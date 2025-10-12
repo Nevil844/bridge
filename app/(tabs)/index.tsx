@@ -352,9 +352,8 @@ export default function HomeScreen() {
       style={styles.container}
       keyboardVerticalOffset={0}>
       <ThemedView style={styles.container}>
-        {/* Header with Orb */}
+        {/* Header */}
         <View style={styles.header}>
-          <GlowingOrb />
           <ThemedText style={styles.title}>AI Assistant</ThemedText>
           
           {/* MCP Status Badge */}
@@ -439,8 +438,14 @@ export default function HomeScreen() {
             onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}>
             {messages.length === 0 ? (
               <View style={styles.emptyState}>
+                <GlowingOrb />
                 <ThemedText style={styles.emptyText}>
-                  Start a conversation...
+                  How can I help you today?
+                </ThemedText>
+                <ThemedText style={styles.emptySubtext}>
+                  {mcpConnected 
+                    ? '✓ Connected to GitHub MCP' 
+                    : 'Connect integrations to get started'}
                 </ThemedText>
               </View>
             ) : (
@@ -666,10 +671,19 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingTop: 60,
+    paddingHorizontal: 40,
+    paddingBottom: 100,
   },
   emptyText: {
-    fontSize: 16,
+    fontSize: 28,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 32,
+    marginBottom: 12,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    textAlign: 'center',
     opacity: 0.5,
   },
   messageBubble: {
