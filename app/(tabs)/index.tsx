@@ -52,16 +52,92 @@ export default function HomeScreen() {
   const [mcpConnected, setMcpConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [chatHistory, setChatHistory] = useState<Array<{id: string, title: string, messages: Message[], date: string}>>([]);
+  const [currentChatId, setCurrentChatId] = useState<string>('default');
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     loadSelectedModel();
     checkMCPStatus();
+    loadChatHistory();
     
     // Refresh MCP status when screen comes into focus
     const interval = setInterval(checkMCPStatus, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    // Save current chat when messages change
+    saveChatHistory();
+  }, [messages]);
+
+  const loadChatHistory = async () => {
+    try {
+      const history = await AsyncStorage.getItem('chatHistory');
+      if (history) {
+        const parsed = JSON.parse(history);
+        setChatHistory(parsed);
+        
+        // Load the current chat
+        const currentChat = parsed.find((chat: any) => chat.id === currentChatId);
+        if (currentChat) {
+          setMessages(currentChat.messages);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading chat history:', error);
+    }
+  };
+
+  const saveChatHistory = async () => {
+    try {
+      const updatedHistory = chatHistory.filter(chat => chat.id !== currentChatId);
+      
+      if (messages.length > 0) {
+        const currentChat = {
+          id: currentChatId,
+          title: messages[0]?.text.substring(0, 30) + (messages[0]?.text.length > 30 ? '...' : ''),
+          messages: messages,
+          date: new Date().toISOString(),
+        };
+        updatedHistory.unshift(currentChat);
+      }
+      
+      // Keep only last 20 chats
+      const limitedHistory = updatedHistory.slice(0, 20);
+      setChatHistory(limitedHistory);
+      await AsyncStorage.setItem('chatHistory', JSON.stringify(limitedHistory));
+    } catch (error) {
+      console.error('Error saving chat history:', error);
+    }
+  };
+
+  const startNewChat = () => {
+    const newChatId = Date.now().toString();
+    setCurrentChatId(newChatId);
+    setMessages([]);
+    setShowSidebar(false);
+  };
+
+  const loadChat = (chatId: string) => {
+    const chat = chatHistory.find(c => c.id === chatId);
+    if (chat) {
+      setCurrentChatId(chatId);
+      setMessages(chat.messages);
+      setShowSidebar(false);
+    }
+  };
+
+  const deleteChat = async (chatId: string) => {
+    const updatedHistory = chatHistory.filter(chat => chat.id !== chatId);
+    setChatHistory(updatedHistory);
+    await AsyncStorage.setItem('chatHistory', JSON.stringify(updatedHistory));
+    
+    if (chatId === currentChatId) {
+      startNewChat();
+    }
+  };
 
   const checkMCPStatus = async () => {
     try {
@@ -354,29 +430,119 @@ export default function HomeScreen() {
       <ThemedView style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <ThemedText style={styles.title}>AI Assistant</ThemedText>
-          
-          {/* MCP Status Badge */}
-          {mcpConnected && (
-            <View style={styles.mcpBadge}>
-              <View style={styles.mcpDot} />
-              <ThemedText style={styles.mcpText}>MCP Connected</ThemedText>
-            </View>
-          )}
-          
-          {/* Model Selector */}
-          <TouchableOpacity
-            style={[
-              styles.modelSelector,
-              { backgroundColor: isDark ? '#1C1C1E' : '#F2F2F7' },
-            ]}
-            onPress={() => setShowModelPicker(true)}>
-            <ThemedText style={styles.modelSelectorText}>
-              {AVAILABLE_MODELS.find((m) => m.id === selectedModel)?.name || 'Select Model'}
-            </ThemedText>
-            <ThemedText style={styles.dropdownIcon}>▼</ThemedText>
+          {/* Hamburger Menu */}
+          <TouchableOpacity 
+            style={styles.hamburgerButton}
+            onPress={() => setShowSidebar(true)}>
+            <IconSymbol name="line.3.horizontal" size={24} color={isDark ? '#FFFFFF' : '#000000'} />
           </TouchableOpacity>
+
+          <View style={styles.headerCenter}>
+            <ThemedText style={styles.title}>AI Assistant</ThemedText>
+            
+            {/* MCP Status Badge */}
+            {mcpConnected && (
+              <View style={styles.mcpBadge}>
+                <View style={styles.mcpDot} />
+                <ThemedText style={styles.mcpText}>MCP Connected</ThemedText>
+              </View>
+            )}
+            
+            {/* Model Selector */}
+            <TouchableOpacity
+              style={[
+                styles.modelSelector,
+                { backgroundColor: isDark ? '#1C1C1E' : '#F2F2F7' },
+              ]}
+              onPress={() => setShowModelPicker(true)}>
+              <ThemedText style={styles.modelSelectorText}>
+                {AVAILABLE_MODELS.find((m) => m.id === selectedModel)?.name || 'Select Model'}
+              </ThemedText>
+              <ThemedText style={styles.dropdownIcon}>▼</ThemedText>
+            </TouchableOpacity>
+          </View>
         </View>
+
+        {/* Sidebar Modal for Chat History */}
+        <Modal
+          visible={showSidebar}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowSidebar(false)}>
+          <View style={styles.sidebarOverlay}>
+            <View style={[
+              styles.sidebar,
+              { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' },
+            ]}>
+              {/* Sidebar Header */}
+              <View style={styles.sidebarHeader}>
+                <TouchableOpacity 
+                  style={styles.closeIcon}
+                  onPress={() => setShowSidebar(false)}>
+                  <IconSymbol name="xmark" size={24} color={isDark ? '#FFFFFF' : '#000000'} />
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.newChatButton, { backgroundColor: '#007AFF' }]}
+                  onPress={startNewChat}>
+                  <IconSymbol name="square.and.pencil" size={18} color="#FFFFFF" />
+                  <ThemedText style={styles.newChatText}>New Chat</ThemedText>
+                </TouchableOpacity>
+              </View>
+
+              {/* Chat History List */}
+              <ScrollView style={styles.chatList}>
+                <ThemedText style={styles.chatListTitle}>Recent Chats</ThemedText>
+                
+                {chatHistory.length === 0 ? (
+                  <View style={styles.emptyChats}>
+                    <ThemedText style={styles.emptyChatsText}>No chat history yet</ThemedText>
+                  </View>
+                ) : (
+                  chatHistory.map((chat) => (
+                    <View key={chat.id} style={styles.chatItemContainer}>
+                      <TouchableOpacity
+                        style={[
+                          styles.chatItem,
+                          chat.id === currentChatId && {
+                            backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
+                          },
+                        ]}
+                        onPress={() => loadChat(chat.id)}>
+                        <View style={styles.chatItemContent}>
+                          <ThemedText style={styles.chatItemTitle} numberOfLines={1}>
+                            {chat.title}
+                          </ThemedText>
+                          <ThemedText style={styles.chatItemDate}>
+                            {new Date(chat.date).toLocaleDateString()}
+                          </ThemedText>
+                        </View>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() => {
+                          Alert.alert(
+                            'Delete Chat',
+                            'Are you sure you want to delete this chat?',
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              { text: 'Delete', style: 'destructive', onPress: () => deleteChat(chat.id) }
+                            ]
+                          );
+                        }}>
+                        <IconSymbol name="trash" size={16} color="#FF3B30" />
+                      </TouchableOpacity>
+                    </View>
+                  ))
+                )}
+              </ScrollView>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.sidebarBackdrop}
+              activeOpacity={1}
+              onPress={() => setShowSidebar(false)} />
+          </View>
+        </Modal>
 
         {/* Model Picker Modal */}
         <Modal
@@ -557,14 +723,25 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    alignItems: 'center',
     paddingTop: 60,
     paddingBottom: 20,
+    paddingHorizontal: 16,
+    position: 'relative',
+  },
+  hamburgerButton: {
+    position: 'absolute',
+    left: 16,
+    top: 64,
+    padding: 8,
+    zIndex: 10,
+  },
+  headerCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
     fontSize: 20,
     fontWeight: '600',
-    marginTop: 16,
     marginBottom: 8,
   },
   mcpBadge: {
@@ -767,5 +944,94 @@ const styles = StyleSheet.create({
   loadingContainer: {
     padding: 16,
     alignItems: 'flex-start',
+  },
+  // Sidebar styles
+  sidebarOverlay: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  sidebar: {
+    width: 280,
+    paddingTop: 60,
+    shadowColor: '#000',
+    shadowOffset: { width: 2, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  sidebarBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  sidebarHeader: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(128, 128, 128, 0.2)',
+  },
+  closeIcon: {
+    padding: 8,
+    alignSelf: 'flex-end',
+  },
+  newChatButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    gap: 8,
+    marginTop: 8,
+  },
+  newChatText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  chatList: {
+    flex: 1,
+    paddingTop: 16,
+  },
+  chatListTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    opacity: 0.5,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  emptyChats: {
+    padding: 32,
+    alignItems: 'center',
+  },
+  emptyChatsText: {
+    fontSize: 14,
+    opacity: 0.5,
+    textAlign: 'center',
+  },
+  chatItemContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    marginBottom: 4,
+  },
+  chatItem: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+  },
+  chatItemContent: {
+    gap: 4,
+  },
+  chatItemTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  chatItemDate: {
+    fontSize: 11,
+    opacity: 0.5,
+  },
+  deleteButton: {
+    padding: 8,
   },
 });
