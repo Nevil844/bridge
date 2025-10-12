@@ -1,50 +1,214 @@
-# Welcome to your Expo app 👋
+# 🤖 AI MCP Chat App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A beautiful mobile AI chat app with dynamic MCP (Model Context Protocol) integrations. Think Claude Desktop, but for mobile! 📱✨
 
-## Get started
+## ✨ Key Features
 
-1. Install dependencies
+- **🔗 Dynamic Integrations** - Users add their own GitHub, Slack, etc. from the app
+- **🎯 OAuth Flow** - Simple "Connect with GitHub" button - no manual tokens!
+- **🤖 6 AI Models** - GPT-4, Claude 3, Gemini Pro, and more
+- **💫 Beautiful UI** - Glowing Siri-style orb, smooth animations
+- **🌓 Dark Mode** - Automatic theme support
+- **📱 Mobile-First** - Built with React Native/Expo
 
-   ```bash
-   npm install
-   ```
+## 🚀 Quick Start (5 Minutes!)
 
-2. Start the app
+### 1. Create GitHub OAuth App
 
-   ```bash
-   npx expo start
-   ```
+1. Go to https://github.com/settings/developers
+2. Click "New OAuth App"
+3. Fill in:
+   - Name: `AI MCP App`
+   - Homepage: `http://localhost:3000`
+   - Callback: `http://localhost:3000/api/oauth/callback`
+4. Copy Client ID and Client Secret
 
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+### 2. Backend Setup
 
 ```bash
-npm run reset-project
+cd backend
+npm install
+
+# Create .env file
+cp .env.example .env
+
+# Edit .env and add your keys:
+# - OPENROUTER_API_KEY (from https://openrouter.ai/keys)
+# - GITHUB_CLIENT_ID
+# - GITHUB_CLIENT_SECRET
+
+npm start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### 3. Mobile App
 
-## Learn more
+```bash
+# From project root
+npm install
+npm start
 
-To learn more about developing your project with Expo, look at the following resources:
+# Then:
+# - Press 'i' for iOS simulator
+# - Or scan QR code with Expo Go for physical device
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+### 4. Connect GitHub!
 
-## Join the community
+1. Open app → Integrations tab
+2. Tap "Connect" on GitHub
+3. Browser opens → Click "Authorize"
+4. Done! Green badge appears in Chat
 
-Join our community of developers creating universal apps.
+## 💬 Try It Out
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+With GitHub connected, ask:
+- "Show me popular React repositories"
+- "What's in the facebook/react README?"
+- "Find Python AI projects"
+
+The AI fetches **real live data** from GitHub! 🔥
+
+## 📖 Documentation
+
+- **[OAUTH_SETUP.md](./OAUTH_SETUP.md)** - Detailed OAuth setup guide
+- **[USER_GUIDE.md](./USER_GUIDE.md)** - Complete user guide
+- **[backend/README.md](./backend/README.md)** - Backend architecture
+
+## 🏗️ Architecture
+
+```
+Mobile App (React Native/Expo)
+    ↓
+Backend API (Express)
+    ↓
+User MCP Manager (Per-user connections)
+    ↓
+MCP Servers (GitHub, Slack, etc.)
+    ↓
+External APIs
+```
+
+**Key Design:**
+- Each user manages their own integrations
+- OAuth for easy authorization
+- Credentials stored securely on backend
+- Extensible - easy to add new integrations
+
+## 🎨 UI/UX Highlights
+
+- **Glowing Orb** - Beautiful animated Siri-style orb
+- **Model Selector** - Quick dropdown to switch AI models
+- **Integration Cards** - Clean GitHub logo, connection status
+- **OAuth Flow** - Seamless browser-based authorization
+- **Status Badge** - Green "MCP Connected" indicator
+- **Loading States** - Smooth animations throughout
+
+## 🔒 Security
+
+✅ OAuth instead of manual tokens  
+✅ Per-user credential isolation  
+✅ State parameter for CSRF protection  
+✅ Tokens never sent to mobile app  
+✅ Easy to revoke access  
+
+## 🛠️ Tech Stack
+
+**Frontend:**
+- React Native + Expo
+- TypeScript
+- AsyncStorage for preferences
+- Reanimated for animations
+
+**Backend:**
+- Express.js
+- MCP SDK (@modelcontextprotocol/sdk)
+- OAuth 2.0 flow
+- Per-user MCP connections
+
+## 📱 Supported Integrations
+
+### Currently Available:
+- ✅ **GitHub** - Full OAuth flow, MCP server integration
+
+### Coming Soon:
+- 🚧 Slack
+- 🚧 Google Drive
+- 🚧 Notion
+- 🚧 Filesystem
+- 🚧 Custom MCP servers
+
+## 🤝 Contributing
+
+This is a reference implementation showing how to build a Claude Desktop-style app. Feel free to:
+- Add more MCP servers
+- Improve UI/UX
+- Add features (voice, images, etc.)
+- Deploy to production
+
+## 📝 Key Files
+
+```
+ai-mcp-app/
+├── app/(tabs)/
+│   ├── index.tsx          # Chat screen
+│   ├── integrations.tsx   # Integration management
+│   └── settings.tsx       # App settings
+├── backend/
+│   ├── server.js           # Express server
+│   ├── user-mcp-manager.js # Per-user MCP connections
+│   └── oauth-handler.js    # OAuth flow logic
+├── components/
+│   └── glowing-orb.tsx    # Animated orb
+└── config/
+    └── api.ts             # API configuration
+```
+
+## 🎯 Comparison with Claude Desktop
+
+| Feature | Claude Desktop | This App |
+|---------|----------------|----------|
+| Dynamic Integrations | ✅ | ✅ |
+| User adds MCP servers | ✅ | ✅ |
+| OAuth flow | ✅ | ✅ |
+| Per-user connections | ✅ | ✅ |
+| Mobile app | ❌ | ✅ |
+| Multiple AI models | ❌ | ✅ (6 models) |
+| Open source | ❌ | ✅ |
+
+## 🐛 Troubleshooting
+
+### "Could not connect to server"
+- Ensure backend is running
+- Check `config/api.ts` has correct IP
+- Both devices on same WiFi
+
+### OAuth not working
+- Verify GitHub OAuth app credentials
+- Check callback URL matches
+- See `OAUTH_SETUP.md` for details
+
+### MCP not connecting
+- Check backend logs for errors
+- Verify user completed OAuth flow
+- Try disconnecting and reconnecting
+
+## 📄 License
+
+MIT - Feel free to use in your own projects!
+
+## 🌟 Star This Repo
+
+If you found this helpful, give it a star! ⭐
+
+## 💡 Inspiration
+
+Built with inspiration from:
+- Claude Desktop (Anthropic)
+- ChatGPT mobile app (OpenAI)
+- Model Context Protocol (MCP)
+
+---
+
+**Happy chatting with your AI assistant!** 🎉
+
+For detailed setup instructions, see [OAUTH_SETUP.md](./OAUTH_SETUP.md)

@@ -21,5 +21,7 @@ export const API_CONFIG = {
 export const API_ENDPOINTS = {
   CHAT: `${API_CONFIG.BASE_URL}/api/chat`,
   MODELS: `${API_CONFIG.BASE_URL}/api/models`,
+  MCP_STATUS: `${API_CONFIG.BASE_URL}/api/mcp/status`,
+  INTEGRATIONS: `${API_CONFIG.BASE_URL}/api/integrations`,
 };
 

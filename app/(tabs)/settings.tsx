@@ -24,10 +24,26 @@ export default function SettingsScreen() {
               { backgroundColor: isDark ? '#1C1C1E' : '#F2F2F7' },
             ]}>
             <ThemedText style={styles.infoText}>
-              This app uses OpenRouter API to provide AI responses.
+              AI chat with dynamic integrations powered by MCP (Model Context Protocol).
             </ThemedText>
             <ThemedText style={styles.infoText}>
-              Select your preferred AI model from the dropdown in the Chat screen.
+              Connect your tools in the Integrations tab to give AI access to your data.
+            </ThemedText>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <ThemedText style={styles.sectionTitle}>MCP Integrations</ThemedText>
+          <View
+            style={[
+              styles.infoBox,
+              { backgroundColor: isDark ? '#1C1C1E' : '#F2F2F7' },
+            ]}>
+            <ThemedText style={styles.infoText}>
+              MCP enables AI to interact with external services like GitHub, Slack, Google Drive, and more.
+            </ThemedText>
+            <ThemedText style={styles.infoText}>
+              Manage your integrations in the Integrations tab.
             </ThemedText>
           </View>
         </View>

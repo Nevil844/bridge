@@ -24,6 +24,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="integrations"
+        options={{
+          title: 'Integrations',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="link" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: 'Settings',

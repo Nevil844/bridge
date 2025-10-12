@@ -1,12 +1,16 @@
 import { GlowingOrb } from '@/components/glowing-orb';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Audio } from 'expo-av';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -14,6 +18,7 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 
@@ -44,11 +49,31 @@ export default function HomeScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState('openai/gpt-3.5-turbo');
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [mcpConnected, setMcpConnected] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     loadSelectedModel();
+    checkMCPStatus();
+    
+    // Refresh MCP status when screen comes into focus
+    const interval = setInterval(checkMCPStatus, 5000);
+    return () => clearInterval(interval);
   }, []);
+
+  const checkMCPStatus = async () => {
+    try {
+      const userId = await AsyncStorage.getItem('userId') || 'default-user';
+      const response = await fetch(`${API_ENDPOINTS.MCP_STATUS}?userId=${userId}`);
+      const data = await response.json();
+      setMcpConnected(data.connected);
+    } catch (error) {
+      console.error('Error checking MCP status:', error);
+      setMcpConnected(false);
+    }
+  };
 
   const loadSelectedModel = async () => {
     try {
@@ -69,11 +94,102 @@ export default function HomeScreen() {
     }
   };
 
-  const handleSend = async () => {
-    if (inputText.trim() && !isLoading) {
+  const startRecording = async () => {
+    try {
+      console.log('Requesting audio permissions...');
+      const permission = await Audio.requestPermissionsAsync();
+      
+      if (permission.status !== 'granted') {
+        Alert.alert('Permission Required', 'Please grant microphone permission to use voice input.');
+        return;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      console.log('Starting recording...');
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      
+      setRecording(recording);
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Failed to start recording', err);
+      Alert.alert('Error', 'Failed to start recording');
+    }
+  };
+
+  const stopRecording = async () => {
+    if (!recording) return;
+
+    try {
+      console.log('Stopping recording...');
+      setIsRecording(false);
+      await recording.stopAndUnloadAsync();
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+      });
+
+      const uri = recording.getURI();
+      setRecording(null);
+
+      if (uri) {
+        console.log('Recording saved to', uri);
+        await transcribeAudio(uri);
+      }
+    } catch (err) {
+      console.error('Failed to stop recording', err);
+      Alert.alert('Error', 'Failed to stop recording');
+    }
+  };
+
+  const transcribeAudio = async (audioUri: string) => {
+    try {
+      setIsLoading(true);
+      const userId = await AsyncStorage.getItem('userId') || 'default-user';
+
+      // Create form data
+      const formData = new FormData();
+      formData.append('audio', {
+        uri: audioUri,
+        type: 'audio/m4a',
+        name: 'recording.m4a',
+      } as any);
+      formData.append('userId', userId);
+
+      const response = await fetch(`${API_ENDPOINTS.CHAT}/transcribe`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.text) {
+        // Set the transcribed text and send it
+        setInputText(data.text);
+        // Auto-send after transcription
+        setTimeout(() => {
+          handleSendWithText(data.text);
+        }, 100);
+      } else {
+        Alert.alert('Error', 'Failed to transcribe audio');
+      }
+    } catch (error) {
+      console.error('Transcription error:', error);
+      Alert.alert('Error', 'Failed to transcribe audio');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSendWithText = async (text: string) => {
+    if (text.trim() && !isLoading) {
       const userMessage: Message = {
         id: Date.now().toString(),
-        text: inputText,
+        text: text,
         isUser: true,
       };
       
@@ -83,14 +199,16 @@ export default function HomeScreen() {
       setIsLoading(true);
 
       try {
+        const userId = await AsyncStorage.getItem('userId') || 'default-user';
         const response = await fetch(API_ENDPOINTS.CHAT, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            message: inputText,
+            message: text,
             model: selectedModel,
+            userId,
           }),
         });
 
@@ -124,18 +242,128 @@ export default function HomeScreen() {
     }
   };
 
+  const handleSend = async () => {
+    if (inputText.trim() && !isLoading) {
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        text: inputText,
+        isUser: true,
+      };
+      
+      const newMessages = [...messages, userMessage];
+      setMessages(newMessages);
+      setInputText('');
+      setIsLoading(true);
+
+      // Create placeholder for AI response
+      const aiMessageId = (Date.now() + 1).toString();
+      const aiMessagePlaceholder: Message = {
+        id: aiMessageId,
+        text: '',
+        isUser: false,
+      };
+      setMessages([...newMessages, aiMessagePlaceholder]);
+
+      try {
+        const userId = await AsyncStorage.getItem('userId') || 'default-user';
+        const response = await fetch(API_ENDPOINTS.CHAT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+          },
+          body: JSON.stringify({
+            message: userMessage.text,
+            model: selectedModel,
+            userId,
+            stream: true,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to get response');
+        }
+
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let accumulatedText = '';
+
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6);
+                if (data === '[DONE]') {
+                  continue;
+                }
+                
+                try {
+                  const parsed = JSON.parse(data);
+                  const content = parsed.choices?.[0]?.delta?.content || '';
+                  if (content) {
+                    accumulatedText += content;
+                    // Update message in real-time
+                    setMessages(prev => 
+                      prev.map(msg => 
+                        msg.id === aiMessageId 
+                          ? { ...msg, text: accumulatedText }
+                          : msg
+                      )
+                    );
+                  }
+                } catch (e) {
+                  // Skip invalid JSON
+                }
+              }
+            }
+          }
+        }
+
+        if (!accumulatedText) {
+          throw new Error('No response received');
+        }
+
+      } catch (error) {
+        console.error('Chat error:', error);
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === aiMessageId
+              ? { ...msg, text: 'Error: Could not connect to server. Make sure the backend is running.' }
+              : msg
+          )
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  };
+
   const isDark = colorScheme === 'dark';
 
   return (
-    <ThemedView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
-        keyboardVerticalOffset={100}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.container}
+      keyboardVerticalOffset={0}>
+      <ThemedView style={styles.container}>
         {/* Header with Orb */}
         <View style={styles.header}>
           <GlowingOrb />
           <ThemedText style={styles.title}>AI Assistant</ThemedText>
+          
+          {/* MCP Status Badge */}
+          {mcpConnected && (
+            <View style={styles.mcpBadge}>
+              <View style={styles.mcpDot} />
+              <ThemedText style={styles.mcpText}>MCP Connected</ThemedText>
+            </View>
+          )}
           
           {/* Model Selector */}
           <TouchableOpacity
@@ -202,56 +430,62 @@ export default function HomeScreen() {
         </Modal>
 
         {/* Messages Area */}
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.messagesContainer}
-          contentContainerStyle={styles.messagesContent}
-          onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}>
-          {messages.length === 0 ? (
-            <View style={styles.emptyState}>
-              <ThemedText style={styles.emptyText}>
-                Start a conversation...
-              </ThemedText>
-            </View>
-          ) : (
-            messages.map((message) => (
-              <View
-                key={message.id}
-                style={[
-                  styles.messageBubble,
-                  message.isUser ? styles.userMessage : styles.aiMessage,
-                  {
-                    backgroundColor: message.isUser
-                      ? isDark
-                        ? '#007AFF'
-                        : '#007AFF'
-                      : isDark
-                      ? '#2C2C2E'
-                      : '#F2F2F7',
-                  },
-                ]}>
-                <ThemedText
-                  style={[
-                    styles.messageText,
-                    message.isUser && { color: '#FFFFFF' },
-                  ]}>
-                  {message.text}
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.messagesContainer}
+            contentContainerStyle={styles.messagesContent}
+            keyboardShouldPersistTaps="handled"
+            onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}>
+            {messages.length === 0 ? (
+              <View style={styles.emptyState}>
+                <ThemedText style={styles.emptyText}>
+                  Start a conversation...
                 </ThemedText>
               </View>
-            ))
-          )}
-          {isLoading && (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color="#007AFF" />
-            </View>
-          )}
-        </ScrollView>
+            ) : (
+              messages.map((message) => (
+                <View
+                  key={message.id}
+                  style={[
+                    styles.messageBubble,
+                    message.isUser ? styles.userMessage : styles.aiMessage,
+                    {
+                      backgroundColor: message.isUser
+                        ? isDark
+                          ? '#007AFF'
+                          : '#007AFF'
+                        : isDark
+                        ? '#2C2C2E'
+                        : '#F2F2F7',
+                    },
+                  ]}>
+                  <ThemedText
+                    style={[
+                      styles.messageText,
+                      message.isUser && { color: '#FFFFFF' },
+                    ]}>
+                    {message.text}
+                  </ThemedText>
+                </View>
+              ))
+            )}
+            {isLoading && (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color="#007AFF" />
+              </View>
+            )}
+          </ScrollView>
+        </TouchableWithoutFeedback>
 
         {/* Input Area */}
         <View
           style={[
             styles.inputContainer,
-            { borderTopColor: isDark ? '#2C2C2E' : '#E5E5EA' },
+            { 
+              borderTopColor: isDark ? '#2C2C2E' : '#E5E5EA',
+              backgroundColor: isDark ? '#000000' : '#FFFFFF',
+            },
           ]}>
           <TextInput
             style={[
@@ -265,26 +499,56 @@ export default function HomeScreen() {
             placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
             value={inputText}
             onChangeText={setInputText}
-            onSubmitEditing={handleSend}
+            onSubmitEditing={() => {
+              handleSend();
+              Keyboard.dismiss();
+            }}
             returnKeyType="send"
+            blurOnSubmit={false}
+            multiline={false}
           />
+          
+          {/* Microphone Button */}
           <TouchableOpacity 
-            style={[styles.sendButton, isLoading && styles.sendButtonDisabled]} 
-            onPress={handleSend}
+            style={[
+              styles.micButton,
+              isRecording && styles.micButtonRecording,
+            ]} 
+            onPress={isRecording ? stopRecording : startRecording}
             disabled={isLoading}>
+            <IconSymbol 
+              name={isRecording ? 'stop.circle.fill' : 'mic.fill'} 
+              size={24} 
+              color="#FFFFFF" 
+            />
+          </TouchableOpacity>
+
+          {/* Send Button */}
+          <TouchableOpacity 
+            style={[styles.sendButton, (isLoading || isRecording) && styles.sendButtonDisabled]} 
+            onPress={() => {
+              handleSend();
+              Keyboard.dismiss();
+            }}
+            disabled={isLoading || isRecording}>
             <ThemedText style={styles.sendButtonText}>↑</ThemedText>
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
-    </ThemedView>
+        
+        {/* Recording Indicator */}
+        {isRecording && (
+          <View style={styles.recordingIndicator}>
+            <View style={styles.recordingDot} />
+            <ThemedText style={styles.recordingText}>Recording...</ThemedText>
+          </View>
+        )}
+      </ThemedView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-  },
-  keyboardView: {
     flex: 1,
   },
   header: {
@@ -296,7 +560,28 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     marginTop: 16,
-    marginBottom: 12,
+    marginBottom: 8,
+  },
+  mcpBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#34C759',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 6,
+    marginBottom: 8,
+  },
+  mcpDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
+  },
+  mcpText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   modelSelector: {
     flexDirection: 'row',
@@ -404,8 +689,9 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flexDirection: 'row',
-    padding: 16,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
     gap: 8,
     borderTopWidth: 1,
   },
@@ -415,6 +701,17 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 24,
     fontSize: 16,
+  },
+  micButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#34C759',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  micButtonRecording: {
+    backgroundColor: '#FF3B30',
   },
   sendButton: {
     width: 44,
@@ -431,6 +728,27 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  recordingIndicator: {
+    position: 'absolute',
+    top: -40,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  recordingDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#FF3B30',
+  },
+  recordingText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FF3B30',
   },
   loadingContainer: {
     padding: 16,
