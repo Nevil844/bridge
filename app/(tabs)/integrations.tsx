@@ -14,6 +14,7 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Integration {
   id: string;
@@ -40,19 +41,62 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     logo: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png',
     description: 'Access repositories, read code, search projects, and more.',
   },
-  // Future integrations
-  // { 
-  //   id: 'slack', 
-  //   name: 'Slack', 
-  //   type: 'slack', 
-  //   connected: false, 
-  //   logo: 'https://...', 
-  //   description: 'Access messages and channels.'
-  // },
+];
+
+const UPCOMING_INTEGRATIONS: Integration[] = [
+  {
+    id: 'google-drive',
+    name: 'Google Drive',
+    type: 'google-drive',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/da/Google_Drive_logo.png/240px-Google_Drive_logo.png',
+    description: 'Access and manage your Google Drive files and folders.',
+  },
+  {
+    id: 'gmail',
+    name: 'Gmail',
+    type: 'gmail',
+    connected: false,
+    logo: 'https://cdn-icons-png.flaticon.com/512/5968/5968534.png',
+    description: 'Read, send, and manage your emails with AI assistance.',
+  },
+  {
+    id: 'whatsapp',
+    name: 'WhatsApp',
+    type: 'whatsapp',
+    connected: false,
+    logo: 'https://cdn-icons-png.flaticon.com/512/733/733585.png',
+    description: 'Send messages, manage contacts, and automate conversations.',
+  },
+  {
+    id: 'aws',
+    name: 'AWS',
+    type: 'aws',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/93/Amazon_Web_Services_Logo.svg/300px-Amazon_Web_Services_Logo.svg.png',
+    description: 'Manage your AWS infrastructure and cloud resources.',
+  },
+  {
+    id: 'discord',
+    name: 'Discord',
+    type: 'discord',
+    connected: false,
+    logo: 'https://cdn-icons-png.flaticon.com/512/5968/5968756.png',
+    description: 'Manage servers, channels, and send messages on Discord.',
+  },
+  {
+    id: 'zerodha',
+    name: 'Zerodha',
+    type: 'zerodha',
+    connected: false,
+    logo: 'https://console.zerodha.com/static/images/kite-logo.png',
+    description: 'Access your portfolio, track stocks, and manage trades.',
+  },
 ];
 
 export default function IntegrationsScreen() {
   const colorScheme = useColorScheme();
+  const insets = useSafeAreaInsets();
   const [integrations, setIntegrations] = useState<Integration[]>(AVAILABLE_INTEGRATIONS);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
@@ -155,7 +199,7 @@ export default function IntegrationsScreen() {
   return (
     <ThemedView style={styles.container}>
       <ScrollView style={styles.scrollView}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
           <ThemedText style={styles.title}>Integrations</ThemedText>
           <ThemedText style={styles.subtitle}>
             Connect AI assistants to your tools and data
@@ -178,6 +222,7 @@ export default function IntegrationsScreen() {
                     <Image
                       source={{ uri: integration.logo }}
                       style={styles.integrationLogo}
+                      resizeMode="contain"
                     />
                   ) : (
                     <ThemedText style={styles.integrationIcon}>🔗</ThemedText>
@@ -209,6 +254,63 @@ export default function IntegrationsScreen() {
                     </ThemedText>
                   </TouchableOpacity>
                 )}
+              </View>
+
+              <ThemedText style={styles.integrationDescription}>
+                {integration.description}
+              </ThemedText>
+            </View>
+          ))}
+        </View>
+
+        {/* Upcoming Integrations */}
+        <View style={styles.section}>
+          <ThemedText style={styles.sectionTitle}>Coming Soon</ThemedText>
+          <ThemedText style={[styles.subtitle, { marginBottom: 16 }]}>
+            These integrations are under development
+          </ThemedText>
+
+          {UPCOMING_INTEGRATIONS.map((integration) => (
+            <View
+              key={integration.id}
+              style={[
+                styles.integrationCard,
+                styles.upcomingCard,
+                { 
+                  backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                  opacity: 0.6,
+                },
+              ]}>
+              <View style={styles.integrationHeader}>
+                <View style={styles.integrationInfo}>
+                  {integration.logo ? (
+                    <Image
+                      source={{ uri: integration.logo }}
+                      style={styles.integrationLogo}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <ThemedText style={styles.integrationIcon}>🔗</ThemedText>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <ThemedText style={styles.integrationName}>
+                        {integration.name}
+                      </ThemedText>
+                      <View style={[
+                        styles.comingSoonBadge,
+                        { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }
+                      ]}>
+                        <ThemedText style={styles.comingSoonText}>
+                          Coming Soon
+                        </ThemedText>
+                      </View>
+                    </View>
+                    <ThemedText style={styles.integrationStatus}>
+                      In development
+                    </ThemedText>
+                  </View>
+                </View>
               </View>
 
               <ThemedText style={styles.integrationDescription}>
@@ -265,7 +367,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 20,
   },
@@ -273,6 +374,7 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: 'bold',
     marginBottom: 8,
+    lineHeight: 40,
   },
   subtitle: {
     fontSize: 16,
@@ -431,6 +533,21 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 16,
     fontWeight: '500',
+  },
+  upcomingCard: {
+    borderWidth: 1,
+    borderColor: 'rgba(128, 128, 128, 0.2)',
+  },
+  comingSoonBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  comingSoonText: {
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    opacity: 0.7,
   },
 });
 

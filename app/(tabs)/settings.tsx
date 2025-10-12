@@ -1,18 +1,19 @@
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { API_CONFIG } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import React from 'react';
 import { Linking, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function SettingsScreen() {
   const colorScheme = useColorScheme();
+  const insets = useSafeAreaInsets();
   const isDark = colorScheme === 'dark';
 
   return (
     <ThemedView style={styles.container}>
       <ScrollView style={styles.scrollView}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
           <ThemedText style={styles.title}>Settings</ThemedText>
         </View>
 
@@ -44,20 +45,6 @@ export default function SettingsScreen() {
             </ThemedText>
             <ThemedText style={styles.infoText}>
               Manage your integrations in the Integrations tab.
-            </ThemedText>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>Backend Server</ThemedText>
-          <View
-            style={[
-              styles.infoBox,
-              { backgroundColor: isDark ? '#1C1C1E' : '#F2F2F7' },
-            ]}>
-            <ThemedText style={styles.infoLabel}>Server URL:</ThemedText>
-            <ThemedText style={styles.infoValue}>
-              {API_CONFIG.BASE_URL}
             </ThemedText>
           </View>
         </View>
@@ -100,13 +87,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 20,
   },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
+    lineHeight: 40,
   },
   section: {
     paddingHorizontal: 20,
