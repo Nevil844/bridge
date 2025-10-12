@@ -304,35 +304,63 @@ app.post('/api/chat', async (req, res) => {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
 
-      const response = await axios.post(
-        'https://openrouter.ai/api/v1/chat/completions',
-        requestBody,
-        {
-          headers: {
-            'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'http://localhost:3000',
-            'X-Title': 'AI MCP App',
-          },
-          responseType: 'stream',
+      try {
+        const response = await axios.post(
+          'https://openrouter.ai/api/v1/chat/completions',
+          requestBody,
+          {
+            headers: {
+              'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'http://localhost:3000',
+              'X-Title': 'AI MCP App',
+            },
+            responseType: 'stream',
+          }
+        );
+
+        // Pipe the stream to the client
+        response.data.on('data', (chunk) => {
+          res.write(chunk);
+        });
+
+        response.data.on('end', () => {
+          res.end();
+        });
+
+        response.data.on('error', (error) => {
+          console.error('Stream error:', error);
+          res.end();
+        });
+
+        return;
+      } catch (streamError) {
+        // Extract error message safely (avoid circular references from stream)
+        let errorMessage = 'Streaming failed';
+        
+        if (streamError.response?.data && streamError.response.data.read) {
+          // Response is a stream, try to read the buffer
+          try {
+            const errorBuffer = streamError.response.data.read();
+            if (errorBuffer) {
+              const errorData = JSON.parse(errorBuffer.toString());
+              errorMessage = errorData.error?.message || errorMessage;
+            }
+          } catch (parseError) {
+            // If we can't parse, use a generic message
+            errorMessage = 'API request failed';
+          }
+        } else if (streamError.message) {
+          errorMessage = streamError.message;
         }
-      );
-
-      // Pipe the stream to the client
-      response.data.on('data', (chunk) => {
-        res.write(chunk);
-      });
-
-      response.data.on('end', () => {
+        
+        console.error('Streaming error:', errorMessage);
+        
+        // Send error in SSE format
+        res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
         res.end();
-      });
-
-      response.data.on('error', (error) => {
-        console.error('Stream error:', error);
-        res.end();
-      });
-
-      return;
+        return;
+      }
     }
 
     // Non-streaming response
