@@ -4,12 +4,13 @@
  */
 
 const GitHubOAuth = require('./github.js');
+const GoogleDriveOAuth = require('./google-drive.js');
 
 // Available OAuth integrations
 const oauthIntegrations = {
   github: GitHubOAuth,
+  'google-drive': GoogleDriveOAuth,
   // Future OAuth integrations:
-  // google: GoogleOAuth,
   // slack: SlackOAuth,
   // microsoft: MicrosoftOAuth,
 };

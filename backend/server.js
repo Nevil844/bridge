@@ -144,12 +144,17 @@ app.get('/api/oauth/callback', async (req, res) => {
     console.log(`✅ Valid state for user ${userId}, exchanging code for token...`);
 
     // Exchange code for access token
-    const accessToken = await oauthHandler.exchangeCodeForToken(integrationType, code);
+    const tokenData = await oauthHandler.exchangeCodeForToken(integrationType, code);
     
-    console.log(`✅ Got access token, adding ${integrationType} integration...`);
+    console.log(`✅ Got tokens, adding ${integrationType} integration...`);
+    
+    // Handle different token formats (some integrations return just a string, others return an object)
+    const config = typeof tokenData === 'string' 
+      ? { token: tokenData }
+      : { token: tokenData.accessToken, refreshToken: tokenData.refreshToken };
     
     // Add integration for user
-    await mcpManager.addIntegration(userId, integrationType, { token: accessToken });
+    await mcpManager.addIntegration(userId, integrationType, config);
 
     console.log(`✅ ${integrationType} integration added successfully!`);
 
@@ -345,27 +350,16 @@ app.post('/api/chat', async (req, res) => {
     
     // Get the appropriate AI provider for this model
     const provider = getProviderForModel(selectedModel);
-    console.log(`Using provider for model ${selectedModel}:`, provider.constructor.name);
-
     const mcpConnected = await mcpManager.isUserMCPConnected(user);
     
     let tools = [];
     let systemPrompt = 'You are a helpful AI assistant.';
     
     if (mcpConnected) {
-      console.log(`\n=== MCP Connected for user: ${user} ===`);
-      
       const mcpTools = await mcpManager.getUserMCPTools(user);
-      console.log(`Found ${mcpTools.length} MCP tools:`, mcpTools.map(t => t.name));
-      
       tools = convertMCPToolsToOpenAI(mcpTools);
-      console.log(`Converted to ${tools.length} OpenAI tools`);
-      console.log('Tools structure:', JSON.stringify(tools.slice(0, 2), null, 2)); // Show first 2
-      
       const integrations = await mcpManager.getUserIntegrations(user);
       systemPrompt = generateSystemPrompt(integrations, tools.length);
-    } else {
-      console.log(`\n=== No MCP connection for user: ${user} ===`);
     }
 
     // Initial request to AI
@@ -374,26 +368,15 @@ app.post('/api/chat', async (req, res) => {
       { role: 'user', content: message },
     ];
 
-    console.log(`Sending message to ${selectedModel} with ${tools.length} tools`);
-
     // Use provider to handle the chat request
     const aiResponse = await provider.chat(messages, selectedModel, tools, stream || false);
-    
-    console.log('AI response:', {
-      has_tool_calls: !!aiResponse.tool_calls,
-      tool_calls_count: aiResponse.tool_calls?.length || 0,
-      content_preview: aiResponse.content?.substring(0, 100),
-    });
 
     // Check if AI wants to call tools
     if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
-      console.log(`AI requested ${aiResponse.tool_calls.length} tool call(s)`);
-      
       // Execute tool calls through MCP
       const toolResults = [];
       for (const toolCall of aiResponse.tool_calls) {
         try {
-          console.log(`Executing tool: ${toolCall.function.name}`);
           const args = JSON.parse(toolCall.function.arguments);
           
           const result = await mcpManager.callUserTool(

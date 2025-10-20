@@ -24,8 +24,6 @@ class GitHubIntegration {
       throw new Error('GitHub token is required');
     }
 
-    console.log('🔗 Connecting to GitHub MCP server...');
-
     try {
       const transport = new StdioClientTransport({
         command: 'npx',
@@ -47,11 +45,8 @@ class GitHubIntegration {
       );
 
       await client.connect(transport);
-      console.log('✅ GitHub MCP server connected successfully');
-
       return { client, transport };
     } catch (error) {
-      console.error('❌ Failed to connect GitHub MCP:', error.message);
       throw error;
     }
   }
@@ -64,9 +59,8 @@ class GitHubIntegration {
     if (connection && connection.client) {
       try {
         await connection.client.close();
-        console.log('✅ GitHub MCP disconnected');
       } catch (error) {
-        console.error('❌ Error disconnecting GitHub MCP:', error.message);
+        console.error('Error disconnecting GitHub:', error.message);
       }
     }
   }

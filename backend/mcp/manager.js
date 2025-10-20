@@ -134,8 +134,6 @@ class MCPManager {
       const IntegrationClass = integrationMeta.class;
       const integration = new IntegrationClass();
       
-      console.log(`🔗 Connecting ${integration.name} for user: ${userId}`);
-      
       const connection = await integration.connect(config);
       
       // Store connection with integration instance
@@ -145,10 +143,9 @@ class MCPManager {
         type,
       });
 
-      console.log(`✅ ${integration.name} connected for user: ${userId}`);
       return true;
     } catch (error) {
-      console.error(`❌ Failed to connect ${type} for user ${userId}:`, error.message);
+      console.error(`Failed to connect ${type}:`, error.message);
       return false;
     }
   }
@@ -168,7 +165,6 @@ class MCPManager {
         console.error(`Error disconnecting ${type}:`, error);
       }
       userConnections.delete(connectionKey);
-      console.log(`Disconnected ${type} for user: ${userId}`);
     }
   }
 
@@ -226,9 +222,7 @@ class MCPManager {
       if (connectionData) {
         try {
           const { integration, connection } = connectionData;
-          console.log(`Calling tool ${toolName} with args:`, args);
           const result = await integration.callTool(connection, toolName, args);
-          console.log(`Tool ${toolName} result:`, result);
           return result;
         } catch (error) {
           console.error(`Error calling tool ${toolName}:`, error);
@@ -238,7 +232,7 @@ class MCPManager {
       }
     }
     
-    throw new Error(`No MCP client found for user ${userId} or tool ${toolName} not available`);
+    throw new Error(`Tool ${toolName} not available`);
   }
 }
 
@@ -249,7 +243,7 @@ const mcpManager = new MCPManager();
  * Auto-reconnect all saved integrations on server startup
  */
 async function reconnectSavedIntegrations() {
-  console.log('\n🔄 Reconnecting saved integrations...');
+  console.log('🔄 Reconnecting saved integrations...');
   
   let reconnectedCount = 0;
   let failedCount = 0;
@@ -257,10 +251,8 @@ async function reconnectSavedIntegrations() {
   for (const [userId, integrations] of userIntegrations.entries()) {
     for (const integration of integrations) {
       try {
-        console.log(`  → Reconnecting ${integration.name} for user ${userId}...`);
         await mcpManager.connectIntegration(userId, integration.type, integration.config);
         reconnectedCount++;
-        console.log(`  ✅ ${integration.name} reconnected`);
       } catch (error) {
         failedCount++;
         console.error(`  ❌ Failed to reconnect ${integration.name}:`, error.message);
