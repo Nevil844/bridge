@@ -42,17 +42,17 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     logo: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png',
     description: 'Access repositories, read code, search projects, and more.',
   },
-];
-
-const UPCOMING_INTEGRATIONS: Integration[] = [
   {
     id: 'google-drive',
     name: 'Google Drive',
     type: 'google-drive',
     connected: false,
     logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/da/Google_Drive_logo.png/240px-Google_Drive_logo.png',
-    description: 'Access and manage your Google Drive files and folders.',
+    description: 'Search files, list documents, and access your Google Drive.',
   },
+];
+
+const UPCOMING_INTEGRATIONS: Integration[] = [
   {
     id: 'gmail',
     name: 'Gmail',
@@ -153,7 +153,6 @@ export default function IntegrationsScreen() {
           await Linking.openURL(data.authUrl);
           
           // Start polling for connection status
-          console.log('🔄 Starting to poll for integration status...');
           const pollInterval = setInterval(async () => {
             try {
               const integrations = await fetch(`${API_ENDPOINTS.INTEGRATIONS}?userId=${userId}`);
@@ -165,7 +164,6 @@ export default function IntegrationsScreen() {
               );
               
               if (isConnected) {
-                console.log(`✅ ${integration.name} connected! Refreshing UI...`);
                 clearInterval(pollInterval);
                 await loadUserIntegrations();
                 setIsLoading(false);
@@ -178,7 +176,7 @@ export default function IntegrationsScreen() {
                 }
               }
             } catch (error) {
-              console.error('Polling error:', error);
+              // Silently continue polling
             }
           }, 2000); // Poll every 2 seconds
           
@@ -186,12 +184,11 @@ export default function IntegrationsScreen() {
           setTimeout(() => {
             clearInterval(pollInterval);
             setIsLoading(false);
-            console.log('⏱️ Polling timeout - stopped checking');
           }, 120000);
           
           // Show instructions (web-compatible)
           if (Platform.OS === 'web') {
-            console.log('ℹ️ Complete authorization in the new window');
+            // Browser will open in new tab
           } else {
             Alert.alert(
               `Authorize ${integration.name}`,
@@ -224,7 +221,6 @@ export default function IntegrationsScreen() {
   };
 
   const handleDisconnect = async (integration: Integration) => {
-    console.log('🔴 Disconnect button clicked!', integration);
     
     // Use window.confirm for web compatibility (Alert.alert doesn't work on web)
     const confirmed = Platform.OS === 'web' 
@@ -241,34 +237,19 @@ export default function IntegrationsScreen() {
         });
     
     if (!confirmed) {
-      console.log('🔴 User cancelled disconnect');
       return;
     }
     
-    console.log('🔴 User confirmed disconnect!');
-    
     try {
       const userId = await AsyncStorage.getItem('userId') || 'default-user';
-      
-      console.log('Disconnecting:', {
-        url: `${API_ENDPOINTS.INTEGRATIONS}/${integration.type}?userId=${userId}`,
-        type: integration.type,
-      });
       
       const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}?userId=${userId}`, {
         method: 'DELETE',
       });
       
-      console.log('Disconnect response:', response.status);
-      
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Disconnect error:', errorText);
         throw new Error(`Failed to disconnect: ${response.status}`);
       }
-      
-      const data = await response.json();
-      console.log('Disconnect success:', data);
       
       // Reload integrations to update UI
       await loadUserIntegrations();
