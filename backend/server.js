@@ -8,6 +8,7 @@ require('dotenv').config();
 const mcpManager = require('./mcp/manager');
 const { convertMCPToolsToOpenAI, generateSystemPrompt } = require('./mcp/tools');
 const oauthHandler = require('./oauth/handler');
+const { getAllModels, getProviderForModel } = require('./ai-providers');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,17 +19,20 @@ const upload = multer({ dest: 'uploads/' });
 app.use(cors());
 app.use(express.json());
 
-// Available models endpoint
+// Available models endpoint (returns both free and premium models)
 app.get('/api/models', (req, res) => {
-  const models = [
-    { id: 'openai/gpt-3.5-turbo', name: 'GPT-3.5 Turbo' },
-    { id: 'openai/gpt-4', name: 'GPT-4' },
-    { id: 'anthropic/claude-3-haiku', name: 'Claude 3 Haiku' },
-    { id: 'anthropic/claude-3-sonnet', name: 'Claude 3 Sonnet' },
-    { id: 'google/gemini-pro', name: 'Gemini Pro' },
-    { id: 'meta-llama/llama-3-8b-instruct', name: 'Llama 3 8B' },
-  ];
-  res.json(models);
+  try {
+    const models = getAllModels();
+    res.json(models);
+  } catch (error) {
+    console.error('Error getting models:', error);
+    res.status(500).json({ 
+      error: 'Failed to load models',
+      models: [
+        { id: 'models/gemini-2.5-flash', name: 'Gemini 2.5 Flash', tier: 'free' }
+      ]
+    });
+  }
 });
 
 // Generic OAuth URL endpoint
@@ -48,25 +52,106 @@ app.get('/api/integrations/:type/oauth-url', (req, res) => {
 // Generic OAuth callback endpoint
 app.get('/api/oauth/callback', async (req, res) => {
   try {
-    const { code, state } = req.query;
+    const { code, state, error, error_description } = req.query;
+
+    console.log('\n🔐 OAuth callback received:', {
+      hasCode: !!code,
+      hasState: !!state,
+      error: error || 'none',
+      error_description: error_description || 'none'
+    });
+
+    // Handle OAuth errors from provider (e.g., user denied access)
+    if (error) {
+      console.error('❌ OAuth error from provider:', error, error_description);
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Authorization Failed</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+              body { font-family: -apple-system, sans-serif; text-align: center; padding: 50px; }
+              .error { color: #ff3b30; font-size: 48px; }
+            </style>
+          </head>
+          <body>
+            <div class="error">❌</div>
+            <h1>Authorization ${error === 'access_denied' ? 'Cancelled' : 'Failed'}</h1>
+            <p>${error_description || 'You can close this window and try again.'}</p>
+            <script>setTimeout(() => window.close(), 3000);</script>
+          </body>
+        </html>
+      `);
+    }
 
     if (!code || !state) {
+      console.error('❌ Missing code or state');
       return res.status(400).send('Missing code or state');
     }
 
     // Verify state and get userId + integration type
     const stateData = oauthHandler.verifyState(state);
     if (!stateData) {
-      return res.status(400).send('Invalid or expired state');
+      console.warn('⚠️ Invalid or expired state - checking if already connected...', state);
+      
+      // The state might be expired because we already processed this successfully
+      // Show a friendly "already connected" message instead of error
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Already Connected</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              }
+              .container {
+                text-align: center;
+                background: white;
+                padding: 40px;
+                border-radius: 20px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                max-width: 400px;
+              }
+              .checkmark { color: #34c759; font-size: 64px; margin-bottom: 20px; }
+              h1 { color: #333; margin: 0 0 10px 0; }
+              p { color: #666; line-height: 1.5; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="checkmark">✓</div>
+              <h1>Already Connected!</h1>
+              <p>This authorization was already processed successfully.</p>
+              <p>You can close this window and return to the app.</p>
+              <script>setTimeout(() => window.close(), 3000);</script>
+            </div>
+          </body>
+        </html>
+      `);
     }
 
     const { userId, integrationType } = stateData;
 
+    console.log(`✅ Valid state for user ${userId}, exchanging code for token...`);
+
     // Exchange code for access token
     const accessToken = await oauthHandler.exchangeCodeForToken(integrationType, code);
     
+    console.log(`✅ Got access token, adding ${integrationType} integration...`);
+    
     // Add integration for user
     await mcpManager.addIntegration(userId, integrationType, { token: accessToken });
+
+    console.log(`✅ ${integrationType} integration added successfully!`);
 
     // Get integration name for display
     const integrationName = integrationType.charAt(0).toUpperCase() + integrationType.slice(1);
@@ -166,10 +251,16 @@ app.delete('/api/integrations/:type', async (req, res) => {
     const userId = req.query.userId || 'default-user';
     const { type } = req.params;
     
-    await mcpManager.removeIntegration(userId, type);
-    res.json({ success: true, message: 'Integration removed' });
+    console.log(`\n🗑️  Disconnect request: ${type} for user ${userId}`);
+    
+    const result = await mcpManager.removeIntegration(userId, type);
+    
+    console.log(`✅ Successfully disconnected ${type}:`, result);
+    
+    res.json({ success: true, message: `${type} integration removed` });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to remove integration' });
+    console.error(`❌ Failed to disconnect ${req.params.type}:`, error);
+    res.status(500).json({ error: 'Failed to remove integration', details: error.message });
   }
 });
 
@@ -249,8 +340,12 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    const selectedModel = model || 'openai/gpt-3.5-turbo';
+    const selectedModel = model || 'models/gemini-2.5-flash'; // Default to free model
     const user = userId || 'default-user';
+    
+    // Get the appropriate AI provider for this model
+    const provider = getProviderForModel(selectedModel);
+    console.log(`Using provider for model ${selectedModel}:`, provider.constructor.name);
 
     const mcpConnected = await mcpManager.isUserMCPConnected(user);
     
@@ -274,110 +369,15 @@ app.post('/api/chat', async (req, res) => {
     }
 
     // Initial request to AI
-    const requestBody = {
-      model: selectedModel,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: message },
-      ],
-      stream: stream || false,
-    };
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: message },
+    ];
 
-    // Add tools if available
-    if (tools.length > 0) {
-      requestBody.tools = tools;
-      requestBody.tool_choice = 'auto';
-      console.log(`Sending ${tools.length} tools to AI model: ${selectedModel}`);
-    } else {
-      console.log('No tools available, sending without function calling');
-    }
+    console.log(`Sending message to ${selectedModel} with ${tools.length} tools`);
 
-    console.log('Request body:', JSON.stringify({
-      ...requestBody,
-      messages: requestBody.messages.map(m => ({ role: m.role, content: m.content?.substring(0, 100) })),
-      tools: tools.length > 0 ? `${tools.length} tools` : undefined,
-    }, null, 2));
-
-    if (stream) {
-      // Set headers for SSE
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-
-      try {
-        const response = await axios.post(
-          'https://openrouter.ai/api/v1/chat/completions',
-          requestBody,
-          {
-            headers: {
-              'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-              'Content-Type': 'application/json',
-              'HTTP-Referer': 'http://localhost:3000',
-              'X-Title': 'AI MCP App',
-            },
-            responseType: 'stream',
-          }
-        );
-
-        // Pipe the stream to the client
-        response.data.on('data', (chunk) => {
-          res.write(chunk);
-        });
-
-        response.data.on('end', () => {
-          res.end();
-        });
-
-        response.data.on('error', (error) => {
-          console.error('Stream error:', error);
-          res.end();
-        });
-
-        return;
-      } catch (streamError) {
-        // Extract error message safely (avoid circular references from stream)
-        let errorMessage = 'Streaming failed';
-        
-        if (streamError.response?.data && streamError.response.data.read) {
-          // Response is a stream, try to read the buffer
-          try {
-            const errorBuffer = streamError.response.data.read();
-            if (errorBuffer) {
-              const errorData = JSON.parse(errorBuffer.toString());
-              errorMessage = errorData.error?.message || errorMessage;
-            }
-          } catch (parseError) {
-            // If we can't parse, use a generic message
-            errorMessage = 'API request failed';
-          }
-        } else if (streamError.message) {
-          errorMessage = streamError.message;
-        }
-        
-        console.error('Streaming error:', errorMessage);
-        
-        // Send error in SSE format
-        res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
-        res.end();
-        return;
-      }
-    }
-
-    // Non-streaming response
-    const response = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
-      requestBody,
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'http://localhost:3000',
-          'X-Title': 'AI MCP App',
-        },
-      }
-    );
-
-    const aiResponse = response.data.choices[0].message;
+    // Use provider to handle the chat request
+    const aiResponse = await provider.chat(messages, selectedModel, tools, stream || false);
     
     console.log('AI response:', {
       has_tool_calls: !!aiResponse.tool_calls,
@@ -420,29 +420,15 @@ app.post('/api/chat', async (req, res) => {
       }
 
       // Send tool results back to AI for final response
-      const finalResponse = await axios.post(
-        'https://openrouter.ai/api/v1/chat/completions',
-        {
-          model: selectedModel,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: message },
-            aiResponse,
-            ...toolResults,
-          ],
-          tools,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'http://localhost:3000',
-            'X-Title': 'AI MCP App',
-          },
-        }
-      );
-
-      const finalMessage = finalResponse.data.choices[0].message.content;
+      const finalMessages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: message },
+        aiResponse,
+        ...toolResults,
+      ];
+      
+      const finalResponse = await provider.chat(finalMessages, selectedModel, tools, false);
+      const finalMessage = finalResponse.content;
       res.json({ 
         message: finalMessage,
         mcpEnabled: true,

@@ -5,11 +5,12 @@
  */
 
 const integrationRegistry = require('./integrations/index.js');
+const storage = require('../storage/integrations');
 
-// Store for user integrations
-const userIntegrations = new Map();
+// Store for user integrations (loaded from persistent storage)
+let userIntegrations = storage.loadIntegrations();
 
-// Store for user MCP connections (client + transport)
+// Store for user MCP connections (client + transport) - these are in-memory only
 const userConnections = new Map();
 
 class MCPManager {
@@ -59,6 +60,9 @@ class MCPManager {
     });
 
     userIntegrations.set(userId, filtered);
+    
+    // Save to persistent storage
+    storage.saveUserIntegrations(userId, filtered, userIntegrations);
 
     // Connect to MCP server
     await this.connectIntegration(userId, type, config);
@@ -73,16 +77,34 @@ class MCPManager {
    * @returns {Promise<boolean>} - Success status
    */
   async removeIntegration(userId, type) {
+    console.log(`  → Removing ${type} integration for user ${userId}`);
+    
     if (!userIntegrations.has(userId)) {
+      console.log(`  ⚠️  No integrations found for user ${userId}`);
       return false;
     }
 
     const integrations = userIntegrations.get(userId);
+    console.log(`  → User has ${integrations.length} integration(s)`);
+    
     const filtered = integrations.filter(i => i.type !== type);
+    console.log(`  → After filtering: ${filtered.length} integration(s) remain`);
+    
     userIntegrations.set(userId, filtered);
+    
+    // Save to persistent storage
+    console.log(`  → Saving to storage...`);
+    const saved = storage.saveUserIntegrations(userId, filtered, userIntegrations);
+    if (saved) {
+      console.log(`  ✅ Saved to storage`);
+    } else {
+      console.log(`  ⚠️  Failed to save to storage`);
+    }
 
     // Disconnect MCP client
+    console.log(`  → Disconnecting MCP client...`);
     await this.disconnectIntegration(userId, type);
+    console.log(`  ✅ MCP client disconnected`);
 
     return true;
   }
@@ -222,6 +244,37 @@ class MCPManager {
 
 // Create singleton instance
 const mcpManager = new MCPManager();
+
+/**
+ * Auto-reconnect all saved integrations on server startup
+ */
+async function reconnectSavedIntegrations() {
+  console.log('\n🔄 Reconnecting saved integrations...');
+  
+  let reconnectedCount = 0;
+  let failedCount = 0;
+  
+  for (const [userId, integrations] of userIntegrations.entries()) {
+    for (const integration of integrations) {
+      try {
+        console.log(`  → Reconnecting ${integration.name} for user ${userId}...`);
+        await mcpManager.connectIntegration(userId, integration.type, integration.config);
+        reconnectedCount++;
+        console.log(`  ✅ ${integration.name} reconnected`);
+      } catch (error) {
+        failedCount++;
+        console.error(`  ❌ Failed to reconnect ${integration.name}:`, error.message);
+      }
+    }
+  }
+  
+  console.log(`\n✨ Reconnection complete: ${reconnectedCount} succeeded, ${failedCount} failed\n`);
+}
+
+// Auto-reconnect on import (when server starts)
+reconnectSavedIntegrations().catch(error => {
+  console.error('Error during auto-reconnection:', error);
+});
 
 module.exports = mcpManager;
 

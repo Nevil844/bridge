@@ -9,7 +9,7 @@
 
 export const API_CONFIG = {
   // Change this to your machine's IP when using a physical device
-  BASE_URL: 'http://192.168.1.61:3000',
+  BASE_URL: 'http://localhost:3000',
   
   // Uncomment for iOS Simulator:
   // BASE_URL: 'http://localhost:3000',

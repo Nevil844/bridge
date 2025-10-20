@@ -5,14 +5,15 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Linking,
-    ScrollView,
-    StyleSheet,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Image,
+  Linking,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -114,11 +115,15 @@ export default function IntegrationsScreen() {
       const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}?userId=${userId}`);
       const data = await response.json();
       
+      console.log('📡 User integrations from API:', data.integrations);
+      
       // Update integrations with user's connected status
       const updated = AVAILABLE_INTEGRATIONS.map(int => ({
         ...int,
         connected: data.integrations.some((ui: UserIntegration) => ui.type === int.type && ui.configured),
       }));
+      
+      console.log('✅ Updated integrations state:', updated);
       setIntegrations(updated);
     } catch (error) {
       console.error('Error loading integrations:', error);
@@ -147,53 +152,142 @@ export default function IntegrationsScreen() {
         if (supported) {
           await Linking.openURL(data.authUrl);
           
-          // Show instructions
-          Alert.alert(
-            `Authorize ${integration.name}`,
-            'Complete the authorization in your browser, then come back to the app.',
-            [
-              {
-                text: 'Done',
-                onPress: () => {
-                  // Refresh integrations after user completes OAuth
-                  setTimeout(() => loadUserIntegrations(), 1000);
+          // Start polling for connection status
+          console.log('🔄 Starting to poll for integration status...');
+          const pollInterval = setInterval(async () => {
+            try {
+              const integrations = await fetch(`${API_ENDPOINTS.INTEGRATIONS}?userId=${userId}`);
+              const integrationsData = await integrations.json();
+              
+              // Check if this integration is now connected
+              const isConnected = integrationsData.integrations.some(
+                (int: any) => int.type === integration.type && int.configured
+              );
+              
+              if (isConnected) {
+                console.log(`✅ ${integration.name} connected! Refreshing UI...`);
+                clearInterval(pollInterval);
+                await loadUserIntegrations();
+                setIsLoading(false);
+                
+                // Show success message
+                if (Platform.OS === 'web') {
+                  alert(`${integration.name} connected successfully!`);
+                } else {
+                  Alert.alert('Success', `${integration.name} connected successfully!`);
+                }
+              }
+            } catch (error) {
+              console.error('Polling error:', error);
+            }
+          }, 2000); // Poll every 2 seconds
+          
+          // Stop polling after 2 minutes (timeout)
+          setTimeout(() => {
+            clearInterval(pollInterval);
+            setIsLoading(false);
+            console.log('⏱️ Polling timeout - stopped checking');
+          }, 120000);
+          
+          // Show instructions (web-compatible)
+          if (Platform.OS === 'web') {
+            console.log('ℹ️ Complete authorization in the new window');
+          } else {
+            Alert.alert(
+              `Authorize ${integration.name}`,
+              'Complete the authorization in your browser, then come back to the app.',
+              [
+                {
+                  text: 'Cancel',
+                  style: 'cancel',
+                  onPress: () => {
+                    clearInterval(pollInterval);
+                    setIsLoading(false);
+                  },
                 },
-              },
-            ]
-          );
+              ]
+            );
+          }
         }
       }
     } catch (error) {
       console.error('OAuth error:', error);
-      Alert.alert('Error', 'Failed to start OAuth. Make sure the backend is running.');
-    } finally {
+      
+      if (Platform.OS === 'web') {
+        alert('Failed to start OAuth. Make sure the backend is running.');
+      } else {
+        Alert.alert('Error', 'Failed to start OAuth. Make sure the backend is running.');
+      }
+      
       setIsLoading(false);
     }
   };
 
   const handleDisconnect = async (integration: Integration) => {
-    Alert.alert(
-      'Disconnect Integration',
-      `Are you sure you want to disconnect ${integration.name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Disconnect',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const userId = await AsyncStorage.getItem('userId') || 'default-user';
-              await fetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}?userId=${userId}`, {
-                method: 'DELETE',
-              });
-              loadUserIntegrations();
-            } catch (error) {
-              Alert.alert('Error', 'Failed to disconnect integration');
-            }
-          },
-        },
-      ]
-    );
+    console.log('🔴 Disconnect button clicked!', integration);
+    
+    // Use window.confirm for web compatibility (Alert.alert doesn't work on web)
+    const confirmed = Platform.OS === 'web' 
+      ? window.confirm(`Are you sure you want to disconnect ${integration.name}?`)
+      : await new Promise(resolve => {
+          Alert.alert(
+            'Disconnect Integration',
+            `Are you sure you want to disconnect ${integration.name}?`,
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Disconnect', style: 'destructive', onPress: () => resolve(true) },
+            ]
+          );
+        });
+    
+    if (!confirmed) {
+      console.log('🔴 User cancelled disconnect');
+      return;
+    }
+    
+    console.log('🔴 User confirmed disconnect!');
+    
+    try {
+      const userId = await AsyncStorage.getItem('userId') || 'default-user';
+      
+      console.log('Disconnecting:', {
+        url: `${API_ENDPOINTS.INTEGRATIONS}/${integration.type}?userId=${userId}`,
+        type: integration.type,
+      });
+      
+      const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}?userId=${userId}`, {
+        method: 'DELETE',
+      });
+      
+      console.log('Disconnect response:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Disconnect error:', errorText);
+        throw new Error(`Failed to disconnect: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('Disconnect success:', data);
+      
+      // Reload integrations to update UI
+      await loadUserIntegrations();
+      
+      // Show success message
+      if (Platform.OS === 'web') {
+        alert(`${integration.name} disconnected successfully!`);
+      } else {
+        Alert.alert('Success', `${integration.name} disconnected successfully`);
+      }
+    } catch (error) {
+      console.error('Disconnect error:', error);
+      
+      if (Platform.OS === 'web') {
+        alert(`Failed to disconnect: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      } else {
+        Alert.alert('Error', `Failed to disconnect integration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    }
   };
 
   return (

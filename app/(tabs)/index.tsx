@@ -31,23 +31,15 @@ interface Message {
 interface Model {
   id: string;
   name: string;
+  tier?: 'free' | 'premium';
 }
-
-const AVAILABLE_MODELS: Model[] = [
-  { id: 'openai/gpt-3.5-turbo', name: 'GPT-3.5 Turbo' },
-  { id: 'openai/gpt-4', name: 'GPT-4' },
-  { id: 'anthropic/claude-3-haiku', name: 'Claude 3 Haiku' },
-  { id: 'anthropic/claude-3-sonnet', name: 'Claude 3 Sonnet' },
-  { id: 'google/gemini-pro', name: 'Gemini Pro' },
-  { id: 'meta-llama/llama-3-8b-instruct', name: 'Llama 3 8B' },
-];
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('openai/gpt-3.5-turbo');
+  const [selectedModel, setSelectedModel] = useState('models/gemini-2.5-flash'); // Default to free model
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [mcpConnected, setMcpConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -55,10 +47,12 @@ export default function HomeScreen() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [chatHistory, setChatHistory] = useState<Array<{id: string, title: string, messages: Message[], date: string}>>([]);
   const [currentChatId, setCurrentChatId] = useState<string>('default');
+  const [availableModels, setAvailableModels] = useState<Model[]>([]);
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     loadSelectedModel();
+    loadAvailableModels();
     checkMCPStatus();
     loadChatHistory();
     
@@ -151,6 +145,20 @@ export default function HomeScreen() {
     }
   };
 
+  const loadAvailableModels = async () => {
+    try {
+      const response = await fetch(`${API_ENDPOINTS.MODELS}`);
+      const models = await response.json();
+      setAvailableModels(models);
+    } catch (error) {
+      console.error('Error loading models:', error);
+      // Fallback to default free model
+      setAvailableModels([
+        { id: 'models/gemini-2.5-flash', name: 'Gemini 2.5 Flash', tier: 'free' },
+      ]);
+    }
+  };
+
   const loadSelectedModel = async () => {
     try {
       const model = await AsyncStorage.getItem('selectedModel');
@@ -160,7 +168,23 @@ export default function HomeScreen() {
     }
   };
 
-  const selectModel = async (modelId: string) => {
+  const selectModel = async (modelId: string, tier?: 'free' | 'premium') => {
+    // Check if user is trying to select a premium model
+    if (tier === 'premium') {
+      Alert.alert(
+        '🔒 Premium Model',
+        'This is a premium model. Upgrade to unlock access to GPT-4, Claude, and more!',
+        [
+          { text: 'Maybe Later', style: 'cancel' },
+          { text: 'Upgrade Now', onPress: () => {
+            // TODO: Navigate to upgrade screen or open payment flow
+            Alert.alert('Coming Soon', 'Premium features will be available soon!');
+          }},
+        ]
+      );
+      return;
+    }
+    
     setSelectedModel(modelId);
     setShowModelPicker(false);
     try {
@@ -342,75 +366,62 @@ export default function HomeScreen() {
 
       try {
         const userId = await AsyncStorage.getItem('userId') || 'default-user';
+        
+        console.log('Sending chat request:', {
+          endpoint: API_ENDPOINTS.CHAT,
+          model: selectedModel,
+          messageLength: userMessage.text.length,
+        });
+
         const response = await fetch(API_ENDPOINTS.CHAT, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Accept': 'text/event-stream',
           },
           body: JSON.stringify({
             message: userMessage.text,
             model: selectedModel,
             userId,
-            stream: true,
+            stream: false, // Use non-streaming for reliability
           }),
         });
 
+        console.log('Response status:', response.status);
+
         if (!response.ok) {
-          throw new Error('Failed to get response');
+          const errorText = await response.text();
+          console.error('Response error:', errorText);
+          throw new Error(`Server error: ${response.status}`);
         }
 
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let accumulatedText = '';
+        const data = await response.json();
+        console.log('Response data:', data);
 
-        if (reader) {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n');
-
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6);
-                if (data === '[DONE]') {
-                  continue;
-                }
-                
-                try {
-                  const parsed = JSON.parse(data);
-                  const content = parsed.choices?.[0]?.delta?.content || '';
-                  if (content) {
-                    accumulatedText += content;
-                    // Update message in real-time
-                    setMessages(prev => 
-                      prev.map(msg => 
-                        msg.id === aiMessageId 
-                          ? { ...msg, text: accumulatedText }
-                          : msg
-                      )
-                    );
-                  }
-                } catch (e) {
-                  // Skip invalid JSON
-                }
-              }
-            }
-          }
+        const aiMessage = data.message || data.content;
+        
+        if (!aiMessage) {
+          console.error('No message in response:', data);
+          throw new Error('No response received from AI');
         }
 
-        if (!accumulatedText) {
-          throw new Error('No response received');
-        }
+        // Update AI message with actual response
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === aiMessageId
+              ? { ...msg, text: aiMessage }
+              : msg
+          )
+        );
 
       } catch (error) {
         console.error('Chat error:', error);
         setMessages(prev =>
           prev.map(msg =>
             msg.id === aiMessageId
-              ? { ...msg, text: 'Error: Could not connect to server. Make sure the backend is running.' }
+              ? { 
+                  ...msg, 
+                  text: `Error: ${error instanceof Error ? error.message : 'Could not connect to server'}\n\nMake sure the backend is running on ${API_ENDPOINTS.CHAT}` 
+                }
               : msg
           )
         );
@@ -456,7 +467,7 @@ export default function HomeScreen() {
               ]}
               onPress={() => setShowModelPicker(true)}>
               <ThemedText style={styles.modelSelectorText}>
-                {AVAILABLE_MODELS.find((m) => m.id === selectedModel)?.name || 'Select Model'}
+                {availableModels.find((m) => m.id === selectedModel)?.name || 'Loading...'}
               </ThemedText>
               <ThemedText style={styles.dropdownIcon}>▼</ThemedText>
             </TouchableOpacity>
@@ -561,7 +572,7 @@ export default function HomeScreen() {
               ]}>
               <ThemedText style={styles.modalTitle}>Select AI Model</ThemedText>
               <ScrollView style={styles.modalScroll}>
-                {AVAILABLE_MODELS.map((model) => (
+                {availableModels.map((model) => (
                   <TouchableOpacity
                     key={model.id}
                     style={[
@@ -569,15 +580,27 @@ export default function HomeScreen() {
                       selectedModel === model.id && {
                         backgroundColor: isDark ? '#2C2C2E' : '#E5E5EA',
                       },
+                      model.tier === 'premium' && styles.modelOptionLocked,
                     ]}
-                    onPress={() => selectModel(model.id)}>
-                    <View>
-                      <ThemedText style={styles.modelOptionName}>
-                        {model.name}
-                      </ThemedText>
-                      <ThemedText style={styles.modelOptionId}>
-                        {model.id}
-                      </ThemedText>
+                    onPress={() => selectModel(model.id, model.tier)}>
+                    <View style={styles.modelOptionContent}>
+                      <View style={styles.modelOptionText}>
+                        <ThemedText style={styles.modelOptionName}>
+                          {model.name}
+                        </ThemedText>
+                        <View style={styles.modelTierBadgeContainer}>
+                          {model.tier === 'free' && (
+                            <View style={styles.freeBadge}>
+                              <ThemedText style={styles.freeBadgeText}>FREE</ThemedText>
+                            </View>
+                          )}
+                          {model.tier === 'premium' && (
+                            <View style={styles.premiumBadge}>
+                              <ThemedText style={styles.premiumBadgeText}>🔒 PREMIUM</ThemedText>
+                            </View>
+                          )}
+                        </View>
+                      </View>
                     </View>
                     {selectedModel === model.id && (
                       <ThemedText style={styles.checkmark}>✓</ThemedText>
@@ -810,6 +833,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 8,
   },
+  modelOptionLocked: {
+    opacity: 0.6,
+  },
+  modelOptionContent: {
+    flex: 1,
+  },
+  modelOptionText: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   modelOptionName: {
     fontSize: 16,
     fontWeight: '600',
@@ -818,6 +852,31 @@ const styles = StyleSheet.create({
   modelOptionId: {
     fontSize: 12,
     opacity: 0.5,
+  },
+  modelTierBadgeContainer: {
+    marginLeft: 8,
+  },
+  freeBadge: {
+    backgroundColor: '#34C759',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  freeBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  premiumBadge: {
+    backgroundColor: '#FFD700',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  premiumBadgeText: {
+    color: '#000000',
+    fontSize: 10,
+    fontWeight: '700',
   },
   checkmark: {
     fontSize: 20,
