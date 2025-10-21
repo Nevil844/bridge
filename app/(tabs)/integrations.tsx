@@ -50,17 +50,17 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/da/Google_Drive_logo.png/240px-Google_Drive_logo.png',
     description: 'Search files, list documents, and access your Google Drive.',
   },
-];
-
-const UPCOMING_INTEGRATIONS: Integration[] = [
   {
     id: 'gmail',
     name: 'Gmail',
     type: 'gmail',
     connected: false,
-    logo: 'https://cdn-icons-png.flaticon.com/512/5968/5968534.png',
-    description: 'Read, send, and manage your emails with AI assistance.',
+    logo: 'https://www.gstatic.com/images/branding/product/1x/gmail_2020q4_48dp.png',
+    description: 'Read, send, search, and manage your Gmail emails.',
   },
+];
+
+const UPCOMING_INTEGRATIONS: Integration[] = [
   {
     id: 'whatsapp',
     name: 'WhatsApp',

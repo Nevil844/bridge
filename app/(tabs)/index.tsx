@@ -8,18 +8,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Keyboard,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
+    ActivityIndicator,
+    Alert,
+    Keyboard,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View,
 } from 'react-native';
 
 interface Message {
@@ -633,7 +633,7 @@ export default function HomeScreen() {
                 </ThemedText>
                 <ThemedText style={styles.emptySubtext}>
                   {mcpConnected 
-                    ? '✓ Connected to GitHub MCP' 
+                    ? '✓ MCP integrations connected' 
                     : 'Connect integrations to get started'}
                 </ThemedText>
               </View>

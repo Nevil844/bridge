@@ -5,6 +5,7 @@
 
 const GitHubIntegration = require('./github.js');
 const GoogleDriveIntegration = require('./google-drive.js');
+const GmailIntegration = require('./gmail.js');
 
 // Available integrations
 // Add new integrations here as you create them
@@ -21,6 +22,13 @@ const integrations = {
     name: 'Google Drive',
     description: 'Search files, list documents, and access your Google Drive',
     icon: 'https://www.google.com/drive/static/images/drive/logo-drive.png',
+    authType: 'oauth',
+  },
+  gmail: {
+    class: GmailIntegration,
+    name: 'Gmail',
+    description: 'Read, send, search, and manage your Gmail emails',
+    icon: 'https://www.gstatic.com/images/branding/product/1x/gmail_2020q4_48dp.png',
     authType: 'oauth',
   },
   // Future integrations:

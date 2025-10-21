@@ -215,6 +215,10 @@ class MCPManager {
   async callUserTool(userId, toolName, args) {
     const integrations = await this.getUserIntegrations(userId);
     
+    // First, find which integration has this tool
+    let targetIntegration = null;
+    let targetConnectionData = null;
+    
     for (const integrationData of integrations) {
       const connectionKey = `${userId}-${integrationData.type}`;
       const connectionData = userConnections.get(connectionKey);
@@ -222,17 +226,38 @@ class MCPManager {
       if (connectionData) {
         try {
           const { integration, connection } = connectionData;
-          const result = await integration.callTool(connection, toolName, args);
-          return result;
+          const tools = await integration.getTools(connection);
+          
+          // Check if this integration has the requested tool
+          if (tools.some(tool => tool.name === toolName)) {
+            targetIntegration = integrationData;
+            targetConnectionData = connectionData;
+            break;
+          }
         } catch (error) {
-          console.error(`Error calling tool ${toolName}:`, error);
-          // Continue to next integration instead of throwing
+          // Silently skip integrations that can't list tools
           continue;
         }
       }
     }
     
-    throw new Error(`Tool ${toolName} not available`);
+    // If no integration has this tool, throw error
+    if (!targetIntegration || !targetConnectionData) {
+      const availableTools = await this.getUserMCPTools(userId);
+      const availableToolNames = availableTools.map(t => t.name).join(', ');
+      throw new Error(`Tool "${toolName}" not found. Available tools: ${availableToolNames || 'none'}`);
+    }
+    
+    // Call the tool on the correct integration
+    try {
+      const { integration, connection } = targetConnectionData;
+      console.log(`🔧 Calling tool "${toolName}" on ${targetIntegration.name}`);
+      const result = await integration.callTool(connection, toolName, args);
+      return result;
+    } catch (error) {
+      console.error(`❌ Error calling ${targetIntegration.name} tool ${toolName}:`, error.message);
+      throw error;
+    }
   }
 }
 
