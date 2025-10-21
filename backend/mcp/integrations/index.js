@@ -6,6 +6,7 @@
 const GitHubIntegration = require('./github.js');
 const GoogleDriveIntegration = require('./google-drive.js');
 const GmailIntegration = require('./gmail.js');
+const ZerodhaIntegration = require('./zerodha.js');
 
 // Available integrations
 // Add new integrations here as you create them
@@ -29,6 +30,13 @@ const integrations = {
     name: 'Gmail',
     description: 'Read, send, search, and manage your Gmail emails',
     icon: 'https://www.gstatic.com/images/branding/product/1x/gmail_2020q4_48dp.png',
+    authType: 'oauth',
+  },
+  zerodha: {
+    class: ZerodhaIntegration,
+    name: 'Zerodha',
+    description: 'Access your portfolio, market data, and trading insights',
+    icon: 'https://zerodha.com/static/images/logo.svg',
     authType: 'oauth',
   },
   // Future integrations:

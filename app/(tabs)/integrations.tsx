@@ -58,6 +58,14 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     logo: 'https://www.gstatic.com/images/branding/product/1x/gmail_2020q4_48dp.png',
     description: 'Read, send, search, and manage your Gmail emails.',
   },
+  {
+    id: 'zerodha',
+    name: 'Zerodha',
+    type: 'zerodha',
+    connected: false,
+    logo: 'https://zerodha.com/static/images/logo.svg',
+    description: 'Access your portfolio, market data, and trading insights.',
+  },
 ];
 
 const UPCOMING_INTEGRATIONS: Integration[] = [
@@ -84,14 +92,6 @@ const UPCOMING_INTEGRATIONS: Integration[] = [
     connected: false,
     logo: 'https://cdn-icons-png.flaticon.com/512/5968/5968756.png',
     description: 'Manage servers, channels, and send messages on Discord.',
-  },
-  {
-    id: 'zerodha',
-    name: 'Zerodha',
-    type: 'zerodha',
-    connected: false,
-    logo: 'https://console.zerodha.com/static/images/kite-logo.png',
-    description: 'Access your portfolio, track stocks, and manage trades.',
   },
 ];
 

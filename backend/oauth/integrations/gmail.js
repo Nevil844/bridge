@@ -67,7 +67,8 @@ class GmailOAuth {
         expiresIn: response.data.expires_in,
       };
     } catch (error) {
-      console.error('Gmail token exchange error:', error.response?.data || error.message);
+      // Don't log response data as it might contain sensitive info
+      console.error('Gmail token exchange error:', error.message);
       throw new Error('Failed to exchange code for Gmail access token');
     }
   }
@@ -93,7 +94,8 @@ class GmailOAuth {
         expiresIn: response.data.expires_in,
       };
     } catch (error) {
-      console.error('Gmail token refresh error:', error.response?.data || error.message);
+      // Don't log response data as it might contain sensitive info
+      console.error('Gmail token refresh error:', error.message);
       throw new Error('Failed to refresh Gmail access token');
     }
   }

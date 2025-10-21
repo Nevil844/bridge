@@ -6,7 +6,7 @@ const FormData = require('form-data');
 const fs = require('fs');
 require('dotenv').config();
 const mcpManager = require('./mcp/manager');
-const { convertMCPToolsToOpenAI, generateSystemPrompt } = require('./mcp/tools');
+const { convertMCPToolsToOpenAI, generateSystemPrompt, getIntegrationInstructions } = require('./mcp/tools');
 const oauthHandler = require('./oauth/handler');
 const { getAllModels, getProviderForModel } = require('./ai-providers');
 
@@ -52,13 +52,20 @@ app.get('/api/integrations/:type/oauth-url', (req, res) => {
 // Generic OAuth callback endpoint
 app.get('/api/oauth/callback', async (req, res) => {
   try {
-    const { code, state, error, error_description } = req.query;
+    const { code, request_token, state, error, error_description, status, action } = req.query;
+    
+    // Zerodha uses request_token instead of code
+    const authCode = code || request_token;
 
     console.log('\n🔐 OAuth callback received:', {
-      hasCode: !!code,
+      hasCode: !!authCode,
       hasState: !!state,
+      isZerodha: !!request_token,
+      status: status || 'none',
+      action: action || 'none',
       error: error || 'none',
-      error_description: error_description || 'none'
+      error_description: error_description || 'none',
+      allParams: req.query
     });
 
     // Handle OAuth errors from provider (e.g., user denied access)
@@ -85,9 +92,32 @@ app.get('/api/oauth/callback', async (req, res) => {
       `);
     }
 
-    if (!code || !state) {
-      console.error('❌ Missing code or state');
-      return res.status(400).send('Missing code or state');
+    if (!authCode) {
+      console.error('❌ Missing authorization code');
+      return res.status(400).send('Missing authorization code');
+    }
+
+    if (!state) {
+      console.error('❌ Missing state parameter');
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Authorization Failed</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+              body { font-family: -apple-system, sans-serif; text-align: center; padding: 50px; }
+              .error { color: #ff3b30; font-size: 48px; }
+            </style>
+          </head>
+          <body>
+            <div class="error">❌</div>
+            <h1>Authorization Failed</h1>
+            <p>Missing state parameter. Please try connecting again.</p>
+            <script>setTimeout(() => window.close(), 3000);</script>
+          </body>
+        </html>
+      `);
     }
 
     // Verify state and get userId + integration type
@@ -144,14 +174,24 @@ app.get('/api/oauth/callback', async (req, res) => {
     console.log(`✅ Valid state for user ${userId}, exchanging code for token...`);
 
     // Exchange code for access token
-    const tokenData = await oauthHandler.exchangeCodeForToken(integrationType, code);
+    const tokenData = await oauthHandler.exchangeCodeForToken(integrationType, authCode);
     
     console.log(`✅ Got tokens, adding ${integrationType} integration...`);
     
     // Handle different token formats (some integrations return just a string, others return an object)
-    const config = typeof tokenData === 'string' 
-      ? { token: tokenData }
-      : { token: tokenData.accessToken, refreshToken: tokenData.refreshToken };
+    let config;
+    if (typeof tokenData === 'string') {
+      config = { token: tokenData };
+    } else {
+      config = { 
+        token: tokenData.accessToken, 
+        refreshToken: tokenData.refreshToken,
+        // Include additional data for integrations like Zerodha
+        userId: tokenData.userId,
+        userName: tokenData.userName,
+        email: tokenData.email,
+      };
+    }
     
     // Add integration for user
     await mcpManager.addIntegration(userId, integrationType, config);
@@ -356,10 +396,37 @@ app.post('/api/chat', async (req, res) => {
     let systemPrompt = 'You are a helpful AI assistant.';
     
     if (mcpConnected) {
-      const mcpTools = await mcpManager.getUserMCPTools(user);
-      tools = convertMCPToolsToOpenAI(mcpTools);
       const integrations = await mcpManager.getUserIntegrations(user);
-      systemPrompt = generateSystemPrompt(integrations, tools.length);
+      
+      console.log(`\n📊 Chat request for user: ${user}`);
+      console.log(`   Connected integrations: ${integrations.map(i => i.name).join(', ')}`);
+      
+      // Create a special "list_tools" meta-tool that the AI can call
+      // to discover which tools are available for each integration
+      const listToolsTool = {
+        type: 'function',
+        function: {
+          name: 'list_tools',
+          description: 'List all available tools for a specific integration. Call this first to discover what actions you can perform with each integration.',
+          parameters: {
+            type: 'object',
+            properties: {
+              integration: {
+                type: 'string',
+                description: `The integration to list tools for. Available: ${integrations.map(i => i.type).join(', ')}`,
+                enum: integrations.map(i => i.type),
+              }
+            },
+            required: ['integration'],
+          },
+        },
+      };
+      
+      // Start with only the list_tools meta-tool
+      tools = [listToolsTool];
+      console.log(`   Starting with list_tools meta-tool only`);
+      
+      systemPrompt = generateSystemPrompt(integrations);
     }
 
     // Initial request to AI
@@ -375,22 +442,56 @@ app.post('/api/chat', async (req, res) => {
     if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
       // Execute tool calls through MCP
       const toolResults = [];
+      let newToolsLoaded = false;
+      
       for (const toolCall of aiResponse.tool_calls) {
         try {
           const args = JSON.parse(toolCall.function.arguments);
           
-          const result = await mcpManager.callUserTool(
-            user, 
-            toolCall.function.name, 
-            args
-          );
-          
-          toolResults.push({
-            tool_call_id: toolCall.id,
-            role: 'tool',
-            name: toolCall.function.name,
-            content: JSON.stringify(result),
-          });
+          // Handle special list_tools meta-tool
+          if (toolCall.function.name === 'list_tools') {
+            const integrationType = args.integration;
+            console.log(`🔍 AI requested tools for: ${integrationType}`);
+            
+            const mcpTools = await mcpManager.getToolsForIntegrations(user, [integrationType]);
+            const newTools = convertMCPToolsToOpenAI(mcpTools);
+            
+            // Add the new tools to the available tools list
+            tools.push(...newTools);
+            newToolsLoaded = true;
+            
+            // Get integration-specific instructions
+            const integrationInstructions = getIntegrationInstructions(integrationType);
+            
+            toolResults.push({
+              tool_call_id: toolCall.id,
+              role: 'tool',
+              name: toolCall.function.name,
+              content: JSON.stringify({
+                integration: integrationType,
+                instructions: integrationInstructions,
+                tools: mcpTools.map(t => ({
+                  name: t.name,
+                  description: t.description,
+                })),
+                count: mcpTools.length,
+              }),
+            });
+          } else {
+            // Regular MCP tool call
+            const result = await mcpManager.callUserTool(
+              user, 
+              toolCall.function.name, 
+              args
+            );
+            
+            toolResults.push({
+              tool_call_id: toolCall.id,
+              role: 'tool',
+              name: toolCall.function.name,
+              content: JSON.stringify(result),
+            });
+          }
         } catch (error) {
           console.error(`Error calling tool ${toolCall.function.name}:`, error);
           toolResults.push({
@@ -403,6 +504,10 @@ app.post('/api/chat', async (req, res) => {
       }
 
       // Send tool results back to AI for final response
+      // If new tools were loaded, include them in the available tools
+      console.log(`\n🔄 Sending tool results back to AI...`);
+      console.log(`   Available tools now: ${tools.length}`);
+      
       const finalMessages = [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: message },
@@ -411,12 +516,62 @@ app.post('/api/chat', async (req, res) => {
       ];
       
       const finalResponse = await provider.chat(finalMessages, selectedModel, tools, false);
-      const finalMessage = finalResponse.content;
-      res.json({ 
-        message: finalMessage,
-        mcpEnabled: true,
-        toolsUsed: aiResponse.tool_calls.map(tc => tc.function.name),
-      });
+      
+      console.log(`📨 AI final response received`);
+      console.log(`   Has tool calls: ${!!finalResponse.tool_calls}`);
+      
+      // Check if AI wants to call more tools (after loading new tools)
+      if (finalResponse.tool_calls && finalResponse.tool_calls.length > 0) {
+        console.log(`🔧 AI making additional tool calls: ${finalResponse.tool_calls.map(tc => tc.function.name).join(', ')}`);
+        
+        // Execute the additional tool calls
+        const additionalResults = [];
+        for (const toolCall of finalResponse.tool_calls) {
+          try {
+            const args = JSON.parse(toolCall.function.arguments);
+            const result = await mcpManager.callUserTool(user, toolCall.function.name, args);
+            
+            additionalResults.push({
+              tool_call_id: toolCall.id,
+              role: 'tool',
+              name: toolCall.function.name,
+              content: JSON.stringify(result),
+            });
+          } catch (error) {
+            console.error(`Error calling tool ${toolCall.function.name}:`, error);
+            additionalResults.push({
+              tool_call_id: toolCall.id,
+              role: 'tool',
+              name: toolCall.function.name,
+              content: JSON.stringify({ error: error.message }),
+            });
+          }
+        }
+        
+        // Get final response with the additional tool results
+        const finalFinalMessages = [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: message },
+          aiResponse,
+          ...toolResults,
+          finalResponse,
+          ...additionalResults,
+        ];
+        
+        const ultimateResponse = await provider.chat(finalFinalMessages, selectedModel, tools, false);
+        res.json({ 
+          message: ultimateResponse.content,
+          mcpEnabled: true,
+          toolsUsed: [...aiResponse.tool_calls.map(tc => tc.function.name), ...finalResponse.tool_calls.map(tc => tc.function.name)],
+        });
+      } else {
+        const finalMessage = finalResponse.content;
+        res.json({ 
+          message: finalMessage,
+          mcpEnabled: true,
+          toolsUsed: aiResponse.tool_calls.map(tc => tc.function.name),
+        });
+      }
     } else {
       // No tools called, return direct response
       res.json({ 
@@ -426,10 +581,16 @@ app.post('/api/chat', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Error:', error.response?.data || error.message);
+    console.error('❌ Chat endpoint error:', error);
+    console.error('   Error message:', error.message);
+    console.error('   Error stack:', error.stack);
+    if (error.response) {
+      console.error('   Response data:', error.response.data);
+    }
     res.status(500).json({ 
       error: 'Failed to get response from AI',
-      details: error.response?.data || error.message 
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     });
   }
 });

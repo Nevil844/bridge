@@ -171,10 +171,16 @@ class GeminiProvider {
             text: `Tool ${msg.name} returned an error: ${JSON.stringify(responseData.error)}`,
           });
         } else {
+          // Gemini expects response to be an object, not an array
+          // If responseData is an array, wrap it in an object
+          const response = Array.isArray(responseData) 
+            ? { data: responseData }
+            : responseData;
+            
           pendingToolResponses.push({
             functionResponse: {
               name: msg.name,
-              response: responseData,
+              response: response,
             },
           });
         }

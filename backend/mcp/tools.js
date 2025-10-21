@@ -24,36 +24,60 @@ function convertMCPToolsToOpenAI(mcpTools) {
 }
 
 /**
- * Generate a generic system prompt for MCP integrations
+ * Generate minimal system prompt listing available integrations
  * @param {Array} integrations - List of connected integrations
- * @param {number} toolCount - Total number of available tools
  * @returns {string} - System prompt
  */
-function generateSystemPrompt(integrations = [], toolCount = 0) {
+function generateSystemPrompt(integrations = []) {
   if (integrations.length === 0) {
     return 'You are a helpful AI assistant.';
   }
 
-  const integrationNames = integrations.map(i => i.name).join(', ');
+  const integrationList = integrations.map(i => i.type).join(', ');
 
-  return `You are a helpful AI assistant with access to external integrations through MCP (Model Context Protocol).
+  return `You are a helpful AI assistant with access to: ${integrationList}.
 
-CONNECTED INTEGRATIONS: ${integrationNames}
+When the user talks about an integration, use list_tools to discover available actions.`;
+}
 
-You have ${toolCount} tool${toolCount !== 1 ? 's' : ''} available to fetch real-time data and perform actions.
+/**
+ * Get integration-specific instructions
+ * These are added to the context only when tools for that integration are loaded
+ * @param {string} integrationType - Integration type (e.g., 'zerodha', 'github')
+ * @returns {string} - Integration-specific instructions
+ */
+function getIntegrationInstructions(integrationType) {
+  const instructions = {
+    zerodha: `ZERODHA USAGE:
+- User is authenticated via OAuth
+- If any tool fails with "Please log in first" or "Failed to execute":
+  1. Call the login tool (no arguments)
+  2. Show the user the warning and authorization link from the response
+  3. Tell them to click the link and ask again after authorizing
+- Try calling data tools directly first (get_profile, get_holdings, etc.)
+- Only call login if a tool fails with a login error`,
 
-IMPORTANT GUIDELINES:
-- You are ALREADY AUTHENTICATED with all connected integrations
-- ALWAYS use the available tools to fetch real, live data when users ask questions
-- DO NOT ask users for authentication tokens or credentials
-- DO NOT make up or guess data - ALWAYS call the appropriate tool first
-- Be proactive in using tools to provide accurate, up-to-date information
+    github: `GITHUB USAGE:
+- User is authenticated via OAuth
+- You have full access to their repositories, issues, and code
+- Use search_repositories to find repos, get_file_contents to read files`,
 
-When users ask questions related to your connected integrations, immediately use the relevant tools to fetch the information they need.`;
+    gmail: `GMAIL USAGE:
+- User is authenticated via OAuth
+- You can read, search, send emails, and manage labels
+- Use list_emails to see recent emails, search_emails for specific queries`,
+
+    'google-drive': `GOOGLE DRIVE USAGE:
+- User is authenticated via OAuth
+- You can list files, read content, and search
+- Use list_files to browse, get_file to read content`,
+  };
+
+  return instructions[integrationType] || `${integrationType.toUpperCase()} USAGE:\n- User is authenticated and ready to use`;
 }
 
 module.exports = {
   convertMCPToolsToOpenAI,
   generateSystemPrompt,
+  getIntegrationInstructions,
 };
-

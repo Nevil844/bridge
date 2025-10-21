@@ -65,7 +65,8 @@ class GoogleDriveOAuth {
         expiresIn: response.data.expires_in,
       };
     } catch (error) {
-      console.error('Google Drive token exchange error:', error.response?.data || error.message);
+      // Don't log response data as it might contain sensitive info
+      console.error('Google Drive token exchange error:', error.message);
       throw new Error('Failed to exchange code for Google Drive access token');
     }
   }
@@ -91,7 +92,8 @@ class GoogleDriveOAuth {
         expiresIn: response.data.expires_in,
       };
     } catch (error) {
-      console.error('Google Drive token refresh error:', error.response?.data || error.message);
+      // Don't log response data as it might contain sensitive info
+      console.error('Google Drive token refresh error:', error.message);
       throw new Error('Failed to refresh Google Drive access token');
     }
   }
