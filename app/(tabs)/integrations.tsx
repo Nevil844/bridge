@@ -66,6 +66,14 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     logo: 'https://zerodha.com/static/images/logo.svg',
     description: 'Access your portfolio, market data, and trading insights.',
   },
+  {
+    id: 'spotify',
+    name: 'Spotify',
+    type: 'spotify',
+    connected: false,
+    logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+    description: 'Control playback, manage playlists, and search music.',
+  },
 ];
 
 const UPCOMING_INTEGRATIONS: Integration[] = [

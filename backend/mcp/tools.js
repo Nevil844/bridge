@@ -71,6 +71,17 @@ function getIntegrationInstructions(integrationType) {
 - User is authenticated via OAuth
 - You can list files, read content, and search
 - Use list_files to browse, get_file to read content`,
+
+    spotify: `SPOTIFY USAGE:
+- User is authenticated via OAuth with Spotify Premium
+- Control playback, manage playlists, search music, get currently playing
+
+- PLAYBACK COMMANDS:
+  When user says "play <song>" or "play <song> by <artist>":
+  ALWAYS use SpotifySearchAndPlay with { query: '<song> <artist>' }
+  
+  This is the ONLY tool you should use for playing songs.
+  It will automatically search and play the song in one step.`,
   };
 
   return instructions[integrationType] || `${integrationType.toUpperCase()} USAGE:\n- User is authenticated and ready to use`;

@@ -145,7 +145,9 @@ class MCPManager {
       const IntegrationClass = integrationMeta.class;
       const integration = new IntegrationClass();
       
-      const connection = await integration.connect(config);
+      // Pass userId in config (needed for Spotify cache file)
+      const connectionConfig = { ...config, userId };
+      const connection = await integration.connect(connectionConfig);
       
       // Store connection with integration instance
       userConnections.set(connectionKey, {
@@ -332,7 +334,14 @@ class MCPManager {
     try {
       const { integration, connection } = targetConnectionData;
       console.log(`🔧 Calling tool "${toolName}" on ${targetIntegration.name}`);
-      const result = await integration.callTool(connection, toolName, args);
+      
+      // Add timeout for tool calls (30 seconds)
+      const result = await Promise.race([
+        integration.callTool(connection, toolName, args),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Tool call timeout after 30 seconds')), 30000)
+        )
+      ]);
       
       // If Zerodha login was successful, invalidate cache to get fresh tools
       if (targetIntegration.type === 'zerodha' && toolName === 'login' && !result.isError) {

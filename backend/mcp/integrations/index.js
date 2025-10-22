@@ -7,6 +7,7 @@ const GitHubIntegration = require('./github.js');
 const GoogleDriveIntegration = require('./google-drive.js');
 const GmailIntegration = require('./gmail.js');
 const ZerodhaIntegration = require('./zerodha.js');
+const SpotifyIntegration = require('./spotify.js');
 
 // Available integrations
 // Add new integrations here as you create them
@@ -37,6 +38,13 @@ const integrations = {
     name: 'Zerodha',
     description: 'Access your portfolio, market data, and trading insights',
     icon: 'https://zerodha.com/static/images/logo.svg',
+    authType: 'oauth',
+  },
+  spotify: {
+    class: SpotifyIntegration,
+    name: 'Spotify',
+    description: 'Control playback, manage playlists, and search music',
+    icon: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
     authType: 'oauth',
   },
   // Future integrations:
