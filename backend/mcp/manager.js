@@ -14,9 +14,9 @@ let userIntegrations = storage.loadIntegrations();
 const userConnections = new Map();
 
 // Cache for tools to avoid repeated listTools calls
-// Cache expires after 60 seconds
+// Cache expires after 5 minutes
 const toolsCache = new Map();
-const TOOLS_CACHE_TTL = 60 * 1000; // 60 seconds
+const TOOLS_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 class MCPManager {
   /**
@@ -70,10 +70,13 @@ class MCPManager {
     storage.saveUserIntegrations(userId, filtered, userIntegrations);
 
     // Connect to MCP server
-    await this.connectIntegration(userId, type, config);
+    const connected = await this.connectIntegration(userId, type, config);
 
     // Invalidate tools cache since we added a new integration
-    this.invalidateToolsCache(userId);
+    // Only invalidate if the integration was successfully connected
+    if (connected) {
+      this.invalidateToolsCache(userId);
+    }
 
     return true;
   }
