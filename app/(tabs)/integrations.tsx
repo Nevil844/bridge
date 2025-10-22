@@ -151,6 +151,47 @@ const UPCOMING_INTEGRATIONS: Integration[] = [
     logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/08/Pinterest-logo.png/150px-Pinterest-logo.png',
     description: 'Pin content, manage boards, and discover visual inspiration.',
   },
+  // B2B integrations
+  {
+    id: 'slack',
+    name: 'Slack',
+    type: 'slack',
+    connected: false,
+    logo: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
+    description: 'Send messages, manage channels, and automate team workflows.',
+  },
+  {
+    id: 'jira',
+    name: 'Jira',
+    type: 'jira',
+    connected: false,
+    logo: 'https://cdn.jsdelivr.net/gh/devicons/devicon/icons/jira/jira-original.svg',
+    description: 'Create issues, manage projects, and track development progress.',
+  },
+  {
+    id: 'notion',
+    name: 'Notion',
+    type: 'notion',
+    connected: false,
+    logo: 'https://www.notion.so/images/logo-ios.png',
+    description: 'Create pages, manage databases, and collaborate on documents.',
+  },
+  {
+    id: 'teams',
+    name: 'Microsoft Teams',
+    type: 'teams',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Microsoft_Office_Teams_%282018%E2%80%93present%29.svg/150px-Microsoft_Office_Teams_%282018%E2%80%93present%29.svg.png',
+    description: 'Video calls, chat, file sharing, and enterprise collaboration.',
+  },
+  {
+    id: 'salesforce',
+    name: 'Salesforce',
+    type: 'salesforce',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f9/Salesforce.com_logo.svg/150px-Salesforce.com_logo.svg.png',
+    description: 'Manage leads, opportunities, and customer relationships.',
+  },
 ];
 
 export default function IntegrationsScreen() {
@@ -398,7 +439,7 @@ export default function IntegrationsScreen() {
 
         {/* Upcoming Integrations */}
         <View style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>Coming Soon</ThemedText>
+          <ThemedText style={styles.sectionTitle}>Upcoming Integrations</ThemedText>
           <ThemedText style={[styles.subtitle, { marginBottom: 16 }]}>
             These integrations are under development
           </ThemedText>
@@ -430,14 +471,6 @@ export default function IntegrationsScreen() {
                       <ThemedText style={styles.integrationName}>
                         {integration.name}
                       </ThemedText>
-                      <View style={[
-                        styles.comingSoonBadge,
-                        { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }
-                      ]}>
-                        <ThemedText style={styles.comingSoonText}>
-                          Coming Soon
-                        </ThemedText>
-                      </View>
                     </View>
                     <ThemedText style={styles.integrationStatus}>
                       In development
