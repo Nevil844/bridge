@@ -77,13 +77,14 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
 ];
 
 const UPCOMING_INTEGRATIONS: Integration[] = [
+  // Existing integrations that were there before
   {
     id: 'whatsapp',
     name: 'WhatsApp',
     type: 'whatsapp',
     connected: false,
-    logo: 'https://cdn-icons-png.flaticon.com/512/733/733585.png',
-    description: 'Send messages, manage contacts, and automate conversations.',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/WhatsApp.svg/150px-WhatsApp.svg.png',
+    description: 'Send messages, manage groups, and automate conversations.',
   },
   {
     id: 'aws',
@@ -100,6 +101,55 @@ const UPCOMING_INTEGRATIONS: Integration[] = [
     connected: false,
     logo: 'https://cdn-icons-png.flaticon.com/512/5968/5968756.png',
     description: 'Manage servers, channels, and send messages on Discord.',
+  },
+  // New D2C integrations
+  {
+    id: 'instagram',
+    name: 'Instagram',
+    type: 'instagram',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/Instagram_logo_2016.svg/150px-Instagram_logo_2016.svg.png',
+    description: 'Post photos, manage stories, and grow your social presence.',
+  },
+  {
+    id: 'youtube',
+    name: 'YouTube',
+    type: 'youtube',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/150px-YouTube_full-color_icon_%282017%29.svg.png',
+    description: 'Upload videos, manage playlists, and track your channel analytics.',
+  },
+  {
+    id: 'twitter',
+    name: 'X (Twitter)',
+    type: 'twitter',
+    connected: false,
+    logo: 'https://cdn-icons-png.flaticon.com/512/3256/3256013.png',
+    description: 'Post tweets, manage timeline, and grow your social influence.',
+  },
+  {
+    id: 'telegram',
+    name: 'Telegram',
+    type: 'telegram',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Telegram_logo.svg/150px-Telegram_logo.svg.png',
+    description: 'Send messages, manage channels, and interact with bots.',
+  },
+  {
+    id: 'reddit',
+    name: 'Reddit',
+    type: 'reddit',
+    connected: false,
+    logo: 'https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png',
+    description: 'Post content, manage subreddits, and engage with communities.',
+  },
+  {
+    id: 'pinterest',
+    name: 'Pinterest',
+    type: 'pinterest',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/08/Pinterest-logo.png/150px-Pinterest-logo.png',
+    description: 'Pin content, manage boards, and discover visual inspiration.',
   },
 ];
 
