@@ -25,7 +25,7 @@ export default function SettingsScreen() {
               { backgroundColor: isDark ? '#1C1C1E' : '#F2F2F7' },
             ]}>
             <ThemedText style={styles.infoText}>
-              AI chat with dynamic integrations powered by MCP (Model Context Protocol).
+              Bridge AI - Chat with dynamic integrations powered by MCP (Model Context Protocol).
             </ThemedText>
             <ThemedText style={styles.infoText}>
               Connect your tools in the Integrations tab to give AI access to your data.

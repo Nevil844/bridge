@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "ai-mcp-app",
-    "slug": "ai-mcp-app",
+    "name": "Bridge AI",
+    "slug": "bridge-ai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "aimcpapp",
+    "scheme": "bridgeai",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true

@@ -57,7 +57,7 @@ class OpenRouterProvider {
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'http://localhost:3000',
-          'X-Title': 'AI MCP App',
+          'X-Title': 'Bridge AI',
         },
         responseType: stream ? 'stream' : 'json',
       }

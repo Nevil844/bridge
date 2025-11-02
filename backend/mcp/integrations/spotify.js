@@ -180,7 +180,7 @@ class SpotifyIntegration {
 
       const client = new Client(
         {
-          name: 'ai-mcp-app-spotify',
+          name: 'bridge-ai-spotify',
           version: '1.0.0',
         },
         {

@@ -433,7 +433,7 @@ export default function IntegrationsScreen() {
         <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
           <ThemedText style={styles.title}>Integrations</ThemedText>
           <ThemedText style={styles.subtitle}>
-            Connect AI assistants to your tools and data
+            Connect your tools to Bridge AI for powerful integrations
           </ThemedText>
         </View>
 

@@ -1,4 +1,4 @@
-# 🤖 AI MCP Chat App
+# 🌉 Bridge AI
 
 A beautiful mobile AI chat app with dynamic MCP (Model Context Protocol) integrations. Think Claude Desktop, but for mobile! 📱✨
 
@@ -18,7 +18,7 @@ A beautiful mobile AI chat app with dynamic MCP (Model Context Protocol) integra
 1. Go to https://github.com/settings/developers
 2. Click "New OAuth App"
 3. Fill in:
-   - Name: `AI MCP App`
+   - Name: `Bridge AI`
    - Homepage: `http://localhost:3000`
    - Callback: `http://localhost:3000/api/oauth/callback`
 4. Copy Client ID and Client Secret
@@ -148,7 +148,7 @@ This is a reference implementation showing how to build a Claude Desktop-style a
 ## 📝 Key Files
 
 ```
-ai-mcp-app/
+bridge-ai/
 ├── app/(tabs)/
 │   ├── index.tsx          # Chat screen
 │   ├── integrations.tsx   # Integration management

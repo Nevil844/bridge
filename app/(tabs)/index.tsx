@@ -449,7 +449,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
 
           <View style={styles.headerCenter}>
-            <ThemedText style={styles.title}>AI Assistant</ThemedText>
+            <ThemedText style={styles.title}>Bridge AI</ThemedText>
             
             {/* MCP Status Badge */}
             {mcpConnected && (

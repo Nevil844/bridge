@@ -46,7 +46,7 @@ class ZerodhaIntegration {
 
       const client = new Client(
         {
-          name: 'ai-mcp-app-zerodha',
+          name: 'bridge-ai-zerodha',
           version: '1.0.0',
         },
         {

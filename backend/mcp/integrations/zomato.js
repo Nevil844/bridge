@@ -153,7 +153,7 @@ class ZomatoIntegration {
 
       const newClient = new Client(
         {
-          name: 'ai-mcp-app-zomato',
+          name: 'bridge-ai-zomato',
           version: '1.0.0',
         },
         {
@@ -296,7 +296,7 @@ class ZomatoIntegration {
 
       const newClient = new Client(
         {
-          name: 'ai-mcp-app-zomato',
+          name: 'bridge-ai-zomato',
           version: '1.0.0',
         },
         {

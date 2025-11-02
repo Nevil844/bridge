@@ -36,7 +36,7 @@ class GitHubIntegration {
 
       const client = new Client(
         {
-          name: 'ai-mcp-app-github',
+          name: 'bridge-ai-github',
           version: '1.0.0',
         },
         {

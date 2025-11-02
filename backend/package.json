@@ -1,7 +1,7 @@
 {
-  "name": "ai-mcp-backend",
+  "name": "bridge-ai-backend",
   "version": "1.0.0",
-  "description": "Backend for AI MCP App",
+  "description": "Backend for Bridge AI",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
