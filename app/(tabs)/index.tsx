@@ -8,18 +8,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Keyboard,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from 'react-native';
 
 interface Message {
@@ -36,6 +37,7 @@ interface Model {
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
+  const screenHeight = Dimensions.get('window').height;
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -594,24 +596,24 @@ export default function HomeScreen() {
 
         {/* Messages Area */}
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <ScrollView
-            ref={scrollViewRef}
-            style={styles.messagesContainer}
-            contentContainerStyle={styles.messagesContent}
-            keyboardShouldPersistTaps="handled"
-            onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}>
-            {messages.length === 0 ? (
-              <View style={styles.emptyState}>
-                <GlowingOrb />
-                <ThemedText style={styles.emptyText}>
-                  How can I help you today?
-                </ThemedText>
-                <ThemedText style={styles.emptySubtext}>
-                  Connect integrations to get started
-                </ThemedText>
-              </View>
-            ) : (
-              messages.map((message) => (
+          {messages.length === 0 ? (
+            <View style={styles.emptyState}>
+              <GlowingOrb />
+              <ThemedText style={styles.emptyText}>
+                What's on your mind today?
+              </ThemedText>
+              <ThemedText style={styles.emptySubtext}>
+                Connect integrations to make it more fun!
+              </ThemedText>
+            </View>
+          ) : (
+            <ScrollView
+              ref={scrollViewRef}
+              style={styles.messagesContainer}
+              contentContainerStyle={styles.messagesContent}
+              keyboardShouldPersistTaps="handled"
+              onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}>
+              {messages.map((message) => (
                 <View
                   key={message.id}
                   style={[
@@ -635,14 +637,14 @@ export default function HomeScreen() {
                     {message.text}
                   </ThemedText>
                 </View>
-              ))
-            )}
-            {isLoading && (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color="#007AFF" />
-              </View>
-            )}
-          </ScrollView>
+              ))}
+              {isLoading && (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color="#007AFF" />
+                </View>
+              )}
+            </ScrollView>
+          )}
         </TouchableWithoutFeedback>
 
         {/* Input Area */}
@@ -854,19 +856,20 @@ const styles = StyleSheet.create({
   },
   messagesContent: {
     paddingBottom: 16,
+    flexGrow: 1,
+    minHeight: '100%',
   },
   emptyState: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 40,
-    paddingBottom: 100,
   },
   emptyText: {
     fontSize: 28,
     fontWeight: '600',
     textAlign: 'center',
-    marginTop: 32,
+    marginTop: 48,
     marginBottom: 12,
   },
   emptySubtext: {
