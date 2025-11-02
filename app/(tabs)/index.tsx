@@ -41,7 +41,6 @@ export default function HomeScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState('models/gemini-2.5-flash'); // Default to free model
   const [showModelPicker, setShowModelPicker] = useState(false);
-  const [mcpConnected, setMcpConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [showSidebar, setShowSidebar] = useState(false);
@@ -53,12 +52,7 @@ export default function HomeScreen() {
   useEffect(() => {
     loadSelectedModel();
     loadAvailableModels();
-    checkMCPStatus();
     loadChatHistory();
-    
-    // Refresh MCP status when screen comes into focus
-    const interval = setInterval(checkMCPStatus, 5000);
-    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -133,17 +127,6 @@ export default function HomeScreen() {
     }
   };
 
-  const checkMCPStatus = async () => {
-    try {
-      const userId = await AsyncStorage.getItem('userId') || 'default-user';
-      const response = await fetch(`${API_ENDPOINTS.MCP_STATUS}?userId=${userId}`);
-      const data = await response.json();
-      setMcpConnected(data.connected);
-    } catch (error) {
-      console.error('Error checking MCP status:', error);
-      setMcpConnected(false);
-    }
-  };
 
   const loadAvailableModels = async () => {
     try {
@@ -451,14 +434,6 @@ export default function HomeScreen() {
           <View style={styles.headerCenter}>
             <ThemedText style={styles.title}>Bridge AI</ThemedText>
             
-            {/* MCP Status Badge */}
-            {mcpConnected && (
-              <View style={styles.mcpBadge}>
-                <View style={styles.mcpDot} />
-                <ThemedText style={styles.mcpText}>MCP Connected</ThemedText>
-              </View>
-            )}
-            
             {/* Model Selector */}
             <TouchableOpacity
               style={[
@@ -632,9 +607,7 @@ export default function HomeScreen() {
                   How can I help you today?
                 </ThemedText>
                 <ThemedText style={styles.emptySubtext}>
-                  {mcpConnected 
-                    ? '✓ MCP integrations connected' 
-                    : 'Connect integrations to get started'}
+                  Connect integrations to get started
                 </ThemedText>
               </View>
             ) : (
@@ -766,27 +739,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     marginBottom: 8,
-  },
-  mcpBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#34C759',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 6,
-    marginBottom: 8,
-  },
-  mcpDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#FFFFFF',
-  },
-  mcpText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFFFFF',
   },
   modelSelector: {
     flexDirection: 'row',
