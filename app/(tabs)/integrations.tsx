@@ -74,6 +74,14 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
     description: 'Control playback, manage playlists, and search music.',
   },
+  {
+    id: 'zomato',
+    name: 'Zomato',
+    type: 'zomato',
+    connected: false,
+    logo: 'https://logo.clearbit.com/zomato.com',
+    description: 'Discover restaurants, browse menus, create carts, and place food orders.',
+  },
 ];
 
 const UPCOMING_INTEGRATIONS: Integration[] = [
@@ -192,14 +200,6 @@ const UPCOMING_INTEGRATIONS: Integration[] = [
     connected: false,
     logo: 'https://logo.clearbit.com/swiggy.com',
     description: 'Order food, track deliveries, and manage your Swiggy account.',
-  },
-  {
-    id: 'zomato',
-    name: 'Zomato',
-    type: 'zomato',
-    connected: false,
-    logo: 'https://logo.clearbit.com/zomato.com',
-    description: 'Discover restaurants, order food, and explore dining options.',
   },
   {
     id: 'uber',

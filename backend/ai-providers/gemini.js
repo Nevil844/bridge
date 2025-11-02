@@ -40,10 +40,30 @@ class GeminiProvider {
 
   /**
    * Remove JSON Schema fields that Gemini doesn't accept
+   * Also resolves $ref references using $defs
    */
-  cleanSchema(schema) {
+  cleanSchema(schema, defs = null) {
     if (!schema || typeof schema !== 'object') {
       return schema;
+    }
+
+    // Extract $defs from schema if present (use parent defs if not in this schema)
+    const schemaDefs = schema.$defs || defs;
+    
+    // If this schema has a $ref, resolve it
+    if (schema.$ref && schemaDefs) {
+      const refPath = schema.$ref;
+      // Handle #/$defs/SomeType format
+      if (refPath.startsWith('#/$defs/')) {
+        const defName = refPath.replace('#/$defs/', '');
+        if (schemaDefs[defName]) {
+          // Resolve the reference recursively (merge any additional properties)
+          const resolved = { ...schemaDefs[defName] };
+          // Remove $ref from resolved schema and clean it
+          delete resolved.$ref;
+          return this.cleanSchema(resolved, schemaDefs);
+        }
+      }
     }
 
     const cleaned = { ...schema };
@@ -53,16 +73,58 @@ class GeminiProvider {
     delete cleaned.additionalProperties;
     delete cleaned.any_of;
     delete cleaned.anyOf;
+    delete cleaned.$defs; // Remove $defs after resolving references
+    delete cleaned.$ref; // Remove $ref after resolving
     
     // Recursively clean nested objects
     if (cleaned.properties) {
       cleaned.properties = Object.keys(cleaned.properties).reduce((acc, key) => {
         const prop = cleaned.properties[key];
-        if (prop.value) {
-          // Handle nested value objects
-          acc[key] = this.cleanSchema(prop.value);
+        if (prop && typeof prop === 'object') {
+          // Handle nested value objects (like MCP's value structure)
+          if (prop.value) {
+            // Check if value itself has $ref
+            if (prop.value.$ref && schemaDefs) {
+              const refPath = prop.value.$ref;
+              if (refPath.startsWith('#/$defs/')) {
+                const defName = refPath.replace('#/$defs/', '');
+                if (schemaDefs[defName]) {
+                  // Replace entire prop.value with resolved schema
+                  const resolved = { ...schemaDefs[defName] };
+                  delete resolved.$ref;
+                  acc[key] = {
+                    ...prop,
+                    value: this.cleanSchema(resolved, schemaDefs)
+                  };
+                } else {
+                  acc[key] = { ...prop, value: this.cleanSchema(prop.value, schemaDefs) };
+                }
+              } else {
+                acc[key] = { ...prop, value: this.cleanSchema(prop.value, schemaDefs) };
+              }
+            } else {
+              acc[key] = { ...prop, value: this.cleanSchema(prop.value, schemaDefs) };
+            }
+          } else if (prop.$ref && schemaDefs) {
+            // Property itself has $ref - resolve it
+            const refPath = prop.$ref;
+            if (refPath.startsWith('#/$defs/')) {
+              const defName = refPath.replace('#/$defs/', '');
+              if (schemaDefs[defName]) {
+                const resolved = { ...schemaDefs[defName] };
+                delete resolved.$ref;
+                acc[key] = this.cleanSchema(resolved, schemaDefs);
+              } else {
+                acc[key] = this.cleanSchema(prop, schemaDefs);
+              }
+            } else {
+              acc[key] = this.cleanSchema(prop, schemaDefs);
+            }
+          } else {
+            acc[key] = this.cleanSchema(prop, schemaDefs);
+          }
         } else {
-          acc[key] = this.cleanSchema(prop);
+          acc[key] = prop;
         }
         return acc;
       }, {});
@@ -70,7 +132,39 @@ class GeminiProvider {
     
     // Clean items for arrays
     if (cleaned.items) {
-      cleaned.items = this.cleanSchema(cleaned.items);
+      if (Array.isArray(cleaned.items)) {
+        cleaned.items = cleaned.items.map(item => this.cleanSchema(item, schemaDefs));
+      } else {
+        cleaned.items = this.cleanSchema(cleaned.items, schemaDefs);
+      }
+    }
+    
+    // Clean additionalProperties if it's an object schema
+    if (cleaned.additionalProperties && typeof cleaned.additionalProperties === 'object') {
+      cleaned.additionalProperties = this.cleanSchema(cleaned.additionalProperties, schemaDefs);
+    }
+    
+    // Recursively clean oneOf, anyOf, allOf if present
+    if (cleaned.oneOf) {
+      cleaned.oneOf = cleaned.oneOf.map(item => this.cleanSchema(item, schemaDefs));
+    }
+    
+    // Convert enum values to strings (Gemini requires all enum values to be strings)
+    // AND ensure type is "string" when enum is present (Gemini only allows enum on STRING type)
+    if (cleaned.enum && Array.isArray(cleaned.enum)) {
+      cleaned.enum = cleaned.enum.map(val => {
+        // Convert numbers/booleans to strings, keep strings as-is
+        if (typeof val === 'number' || typeof val === 'boolean') {
+          return String(val);
+        }
+        return val;
+      });
+      
+      // Gemini requires enum to be on STRING type only
+      // If type is missing or not "string", set it to "string"
+      if (!cleaned.type || cleaned.type !== 'string') {
+        cleaned.type = 'string';
+      }
     }
     
     return cleaned;

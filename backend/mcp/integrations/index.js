@@ -8,6 +8,7 @@ const GoogleDriveIntegration = require('./google-drive.js');
 const GmailIntegration = require('./gmail.js');
 const ZerodhaIntegration = require('./zerodha.js');
 const SpotifyIntegration = require('./spotify.js');
+const ZomatoIntegration = require('./zomato.js');
 
 // Available integrations
 // Add new integrations here as you create them
@@ -45,6 +46,13 @@ const integrations = {
     name: 'Spotify',
     description: 'Control playback, manage playlists, and search music',
     icon: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+    authType: 'oauth',
+  },
+  zomato: {
+    class: ZomatoIntegration,
+    name: 'Zomato',
+    description: 'Discover restaurants, browse menus, create carts, and place food orders',
+    icon: 'https://logo.clearbit.com/zomato.com',
     authType: 'oauth',
   },
   // Future integrations:

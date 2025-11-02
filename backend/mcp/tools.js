@@ -34,10 +34,12 @@ function generateSystemPrompt(integrations = []) {
   }
 
   const integrationList = integrations.map(i => i.type).join(', ');
-
-  return `You are a helpful AI assistant with access to: ${integrationList}.
+  
+  let prompt = `You are a helpful AI assistant with access to: ${integrationList}.
 
 When the user talks about an integration, use list_tools to discover available actions.`;
+
+  return prompt;
 }
 
 /**
@@ -82,6 +84,17 @@ function getIntegrationInstructions(integrationType) {
   
   This is the ONLY tool you should use for playing songs.
   It will automatically search and play the song in one step.`,
+
+    zomato: `ZOMATO USAGE:
+- User is authenticated via OAuth (handled internally by mcp-remote)
+- Search restaurants, browse menus, manage cart, and place orders
+- Use get_restaurants_for_keyword to search restaurants by food item or location
+- Use menu tools to browse restaurant menus
+- Use add_to_cart to add items to cart
+- Use place_order only when user explicitly requests to place an order
+- Check conversation history for restaurant IDs when adding items to cart
+
+The MCP server maintains its own OAuth session via mcp-remote`,
   };
 
   return instructions[integrationType] || `${integrationType.toUpperCase()} USAGE:\n- User is authenticated and ready to use`;
