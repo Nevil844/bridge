@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -33,6 +34,7 @@ interface Model {
   id: string;
   name: string;
   tier?: 'free' | 'premium';
+  provider?: 'gemini' | 'openrouter' | 'bedrock';
 }
 
 export default function HomeScreen() {
@@ -49,6 +51,7 @@ export default function HomeScreen() {
   const [chatHistory, setChatHistory] = useState<Array<{id: string, title: string, messages: Message[], date: string}>>([]);
   const [currentChatId, setCurrentChatId] = useState<string>('default');
   const [availableModels, setAvailableModels] = useState<Model[]>([]);
+  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set(['gemini'])); // Default expand Gemini
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -61,6 +64,33 @@ export default function HomeScreen() {
     // Save current chat when messages change
     saveChatHistory();
   }, [messages]);
+
+  useEffect(() => {
+    // Scroll to bottom when messages array length changes
+    if (messages.length > 0) {
+      const timer = setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: false });
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [messages.length]);
+
+  useEffect(() => {
+    // Listen to keyboard events
+    const keyboardWillShow = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => {
+        // Scroll to bottom when keyboard appears
+        setTimeout(() => {
+          scrollViewRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      }
+    );
+
+    return () => {
+      keyboardWillShow.remove();
+    };
+  }, []);
 
   const loadChatHistory = async () => {
     try {
@@ -139,7 +169,7 @@ export default function HomeScreen() {
       console.error('Error loading models:', error);
       // Fallback to default free model
       setAvailableModels([
-        { id: 'models/gemini-2.5-flash', name: 'Gemini 2.5 Flash', tier: 'free' },
+        { id: 'models/gemini-2.5-flash', name: 'Gemini 2.5 Flash', tier: 'free', provider: 'gemini' },
       ]);
     }
   };
@@ -449,6 +479,13 @@ export default function HomeScreen() {
               <ThemedText style={styles.dropdownIcon}>▼</ThemedText>
             </TouchableOpacity>
           </View>
+
+          {/* New Chat Button */}
+          <TouchableOpacity 
+            style={styles.newChatHeaderButton}
+            onPress={startNewChat}>
+            <IconSymbol name="square.and.pencil" size={22} color={isDark ? '#FFFFFF' : '#000000'} />
+          </TouchableOpacity>
         </View>
 
         {/* Sidebar Modal for Chat History */}
@@ -464,15 +501,25 @@ export default function HomeScreen() {
             ]}>
               {/* Sidebar Header */}
               <View style={styles.sidebarHeader}>
+                <View style={styles.sidebarTopBar}>
+                  <TouchableOpacity 
+                    style={styles.closeIcon}
+                    onPress={() => setShowSidebar(false)}>
+                    <IconSymbol name="chevron.left" size={20} color={isDark ? '#FFFFFF' : '#000000'} />
+                  </TouchableOpacity>
+                  <ThemedText style={styles.sidebarTitle}>Bridge AI</ThemedText>
+                </View>
                 <TouchableOpacity 
-                  style={styles.closeIcon}
-                  onPress={() => setShowSidebar(false)}>
-                  <IconSymbol name="xmark" size={24} color={isDark ? '#FFFFFF' : '#000000'} />
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={[styles.newChatButton, { backgroundColor: '#007AFF' }]}
+                  style={[
+                    styles.newChatButton,
+                    {
+                      backgroundColor: 'transparent',
+                      borderWidth: 1,
+                      borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                    },
+                  ]}
                   onPress={startNewChat}>
-                  <IconSymbol name="square.and.pencil" size={18} color="#FFFFFF" />
+                  <IconSymbol name="square.and.pencil" size={18} color={isDark ? '#FFFFFF' : '#000000'} />
                   <ThemedText style={styles.newChatText}>New Chat</ThemedText>
                 </TouchableOpacity>
               </View>
@@ -487,15 +534,16 @@ export default function HomeScreen() {
                   </View>
                 ) : (
                   chatHistory.map((chat) => (
-                    <View key={chat.id} style={styles.chatItemContainer}>
-                      <TouchableOpacity
-                        style={[
-                          styles.chatItem,
-                          chat.id === currentChatId && {
-                            backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
-                          },
-                        ]}
-                        onPress={() => loadChat(chat.id)}>
+                    <TouchableOpacity
+                      key={chat.id}
+                      style={[
+                        styles.chatItem,
+                        chat.id === currentChatId && {
+                          backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
+                        },
+                      ]}
+                      onPress={() => loadChat(chat.id)}>
+                      <View style={styles.chatItemContainer}>
                         <View style={styles.chatItemContent}>
                           <ThemedText style={styles.chatItemTitle} numberOfLines={1}>
                             {chat.title}
@@ -504,25 +552,45 @@ export default function HomeScreen() {
                             {new Date(chat.date).toLocaleDateString()}
                           </ThemedText>
                         </View>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={() => {
-                          Alert.alert(
-                            'Delete Chat',
-                            'Are you sure you want to delete this chat?',
-                            [
-                              { text: 'Cancel', style: 'cancel' },
-                              { text: 'Delete', style: 'destructive', onPress: () => deleteChat(chat.id) }
-                            ]
-                          );
-                        }}>
-                        <IconSymbol name="trash" size={16} color="#FF3B30" />
-                      </TouchableOpacity>
-                    </View>
+                        <TouchableOpacity
+                          style={styles.deleteButton}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            Alert.alert(
+                              'Delete Chat',
+                              'Are you sure you want to delete this chat?',
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                { text: 'Delete', style: 'destructive', onPress: () => deleteChat(chat.id) }
+                              ]
+                            );
+                          }}>
+                          <IconSymbol name="trash" size={16} color="#FF3B30" />
+                        </TouchableOpacity>
+                      </View>
+                    </TouchableOpacity>
                   ))
                 )}
               </ScrollView>
+
+              {/* Profile Section */}
+              <View style={[
+                styles.profileSection,
+                {
+                  borderTopColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                },
+              ]}>
+                <View style={styles.profilePhotoContainer}>
+                  <Image
+                    source={{ uri: 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png' }}
+                    style={styles.profilePhoto}
+                  />
+                </View>
+                <View style={styles.profileInfo}>
+                  <ThemedText style={styles.profileName}>Nevil Jobanputra</ThemedText>
+                  <ThemedText style={styles.profileEmail}>neviljobanputra34@gmail.com</ThemedText>
+                </View>
+              </View>
             </View>
             
             <TouchableOpacity 
@@ -549,44 +617,77 @@ export default function HomeScreen() {
               ]}>
               <ThemedText style={styles.modalTitle}>Select AI Model</ThemedText>
               <ScrollView style={styles.modalScroll}>
-                {availableModels.map((model) => (
-                  <TouchableOpacity
-                    key={model.id}
-                    style={[
-                      styles.modelOption,
-                      selectedModel === model.id && {
-                        backgroundColor: isDark ? '#2C2C2E' : '#E5E5EA',
-                      },
-                      model.tier === 'premium' && styles.modelOptionLocked,
-                    ]}
-                    onPress={() => selectModel(model.id, model.tier)}>
-                    <View style={styles.modelOptionContent}>
-                      <View style={styles.modelOptionText}>
-                        <ThemedText style={styles.modelOptionName}>
-                          {model.name}
+                {['gemini', 'openrouter', 'bedrock'].map((provider) => {
+                  const providerModels = availableModels.filter(m => m.provider === provider);
+                  if (providerModels.length === 0) return null;
+                  
+                  const isExpanded = expandedProviders.has(provider);
+                  const providerName = provider === 'gemini' ? 'Gemini' : 
+                                       provider === 'openrouter' ? 'OpenRouter' : 
+                                       'AWS Bedrock';
+                  
+                  return (
+                    <View key={provider} style={styles.providerGroup}>
+                      <TouchableOpacity
+                        style={[
+                          styles.providerHeader,
+                          { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' },
+                        ]}
+                        onPress={() => {
+                          const newExpanded = new Set(expandedProviders);
+                          if (isExpanded) {
+                            newExpanded.delete(provider);
+                          } else {
+                            newExpanded.add(provider);
+                          }
+                          setExpandedProviders(newExpanded);
+                        }}>
+                        <ThemedText style={styles.providerName}>{providerName}</ThemedText>
+                        <ThemedText style={styles.expandIcon}>
+                          {isExpanded ? '−' : '+'}
                         </ThemedText>
-                        <View style={styles.modelTierBadgeContainer}>
-                          {model.tier === 'free' && (
-                            <View style={styles.freeBadge}>
-                              <ThemedText style={styles.freeBadgeText}>FREE</ThemedText>
-                            </View>
-                          )}
-                          {model.tier === 'premium' && (
-                            <View style={styles.premiumBadge}>
-                              <ThemedText style={styles.premiumBadgeText}>🔒 PREMIUM</ThemedText>
-                            </View>
-                          )}
+                      </TouchableOpacity>
+                      
+                      {isExpanded && (
+                        <View style={styles.modelsList}>
+                          {providerModels.map((model) => (
+                            <TouchableOpacity
+                              key={model.id}
+                              style={[
+                                styles.modelOption,
+                                { backgroundColor: 'transparent' },
+                                selectedModel === model.id && {
+                                  backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+                                },
+                                model.tier === 'premium' && styles.modelOptionLocked,
+                              ]}
+                              onPress={() => selectModel(model.id, model.tier)}>
+                              <View style={styles.modelOptionContent}>
+                                <ThemedText style={styles.modelOptionName}>
+                                  {model.name}
+                                </ThemedText>
+                                {model.tier && (
+                                  <ThemedText style={styles.modelTierText}>
+                                    {model.tier === 'free' ? 'Free' : 'Premium'}
+                                  </ThemedText>
+                                )}
+                              </View>
+                              {selectedModel === model.id && (
+                                <ThemedText style={styles.checkmark}>•</ThemedText>
+                              )}
+                            </TouchableOpacity>
+                          ))}
                         </View>
-                      </View>
+                      )}
                     </View>
-                    {selectedModel === model.id && (
-                      <ThemedText style={styles.checkmark}>✓</ThemedText>
-                    )}
-                  </TouchableOpacity>
-                ))}
+                  );
+                })}
               </ScrollView>
               <TouchableOpacity
-                style={styles.closeButton}
+                style={[
+                  styles.closeButton,
+                  { borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' },
+                ]}
                 onPress={() => setShowModelPicker(false)}>
                 <ThemedText style={styles.closeButtonText}>Close</ThemedText>
               </TouchableOpacity>
@@ -612,7 +713,10 @@ export default function HomeScreen() {
               style={styles.messagesContainer}
               contentContainerStyle={styles.messagesContent}
               keyboardShouldPersistTaps="handled"
-              onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}>
+              onContentSizeChange={() => {
+                // Scroll to end smoothly when new content is added
+                scrollViewRef.current?.scrollToEnd({ animated: true });
+              }}>
               {messages.map((message) => (
                 <View
                   key={message.id}
@@ -675,6 +779,12 @@ export default function HomeScreen() {
             returnKeyType="send"
             blurOnSubmit={false}
             multiline={false}
+            onFocus={() => {
+              // Scroll to bottom when input is focused (keyboard opens)
+              setTimeout(() => {
+                scrollViewRef.current?.scrollToEnd({ animated: true });
+              }, 300);
+            }}
           />
           
           {/* Microphone Button */}
@@ -682,25 +792,38 @@ export default function HomeScreen() {
             style={[
               styles.micButton,
               isRecording && styles.micButtonRecording,
+              {
+                borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+              },
             ]} 
             onPress={isRecording ? stopRecording : startRecording}
             disabled={isLoading}>
             <IconSymbol 
               name={isRecording ? 'stop.circle.fill' : 'mic.fill'} 
-              size={24} 
-              color="#FFFFFF" 
+              size={20} 
+              color={isDark ? '#FFFFFF' : '#000000'} 
             />
           </TouchableOpacity>
 
           {/* Send Button */}
           <TouchableOpacity 
-            style={[styles.sendButton, (isLoading || isRecording) && styles.sendButtonDisabled]} 
+            style={[
+              styles.sendButton, 
+              (isLoading || isRecording) && styles.sendButtonDisabled,
+              {
+                borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+              },
+            ]} 
             onPress={() => {
               handleSend();
               Keyboard.dismiss();
             }}
             disabled={isLoading || isRecording}>
-            <ThemedText style={styles.sendButtonText}>↑</ThemedText>
+            <IconSymbol 
+              name="arrow.up" 
+              size={18} 
+              color={isDark ? '#FFFFFF' : '#000000'} 
+            />
           </TouchableOpacity>
         </View>
         
@@ -732,6 +855,14 @@ const styles = StyleSheet.create({
     top: 64,
     padding: 8,
     zIndex: 10,
+  },
+  newChatHeaderButton: {
+    position: 'absolute',
+    right: 16,
+    top: 64,
+    padding: 8,
+    zIndex: 10,
+    opacity: 0.7,
   },
   headerCenter: {
     alignItems: 'center',
@@ -779,85 +910,79 @@ const styles = StyleSheet.create({
   modalScroll: {
     paddingHorizontal: 20,
   },
+  providerGroup: {
+    marginBottom: 12,
+  },
+  providerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 14,
+    borderRadius: 10,
+    marginBottom: 2,
+  },
+  providerName: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  expandIcon: {
+    fontSize: 16,
+    opacity: 0.4,
+    fontWeight: '300',
+  },
+  modelsList: {
+    paddingLeft: 12,
+    paddingRight: 4,
+    paddingTop: 4,
+  },
   modelOption: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 8,
+    padding: 14,
+    borderRadius: 10,
+    marginBottom: 2,
   },
   modelOptionLocked: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
   modelOptionContent: {
     flex: 1,
   },
-  modelOptionText: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
   modelOptionName: {
     fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
+    fontWeight: '500',
+    marginBottom: 2,
   },
-  modelOptionId: {
+  modelTierText: {
     fontSize: 12,
     opacity: 0.5,
-  },
-  modelTierBadgeContainer: {
-    marginLeft: 8,
-  },
-  freeBadge: {
-    backgroundColor: '#34C759',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  freeBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  premiumBadge: {
-    backgroundColor: '#FFD700',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  premiumBadgeText: {
-    color: '#000000',
-    fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '400',
   },
   checkmark: {
-    fontSize: 20,
-    color: '#007AFF',
-    fontWeight: 'bold',
+    fontSize: 18,
+    opacity: 0.7,
+    fontWeight: '600',
   },
   closeButton: {
     marginHorizontal: 20,
     marginTop: 16,
-    padding: 16,
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
+    padding: 14,
+    borderRadius: 10,
     alignItems: 'center',
+    borderWidth: 1,
   },
   closeButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '500',
+    opacity: 0.7,
   },
   messagesContainer: {
     flex: 1,
     paddingHorizontal: 16,
   },
   messagesContent: {
-    paddingBottom: 16,
-    flexGrow: 1,
-    minHeight: '100%',
+    paddingBottom: 20,
   },
   emptyState: {
     flex: 1,
@@ -894,6 +1019,7 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 34 : 16,
@@ -911,28 +1037,26 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#34C759',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
   micButtonRecording: {
-    backgroundColor: '#FF3B30',
+    borderColor: 'rgba(255, 59, 48, 0.3)',
+    backgroundColor: 'rgba(255, 59, 48, 0.1)',
   },
   sendButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#007AFF',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
   sendButtonDisabled: {
-    opacity: 0.5,
-  },
-  sendButtonText: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: '#FFFFFF',
+    opacity: 0.3,
   },
   recordingIndicator: {
     position: 'absolute',
@@ -979,13 +1103,23 @@ const styles = StyleSheet.create({
   },
   sidebarHeader: {
     paddingHorizontal: 16,
+    paddingTop: 16,
     paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(128, 128, 128, 0.2)',
   },
+  sidebarTopBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 12,
+  },
   closeIcon: {
-    padding: 8,
-    alignSelf: 'flex-end',
+    padding: 4,
+  },
+  sidebarTitle: {
+    fontSize: 20,
+    fontWeight: '600',
   },
   newChatButton: {
     flexDirection: 'row',
@@ -995,12 +1129,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 12,
     gap: 8,
-    marginTop: 8,
   },
   newChatText: {
-    color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   chatList: {
     flex: 1,
@@ -1023,18 +1155,21 @@ const styles = StyleSheet.create({
     opacity: 0.5,
     textAlign: 'center',
   },
+  chatItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginHorizontal: 12,
+    marginBottom: 4,
+  },
   chatItemContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    marginBottom: 4,
-  },
-  chatItem: {
-    flex: 1,
-    padding: 12,
-    borderRadius: 8,
+    justifyContent: 'space-between',
+    gap: 8,
   },
   chatItemContent: {
+    flex: 1,
     gap: 4,
   },
   chatItemTitle: {
@@ -1047,5 +1182,37 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     padding: 8,
+  },
+  profileSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 30,
+    borderTopWidth: 1,
+    gap: 10,
+  },
+  profilePhotoContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  profilePhoto: {
+    width: '100%',
+    height: '100%',
+  },
+  profileInfo: {
+    flex: 1,
+  },
+  profileName: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 1,
+  },
+  profileEmail: {
+    fontSize: 11,
+    opacity: 0.5,
   },
 });
