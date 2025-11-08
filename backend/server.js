@@ -511,7 +511,7 @@ app.post('/api/chat', async (req, res) => {
       const finalMessages = [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: message },
-        aiResponse,
+        { role: 'assistant', content: aiResponse.content || '', tool_calls: aiResponse.tool_calls || [] },
         ...toolResults,
       ];
       
@@ -552,9 +552,9 @@ app.post('/api/chat', async (req, res) => {
         const finalFinalMessages = [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: message },
-          aiResponse,
+          { role: 'assistant', content: aiResponse.content || '', tool_calls: aiResponse.tool_calls || [] },
           ...toolResults,
-          finalResponse,
+          { role: 'assistant', content: finalResponse.content || '', tool_calls: finalResponse.tool_calls || [] },
           ...additionalResults,
         ];
         

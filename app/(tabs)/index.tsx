@@ -51,7 +51,7 @@ export default function HomeScreen() {
   const [chatHistory, setChatHistory] = useState<Array<{id: string, title: string, messages: Message[], date: string}>>([]);
   const [currentChatId, setCurrentChatId] = useState<string>('default');
   const [availableModels, setAvailableModels] = useState<Model[]>([]);
-  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set(['gemini'])); // Default expand Gemini
+  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set(['gemini', 'bedrock'])); // Default expand Gemini and Bedrock
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -184,22 +184,7 @@ export default function HomeScreen() {
   };
 
   const selectModel = async (modelId: string, tier?: 'free' | 'premium') => {
-    // Check if user is trying to select a premium model
-    if (tier === 'premium') {
-      Alert.alert(
-        '🔒 Premium Model',
-        'This is a premium model. Upgrade to unlock access to GPT-4, Claude, and more!',
-        [
-          { text: 'Maybe Later', style: 'cancel' },
-          { text: 'Upgrade Now', onPress: () => {
-            // TODO: Navigate to upgrade screen or open payment flow
-            Alert.alert('Coming Soon', 'Premium features will be available soon!');
-          }},
-        ]
-      );
-      return;
-    }
-    
+    // Allow selection of both free and premium models
     setSelectedModel(modelId);
     setShowModelPicker(false);
     try {
