@@ -305,6 +305,14 @@ class GeminiProvider {
       // Check for function calls
       const functionCalls = response.functionCalls();
       
+      // Extract usage data from Gemini response
+      // Gemini uses usageMetadata with promptTokenCount and candidatesTokenCount
+      const usageMetadata = response.usageMetadata;
+      const usage = usageMetadata ? {
+        input_tokens: usageMetadata.promptTokenCount || 0,
+        output_tokens: usageMetadata.candidatesTokenCount || 0,
+      } : null;
+      
       return {
         content: text,
         tool_calls: functionCalls ? functionCalls.map((fc, index) => ({
@@ -315,6 +323,7 @@ class GeminiProvider {
             arguments: JSON.stringify(fc.args),
           },
         })) : null,
+        usage: usage,
       };
     }
   }

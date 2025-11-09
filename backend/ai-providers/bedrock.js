@@ -194,16 +194,7 @@ class BedrockProvider {
       if (tools.length > 0) {
         const convertedTools = this.convertTools(tools);
         console.log(`🔧 Bedrock: Converting ${tools.length} tools to Bedrock format`);
-        console.log(`   Original tools:`, tools.map(t => ({ 
-          type: t.type, 
-          name: t.function?.name || t.name || 'unknown',
-          hasFunction: !!t.function 
-        })));
-        console.log(`   Converted tools:`, convertedTools.map(t => ({ 
-          name: t.name || 'unknown',
-          hasSchema: !!t.input_schema,
-          schemaType: t.input_schema?.type || 'object'
-        })));
+
         if (convertedTools.length === 0) {
           console.warn(`⚠️  Bedrock: All tools were filtered out!`);
         }
@@ -235,9 +226,16 @@ class BedrockProvider {
           },
         })) || null;
 
+      // Extract usage data from Bedrock response
+      const usage = responseBody.usage ? {
+        input_tokens: responseBody.usage.input_tokens || 0,
+        output_tokens: responseBody.usage.output_tokens || 0,
+      } : null;
+
       return {
         content,
         tool_calls: toolCalls && toolCalls.length > 0 ? toolCalls : null,
+        usage: usage,
       };
     } else if (isLlama || isMistral) {
       const requestBody = {
@@ -263,9 +261,16 @@ class BedrockProvider {
       const responseBody = JSON.parse(new TextDecoder().decode(response.body));
       const content = responseBody.generation || responseBody.content || '';
 
+      // Extract usage data from Bedrock response (Llama/Mistral format may vary)
+      const usage = responseBody.usage ? {
+        input_tokens: responseBody.usage.input_tokens || responseBody.usage.prompt_tokens || 0,
+        output_tokens: responseBody.usage.output_tokens || responseBody.usage.completion_tokens || 0,
+      } : null;
+
       return {
         content,
         tool_calls: null,
+        usage: usage,
       };
     } else {
       const requestBody = {
@@ -290,9 +295,16 @@ class BedrockProvider {
       const responseBody = JSON.parse(new TextDecoder().decode(response.body));
       const content = responseBody.results?.[0]?.outputText || '';
 
+      // Extract usage data from Bedrock response (Titan format may vary)
+      const usage = responseBody.usage ? {
+        input_tokens: responseBody.usage.input_tokens || 0,
+        output_tokens: responseBody.usage.output_tokens || 0,
+      } : null;
+
       return {
         content,
         tool_calls: null,
+        usage: usage,
       };
     }
   }

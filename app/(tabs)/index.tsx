@@ -1,12 +1,16 @@
 import { GlowingOrb } from '@/components/glowing-orb';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { ThinkingProcess } from '@/components/thinking-process';
+import { MarkdownText } from '@/components/markdown-text';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { API_ENDPOINTS } from '@/config/api';
+import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
-import React, { useEffect, useRef, useState } from 'react';
+import * as Clipboard from 'expo-clipboard';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,16 +22,28 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  Text,
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
 
+interface ThinkingData {
+  isInternal: boolean;
+  thinking: string;
+  action: string;
+  toolCalls: string[];
+  data: any;
+  memoryUsed?: boolean;
+  memoryCount?: number;
+}
+
 interface Message {
   id: string;
   text: string;
   isUser: boolean;
+  thinking?: ThinkingData; // Add thinking data for AI messages
 }
 
 interface Model {
@@ -40,6 +56,7 @@ interface Model {
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const screenHeight = Dimensions.get('window').height;
+  const { user, logout } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -48,22 +65,39 @@ export default function HomeScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [showSidebar, setShowSidebar] = useState(false);
-  const [chatHistory, setChatHistory] = useState<Array<{id: string, title: string, messages: Message[], date: string}>>([]);
-  const [currentChatId, setCurrentChatId] = useState<string>('default');
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [chatHistory, setChatHistory] = useState<Array<{id: string, title: string, lastActive: string, messageCount: number}>>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string>('default-user');
   const [availableModels, setAvailableModels] = useState<Model[]>([]);
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set(['gemini', 'bedrock'])); // Default expand Gemini and Bedrock
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
+    loadUserId();
     loadSelectedModel();
     loadAvailableModels();
-    loadChatHistory();
+    cleanupOldData(); // Remove old AsyncStorage data
   }, []);
 
-  useEffect(() => {
-    // Save current chat when messages change
-    saveChatHistory();
-  }, [messages]);
+  const loadUserId = async () => {
+    try {
+      const storedUserId = await AsyncStorage.getItem('userId');
+      // Only use stored userId if it exists and is not default-user
+      if (storedUserId && storedUserId !== 'default-user') {
+      setUserId(storedUserId);
+      } else {
+        // If no valid userId, use the one from useAuth hook
+        if (user?.id) {
+          setUserId(user.id);
+        } else {
+          setUserId('default-user');
+        }
+      }
+    } catch (error) {
+      console.error('Error loading userId:', error);
+    }
+  };
 
   useEffect(() => {
     // Scroll to bottom when messages array length changes
@@ -92,70 +126,89 @@ export default function HomeScreen() {
     };
   }, []);
 
-  const loadChatHistory = async () => {
+  // Load conversations from database
+  const loadConversations = useCallback(async () => {
     try {
-      const history = await AsyncStorage.getItem('chatHistory');
-      if (history) {
-        const parsed = JSON.parse(history);
-        setChatHistory(parsed);
-        
-        // Load the current chat
-        const currentChat = parsed.find((chat: any) => chat.id === currentChatId);
-        if (currentChat) {
-          setMessages(currentChat.messages);
-        }
+      if (!userId) return; // Wait for userId to load
+      const response = await fetch(`${API_ENDPOINTS.CONVERSATIONS}?userId=${userId}`);
+      if (response.ok) {
+        const conversations = await response.json();
+        setChatHistory(conversations.map((conv: any) => ({
+          id: conv.id,
+          title: conv.title,
+          lastActive: conv.lastActive,
+          messageCount: conv._count?.messages || 0,
+        })));
       }
     } catch (error) {
-      console.error('Error loading chat history:', error);
+      console.error('Error loading conversations:', error);
     }
-  };
+  }, [userId]);
 
-  const saveChatHistory = async () => {
+  // Load conversations when userId changes
+  useEffect(() => {
+    if (userId) {
+      loadConversations();
+    }
+  }, [userId, loadConversations]);
+
+  // Load messages for a conversation
+  const loadConversationMessages = async (conversationId: string) => {
     try {
-      const updatedHistory = chatHistory.filter(chat => chat.id !== currentChatId);
-      
-      if (messages.length > 0) {
-        const currentChat = {
-          id: currentChatId,
-          title: messages[0]?.text.substring(0, 30) + (messages[0]?.text.length > 30 ? '...' : ''),
-          messages: messages,
-          date: new Date().toISOString(),
-        };
-        updatedHistory.unshift(currentChat);
+      const response = await fetch(`${API_ENDPOINTS.CONVERSATIONS}/${conversationId}?userId=${userId}`);
+      if (response.ok) {
+        const conversation = await response.json();
+        const loadedMessages: Message[] = conversation.messages.map((msg: any) => ({
+          id: msg.id,
+          text: msg.content,
+          isUser: msg.role === 'user',
+        }));
+        setMessages(loadedMessages);
       }
-      
-      // Keep only last 20 chats
-      const limitedHistory = updatedHistory.slice(0, 20);
-      setChatHistory(limitedHistory);
-      await AsyncStorage.setItem('chatHistory', JSON.stringify(limitedHistory));
     } catch (error) {
-      console.error('Error saving chat history:', error);
+      console.error('Error loading conversation messages:', error);
     }
   };
 
   const startNewChat = () => {
-    const newChatId = Date.now().toString();
-    setCurrentChatId(newChatId);
+    setCurrentChatId(null);
     setMessages([]);
     setShowSidebar(false);
   };
 
-  const loadChat = (chatId: string) => {
-    const chat = chatHistory.find(c => c.id === chatId);
-    if (chat) {
-      setCurrentChatId(chatId);
-      setMessages(chat.messages);
-      setShowSidebar(false);
-    }
+  const loadChat = async (chatId: string) => {
+    setCurrentChatId(chatId);
+    await loadConversationMessages(chatId);
+    setShowSidebar(false);
   };
 
   const deleteChat = async (chatId: string) => {
-    const updatedHistory = chatHistory.filter(chat => chat.id !== chatId);
-    setChatHistory(updatedHistory);
-    await AsyncStorage.setItem('chatHistory', JSON.stringify(updatedHistory));
-    
-    if (chatId === currentChatId) {
-      startNewChat();
+    try {
+      const response = await fetch(`${API_ENDPOINTS.CONVERSATIONS}/${chatId}?userId=${userId}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        // Reload conversations list
+        await loadConversations();
+        
+        if (chatId === currentChatId) {
+          startNewChat();
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+      Alert.alert('Error', 'Failed to delete conversation');
+    }
+  };
+
+  // Clean up old AsyncStorage data
+  const cleanupOldData = async () => {
+    try {
+      await AsyncStorage.removeItem('chatHistory');
+      console.log('✅ Cleaned up old chat history from AsyncStorage');
+    } catch (error) {
+      console.error('Error cleaning up old data:', error);
     }
   };
 
@@ -249,7 +302,7 @@ export default function HomeScreen() {
   const transcribeAudio = async (audioUri: string) => {
     try {
       setIsLoading(true);
-      const userId = await AsyncStorage.getItem('userId') || 'default-user';
+      // userId is already in state from loadUserId()
 
       // Create form data
       const formData = new FormData();
@@ -299,7 +352,6 @@ export default function HomeScreen() {
       setIsLoading(true);
 
       try {
-        const userId = await AsyncStorage.getItem('userId') || 'default-user';
         const response = await fetch(API_ENDPOINTS.CHAT, {
           method: 'POST',
           headers: {
@@ -309,6 +361,7 @@ export default function HomeScreen() {
             message: text,
             model: selectedModel,
             userId,
+            conversationId: currentChatId,
           }),
         });
 
@@ -321,6 +374,12 @@ export default function HomeScreen() {
             isUser: false,
           };
           setMessages([...newMessages, aiMessage]);
+          
+          // Update conversationId if this was a new conversation
+          if (data.conversationId && !currentChatId) {
+            setCurrentChatId(data.conversationId);
+            await loadConversations();
+          }
         } else {
           const errorMessage: Message = {
             id: (Date.now() + 1).toString(),
@@ -365,14 +424,6 @@ export default function HomeScreen() {
       setMessages([...newMessages, aiMessagePlaceholder]);
 
       try {
-        const userId = await AsyncStorage.getItem('userId') || 'default-user';
-        
-        console.log('Sending chat request:', {
-          endpoint: API_ENDPOINTS.CHAT,
-          model: selectedModel,
-          messageLength: userMessage.text.length,
-        });
-
         const response = await fetch(API_ENDPOINTS.CHAT, {
           method: 'POST',
           headers: {
@@ -382,11 +433,46 @@ export default function HomeScreen() {
             message: userMessage.text,
             model: selectedModel,
             userId,
+            conversationId: currentChatId, // Pass conversationId to continue existing or create new
             stream: false, // Use non-streaming for reliability
           }),
         });
 
-        console.log('Response status:', response.status);
+        // Handle quota exceeded (429)
+        if (response.status === 429) {
+          const errorData = await response.json();
+          
+          // Show quota exceeded alert
+          Alert.alert(
+            'Quota Exceeded',
+            errorData.message || 'You have exceeded your monthly token limit.',
+            [
+              { text: 'OK', style: 'cancel' },
+              { text: 'View Usage', onPress: () => {
+                // Navigate to settings to see usage
+                // @ts-ignore - navigation exists in tab context
+                navigation?.navigate?.('settings');
+              }},
+              { text: 'Upgrade Plan', onPress: () => {
+                // Navigate to pricing
+                // @ts-ignore - navigation exists in tab context
+                navigation?.navigate?.('pricing');
+              }},
+            ]
+          );
+          
+          // Update messages to show error
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === aiMessageId
+                ? { ...msg, text: `⚠️ ${errorData.message}\n\nYou've used ${errorData.usage?.percentage || '100'}% of your ${errorData.usage?.plan || 'free'} plan.\n\nPlease upgrade or wait until next month.` }
+                : msg
+            )
+          );
+          
+          setIsLoading(false);
+          return;
+        }
 
         if (!response.ok) {
           const errorText = await response.text();
@@ -395,7 +481,6 @@ export default function HomeScreen() {
         }
 
         const data = await response.json();
-        console.log('Response data:', data);
 
         const aiMessage = data.message || data.content;
         
@@ -404,14 +489,21 @@ export default function HomeScreen() {
           throw new Error('No response received from AI');
         }
 
-        // Update AI message with actual response
+        // Update AI message with actual response (including thinking data)
         setMessages(prev =>
           prev.map(msg =>
             msg.id === aiMessageId
-              ? { ...msg, text: aiMessage }
+              ? { ...msg, text: aiMessage, thinking: data.thinking || undefined }
               : msg
           )
         );
+        
+        // Update conversationId if this was a new conversation
+        if (data.conversationId && !currentChatId) {
+          setCurrentChatId(data.conversationId);
+          // Reload conversations list to show the new one
+          await loadConversations();
+        }
 
       } catch (error) {
         console.error('Chat error:', error);
@@ -449,7 +541,10 @@ export default function HomeScreen() {
           </TouchableOpacity>
 
           <View style={styles.headerCenter}>
-            <ThemedText style={styles.title}>Bridge AI</ThemedText>
+            <Text style={[
+              styles.title,
+              { color: isDark ? '#4A9EFF' : '#007AFF' }
+            ]}>Bridge AI</Text>
             
             {/* Model Selector */}
             <TouchableOpacity
@@ -492,7 +587,10 @@ export default function HomeScreen() {
                     onPress={() => setShowSidebar(false)}>
                     <IconSymbol name="chevron.left" size={20} color={isDark ? '#FFFFFF' : '#000000'} />
                   </TouchableOpacity>
-                  <ThemedText style={styles.sidebarTitle}>Bridge AI</ThemedText>
+                  <Text style={[
+                    styles.sidebarTitle,
+                    { color: isDark ? '#4A9EFF' : '#007AFF' }
+                  ]}>Bridge AI</Text>
                 </View>
                 <TouchableOpacity 
                   style={[
@@ -534,7 +632,7 @@ export default function HomeScreen() {
                             {chat.title}
                           </ThemedText>
                           <ThemedText style={styles.chatItemDate}>
-                            {new Date(chat.date).toLocaleDateString()}
+                            {new Date(chat.lastActive).toLocaleDateString()}
                           </ThemedText>
                         </View>
                         <TouchableOpacity
@@ -565,16 +663,90 @@ export default function HomeScreen() {
                   borderTopColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
                 },
               ]}>
+                <TouchableOpacity
+                  style={styles.profileButton}
+                  onPress={() => setShowProfileMenu(!showProfileMenu)}
+                  activeOpacity={0.7}>
                 <View style={styles.profilePhotoContainer}>
+                    {user?.picture ? (
                   <Image
-                    source={{ uri: 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png' }}
+                        source={{ uri: user.picture }}
                     style={styles.profilePhoto}
                   />
+                    ) : (
+                      <View style={[
+                        styles.profilePhoto,
+                        styles.profilePhotoPlaceholder,
+                        { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }
+                      ]}>
+                        <ThemedText style={styles.profileInitial}>
+                          {user?.name?.[0]?.toUpperCase() || 'U'}
+                        </ThemedText>
+                      </View>
+                    )}
                 </View>
                 <View style={styles.profileInfo}>
-                  <ThemedText style={styles.profileName}>Nevil Jobanputra</ThemedText>
-                  <ThemedText style={styles.profileEmail}>neviljobanputra34@gmail.com</ThemedText>
+                    <ThemedText style={styles.profileName} numberOfLines={1}>
+                      {user?.name || 'Guest User'}
+                    </ThemedText>
+                    {!showProfileMenu && (
+                      <ThemedText style={styles.profileHint}>Tap to view profile</ThemedText>
+                    )}
                 </View>
+                  <IconSymbol 
+                    name={showProfileMenu ? "chevron.down" : "chevron.right"} 
+                    size={16} 
+                    color={isDark ? '#A0A0A0' : '#666666'} 
+                  />
+                </TouchableOpacity>
+
+                {/* Expandable Profile Menu */}
+                {showProfileMenu && (
+                  <View style={[
+                    styles.profileMenu,
+                    {
+                      backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
+                      borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                    }
+                  ]}>
+                    <View style={styles.profileMenuItem}>
+                      <IconSymbol name="envelope" size={16} color={isDark ? '#A0A0A0' : '#666666'} />
+                      <ThemedText style={styles.profileMenuText} numberOfLines={1}>
+                        {user?.email || 'No email'}
+                      </ThemedText>
+                    </View>
+                    <TouchableOpacity
+                      style={[
+                        styles.logoutButton,
+                        {
+                          backgroundColor: isDark ? 'rgba(255, 59, 48, 0.1)' : 'rgba(255, 59, 48, 0.05)',
+                        }
+                      ]}
+                      onPress={async () => {
+                        Alert.alert(
+                          'Logout',
+                          'Are you sure you want to logout?',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Logout',
+                              style: 'destructive',
+                              onPress: async () => {
+                                await logout();
+                                setShowSidebar(false);
+                                setShowProfileMenu(false);
+                              }
+                            }
+                          ]
+                        );
+                      }}>
+                      <IconSymbol name="arrow.right.square" size={16} color="#FF3B30" />
+                      <ThemedText style={[styles.logoutButtonText, { color: '#FF3B30' }]}>
+                        Logout
+                      </ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
             </View>
             
@@ -698,13 +870,18 @@ export default function HomeScreen() {
               style={styles.messagesContainer}
               contentContainerStyle={styles.messagesContent}
               keyboardShouldPersistTaps="handled"
+              scrollEventThrottle={16}
+              nestedScrollEnabled={true}
               onContentSizeChange={() => {
-                // Scroll to end smoothly when new content is added
-                scrollViewRef.current?.scrollToEnd({ animated: true });
+                // Only auto-scroll if user is near the bottom (not when interacting with thinking dropdown)
+                // This prevents scroll when clicking thinking button
               }}>
               {messages.map((message) => (
-                <View
-                  key={message.id}
+                <View key={message.id} style={{ marginBottom: 12 }}>
+                  {!message.isUser && message.thinking && (
+                    <ThinkingProcess thinking={message.thinking} />
+                  )}
+                  <View
                   style={[
                     styles.messageBubble,
                     message.isUser ? styles.userMessage : styles.aiMessage,
@@ -718,13 +895,36 @@ export default function HomeScreen() {
                         : '#F2F2F7',
                     },
                   ]}>
-                  <ThemedText
+                  <MarkdownText
+                    text={message.text}
+                    isUser={message.isUser}
+                  />
+                  </View>
+                  <TouchableOpacity
                     style={[
-                      styles.messageText,
-                      message.isUser && { color: '#FFFFFF' },
-                    ]}>
-                    {message.text}
-                  </ThemedText>
+                      styles.copyButton,
+                      {
+                        backgroundColor: isDark ? 'rgba(128, 128, 128, 0.1)' : 'rgba(128, 128, 128, 0.05)',
+                        alignSelf: message.isUser ? 'flex-end' : 'flex-start',
+                      },
+                    ]}
+                    onPress={async () => {
+                      try {
+                        await Clipboard.setStringAsync(message.text);
+                        // Show brief feedback
+                        Alert.alert('Copied!', 'Message copied to clipboard', [{ text: 'OK' }]);
+                      } catch (error) {
+                        console.error('Failed to copy:', error);
+                        Alert.alert('Error', 'Failed to copy message');
+                      }
+                    }}
+                    activeOpacity={0.7}>
+                    <IconSymbol
+                      name="doc.on.doc"
+                      size={14}
+                      color={isDark ? '#9CA3AF' : '#6B7280'}
+                    />
+                  </TouchableOpacity>
                 </View>
               ))}
               {isLoading && (
@@ -991,13 +1191,21 @@ const styles = StyleSheet.create({
     maxWidth: '80%',
     padding: 12,
     borderRadius: 20,
-    marginBottom: 12,
   },
   userMessage: {
     alignSelf: 'flex-end',
   },
   aiMessage: {
     alignSelf: 'flex-start',
+  },
+  copyButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 4,
+    opacity: 0.7,
   },
   messageText: {
     fontSize: 16,
@@ -1169,12 +1377,14 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   profileSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 30,
     borderTopWidth: 1,
+  },
+  profileButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 10,
   },
   profilePhotoContainer: {
@@ -1188,6 +1398,14 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  profilePhotoPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profileInitial: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
   profileInfo: {
     flex: 1,
   },
@@ -1196,8 +1414,41 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 1,
   },
-  profileEmail: {
+  profileHint: {
     fontSize: 11,
     opacity: 0.5,
+    marginTop: 2,
+  },
+  profileMenu: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 10,
+  },
+  profileMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+  },
+  profileMenuText: {
+    fontSize: 13,
+    opacity: 0.7,
+    flex: 1,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    marginTop: 6,
+  },
+  logoutButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

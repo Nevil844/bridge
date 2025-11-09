@@ -3,6 +3,7 @@ import { ThemedView } from '@/components/themed-view';
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -265,18 +266,42 @@ export default function IntegrationsScreen() {
     loadUserIntegrations();
   }, []);
 
+  // Reload integrations when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      loadUserIntegrations();
+    }, [])
+  );
+
   const loadUserIntegrations = async () => {
     try {
       const userId = await AsyncStorage.getItem('userId') || 'default-user';
       const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}?userId=${userId}`);
+      
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('❌ Integrations API error:', response.status, text.substring(0, 200));
+        throw new Error(`API error: ${response.status}`);
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('❌ Non-JSON response:', text.substring(0, 200));
+        throw new Error('Server returned non-JSON response');
+      }
+      
       const data = await response.json();
       
       console.log('📡 User integrations from API:', data.integrations);
       
       // Update integrations with user's connected status
+      // Check both 'configured' and 'isActive' for backwards compatibility
       const updated = AVAILABLE_INTEGRATIONS.map(int => ({
         ...int,
-        connected: data.integrations.some((ui: UserIntegration) => ui.type === int.type && ui.configured),
+        connected: data.integrations.some((ui: any) => 
+          ui.type === int.type && (ui.configured || ui.isActive)
+        ),
       }));
       
       console.log('✅ Updated integrations state:', updated);
@@ -300,6 +325,20 @@ export default function IntegrationsScreen() {
       
       // Get OAuth URL from backend (generic endpoint)
       const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}/oauth-url?userId=${userId}`);
+      
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('❌ OAuth URL API error:', response.status, text.substring(0, 200));
+        throw new Error(`Failed to get OAuth URL: ${response.status}`);
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('❌ Non-JSON response from OAuth URL:', text.substring(0, 200));
+        throw new Error('Server returned non-JSON response');
+      }
+      
       const data = await response.json();
       
       if (data.authUrl) {
@@ -312,11 +351,23 @@ export default function IntegrationsScreen() {
           const pollInterval = setInterval(async () => {
             try {
               const integrations = await fetch(`${API_ENDPOINTS.INTEGRATIONS}?userId=${userId}`);
+              
+              if (!integrations.ok) {
+                // Don't log errors during polling - just skip this poll
+                return;
+              }
+              
+              const contentType = integrations.headers.get('content-type');
+              if (!contentType || !contentType.includes('application/json')) {
+                // Don't log errors during polling - just skip this poll
+                return;
+              }
+              
               const integrationsData = await integrations.json();
               
               // Check if this integration is now connected
               const isConnected = integrationsData.integrations.some(
-                (int: any) => int.type === integration.type && int.configured
+                (int: any) => int.type === integration.type && (int.configured || int.isActive)
               );
               
               if (isConnected) {

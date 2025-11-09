@@ -24,20 +24,103 @@ function convertMCPToolsToOpenAI(mcpTools) {
 }
 
 /**
- * Generate minimal system prompt listing available integrations
+ * Generate enhanced system prompt with structured response format
  * @param {Array} integrations - List of connected integrations
+ * @param {Object} options - Additional options (enableMemory, enableThinking)
  * @returns {string} - System prompt
  */
-function generateSystemPrompt(integrations = []) {
-  if (integrations.length === 0) {
-    return 'You are a helpful AI assistant.';
-  }
-
-  const integrationList = integrations.map(i => i.type).join(', ');
+function generateSystemPrompt(integrations = [], options = {}) {
+  const { enableMemory = false, enableThinking = true } = options;
   
-  let prompt = `You are a helpful AI assistant with access to: ${integrationList}.
+  let prompt = '';
+  
+  if (integrations.length === 0) {
+    prompt = 'You are a helpful AI assistant.';
+  } else {
+  const integrationList = integrations.map(i => i.type).join(', ');
+    prompt = `You are a helpful AI assistant with access to: ${integrationList}.
 
 When the user talks about an integration, use list_tools to discover available actions.`;
+  }
+
+  if (enableThinking) {
+    prompt += `
+
+## Response Format
+
+Use this JSON format for responses:
+
+\`\`\`json
+{
+  "internal": 0 or 1,
+  "thinking": "Your reasoning process",
+  "action": "What you did",
+  "response": "Your answer to the user",
+  "data": {}
+}
+\`\`\`
+
+## Internal Flag Usage
+
+**Use internal: 0 (HIDDEN) when:**
+- You're still thinking or planning
+- You're calling tools but don't have results yet
+- You're waiting for tool responses
+
+**Use internal: 1 (VISIBLE) ONLY when:**
+- You have the ACTUAL DATA the user asked for
+- You've verified the tool results
+- You can provide a complete answer with real information
+
+**NEVER use internal: 1 with placeholder text.**
+**ALWAYS use internal: 1 with actual data from tool results.**
+
+## Guidelines
+
+**When you have all the information needed:**
+- Set internal: 1
+- Provide a complete answer with ACTUAL DATA from tool results
+- Use "thinking" field to explain your reasoning process
+- Format the data nicely for the user
+
+**When you need more information:**
+- Set internal: 1 (it's a final response, just asking for clarification)
+- Ask the user a clarifying question
+- Explain what information you need and why
+
+**When using tools:**
+- Step 1: Set internal: 0, call the tool, wait for results
+- Step 2: Extract ALL data from tool results
+- Step 3: Verify the data is what the user asked for
+- Step 4: Set internal: 1, provide the ACTUAL DATA in the response field
+- Extract ALL information from tool results before responding
+- Use information from tool results in subsequent operations - don't ask the user for what you already have
+- If tool results contain the information you need, use it immediately
+
+**Data Verification:**
+- Always check tool results contain the requested information
+- If data is missing or incomplete, either ask for clarification OR try another tool
+- Never send empty or placeholder responses with internal: 1
+
+**Conversation continuity:**
+- You have access to conversation history, memory, and working memory (tool context)
+- Reference previous context when relevant
+- Build on earlier interactions naturally
+- Check conversation history and working memory BEFORE asking the user for any information
+- Use information you've already obtained - don't ask again
+
+The user can see your "thinking" process in an expandable section, so use it to show your reasoning transparently.`;
+  }
+
+  if (enableMemory) {
+    prompt += `
+
+## Memory Context
+
+Relevant context from past conversations has been included above.
+Use this to provide personalized, context-aware responses.
+Reference previous interactions when relevant.`;
+  }
 
   return prompt;
 }
@@ -60,9 +143,10 @@ function getIntegrationInstructions(integrationType) {
 - Only call login if a tool fails with a login error`,
 
     github: `GITHUB USAGE:
-- User is authenticated via OAuth
-- You have full access to their repositories, issues, and code
-- Use search_repositories to find repos, get_file_contents to read files`,
+- User is authenticated via OAuth - you have access to their account
+- When user says "my repo", "my commits", "my issues" - they mean items they own
+- Use information from tool results in subsequent operations
+- Check conversation history and working memory before asking for information`,
 
     gmail: `GMAIL USAGE:
 - User is authenticated via OAuth

@@ -11,40 +11,58 @@ A beautiful mobile AI chat app with dynamic MCP (Model Context Protocol) integra
 - **🌓 Dark Mode** - Automatic theme support
 - **📱 Mobile-First** - Built with React Native/Expo
 
-## 🚀 Quick Start (5 Minutes!)
+## 🚀 Quick Start
 
-### 1. Create GitHub OAuth App
+### Prerequisites
 
-1. Go to https://github.com/settings/developers
-2. Click "New OAuth App"
-3. Fill in:
-   - Name: `Bridge AI`
-   - Homepage: `http://localhost:3000`
-   - Callback: `http://localhost:3000/api/oauth/callback`
-4. Copy Client ID and Client Secret
+- Node.js 18+ and npm
+- Google Cloud Console account (for OAuth)
+- PostgreSQL database with pgvector extension
+
+### 1. Google OAuth Setup (Required for Login)
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+2. Create OAuth 2.0 Client ID (Web application)
+3. Add redirect URI: `http://localhost:3000/api/auth/google/callback`
+4. Copy your Client ID and Client Secret
+
+📖 **Detailed guide:** See [OAUTH_SETUP.md](./OAUTH_SETUP.md)
 
 ### 2. Backend Setup
 
 ```bash
 cd backend
+
+# Install dependencies
 npm install
 
-# Create .env file
-cp .env.example .env
+# Create .env file from example
+cp env.example .env
 
-# Edit .env and add your keys:
-# - OPENROUTER_API_KEY (from https://openrouter.ai/keys)
-# - GITHUB_CLIENT_ID
-# - GITHUB_CLIENT_SECRET
+# Edit .env and add:
+# - DATABASE_URL (PostgreSQL connection string)
+# - GOOGLE_AUTH_CLIENT_ID (from step 1)
+# - GOOGLE_AUTH_CLIENT_SECRET (from step 1)
+# - GEMINI_API_KEY (optional, for Gemini models)
+# - OPENROUTER_API_KEY (optional, for additional models)
 
+# Set up database and run migrations
+./scripts/setup-db.sh  # Or manually create database
+npm run migrate
+
+# Start the backend server
 npm start
 ```
 
-### 3. Mobile App
+Backend runs on `http://localhost:3000`
+
+### 3. Frontend Setup
 
 ```bash
 # From project root
 npm install
+
+# Start the development server
 npm start
 
 # Then:
