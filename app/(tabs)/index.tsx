@@ -302,6 +302,9 @@ export default function HomeScreen() {
   const transcribeAudio = async (audioUri: string) => {
     try {
       setIsLoading(true);
+      // Show immediate feedback
+      setInputText('🎤 Transcribing...');
+      
       // userId is already in state from loadUserId()
 
       // Create form data
@@ -313,25 +316,30 @@ export default function HomeScreen() {
       } as any);
       formData.append('userId', userId);
 
+      const startTime = Date.now();
       const response = await fetch(`${API_ENDPOINTS.CHAT}/transcribe`, {
         method: 'POST',
         body: formData,
       });
 
       const data = await response.json();
+      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
       if (response.ok && data.text) {
         // Set the transcribed text and send it
         setInputText(data.text);
+        console.log(`✅ Transcription completed in ${duration}s`);
         // Auto-send after transcription
         setTimeout(() => {
           handleSendWithText(data.text);
         }, 100);
       } else {
+        setInputText('');
         Alert.alert('Error', 'Failed to transcribe audio');
       }
     } catch (error) {
       console.error('Transcription error:', error);
+      setInputText('');
       Alert.alert('Error', 'Failed to transcribe audio');
     } finally {
       setIsLoading(false);

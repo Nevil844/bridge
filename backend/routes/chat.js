@@ -488,7 +488,8 @@ router.post('/', checkQuota, async (req, res) => {
 });
 
 /**
- * Speech-to-text endpoint
+ * Speech-to-text endpoint using Amazon Transcribe (BATCH - NOT REAL-TIME)
+ * For real-time transcription, use /api/transcribe/stream WebSocket endpoint
  */
 router.post('/transcribe', upload.single('audio'), async (req, res) => {
   try {
@@ -496,35 +497,207 @@ router.post('/transcribe', upload.single('audio'), async (req, res) => {
       return res.status(400).json({ error: 'No audio file provided' });
     }
 
-    console.log('Transcribing audio file:', req.file.filename);
+    console.log('Transcribing audio file with Amazon Transcribe:', req.file.filename);
 
-    // Create form data for Whisper API
-    const formData = new FormData();
-    formData.append('file', fs.createReadStream(req.file.path), {
-      filename: 'audio.m4a',
-      contentType: 'audio/m4a',
+    // Import AWS Transcribe SDK
+    const { TranscribeClient, StartTranscriptionJobCommand, GetTranscriptionJobCommand } = require('@aws-sdk/client-transcribe');
+    const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+    const { Readable } = require('stream');
+
+    // Initialize AWS clients (uses default credential chain like Bedrock)
+    const region = process.env.AWS_REGION || 'us-east-1';
+    const s3Bucket = process.env.AWS_TRANSCRIBE_S3_BUCKET || process.env.AWS_S3_BUCKET;
+    
+    const clientConfig = {
+      region: region,
+    };
+    
+    // Only set explicit credentials if env vars are provided
+    // Otherwise, SDK will use default credential chain (~/.aws/credentials, IAM role, etc.)
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      clientConfig.credentials = {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      };
+    }
+
+    const transcribeClient = new TranscribeClient(clientConfig);
+    const s3Client = new S3Client(clientConfig);
+
+    // Generate unique job name
+    const jobName = `transcribe-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    const s3Key = `transcriptions/${jobName}.m4a`;
+
+    // Upload audio file to S3 (required by Transcribe)
+    if (!s3Bucket) {
+      // If no S3 bucket, use synchronous transcription with direct file upload
+      // Note: This requires the audio file to be small (< 2MB) and in supported format
+      const audioData = fs.readFileSync(req.file.path);
+      
+      // Use Transcribe Streaming API for real-time transcription (no S3 needed)
+      // For now, we'll use a simpler approach: use AWS Transcribe with direct file
+      // But Transcribe requires S3, so we'll create a temporary approach
+      
+      // Alternative: Use Transcribe Streaming (more complex, requires WebSocket)
+      // For simplicity, let's use synchronous transcription with a small file
+      
+      throw new Error('AWS_TRANSCRIBE_S3_BUCKET or AWS_S3_BUCKET environment variable is required. Please set it in your .env file.');
+    }
+
+    // Upload to S3
+    const audioData = fs.readFileSync(req.file.path);
+    await s3Client.send(new PutObjectCommand({
+      Bucket: s3Bucket,
+      Key: s3Key,
+      Body: audioData,
+      ContentType: 'audio/m4a',
+    }));
+
+    console.log(`✅ Uploaded audio to S3: s3://${s3Bucket}/${s3Key}`);
+
+    // Start transcription job
+    const s3Uri = `s3://${s3Bucket}/${s3Key}`;
+    const startCommand = new StartTranscriptionJobCommand({
+      TranscriptionJobName: jobName,
+      Media: { MediaFileUri: s3Uri },
+      MediaFormat: 'mp4', // m4a files are treated as mp4 by Transcribe
+      LanguageCode: 'en-US', // Can be made configurable
     });
-    formData.append('model', 'whisper-1');
 
-    // Call OpenAI Whisper API
-    const response = await axios.post(
-      'https://api.openai.com/v1/audio/transcriptions',
-      formData,
-      {
-        headers: {
-          ...formData.getHeaders(),
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
+    await transcribeClient.send(startCommand);
+    console.log(`✅ Started transcription job: ${jobName}`);
+
+    // Poll for job completion (max 60 seconds)
+    // Start with shorter intervals for faster response
+    let jobStatus = 'IN_PROGRESS';
+    let attempts = 0;
+    const maxAttempts = 60; // 60 seconds max
+    let pollInterval = 500; // Start with 500ms for faster initial response
+
+    while (jobStatus === 'IN_PROGRESS' && attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      // Increase interval after first few attempts to reduce API calls
+      if (attempts > 5) {
+        pollInterval = 1000; // 1 second after initial checks
       }
-    );
+      
+      const getCommand = new GetTranscriptionJobCommand({ TranscriptionJobName: jobName });
+      const jobResult = await transcribeClient.send(getCommand);
+      jobStatus = jobResult.TranscriptionJob?.TranscriptionJobStatus || 'IN_PROGRESS';
+      
+      attempts++;
+      
+      if (jobStatus === 'COMPLETED') {
+        // Get transcription result from S3
+        const transcriptUri = jobResult.TranscriptionJob?.Transcript?.TranscriptFileUri;
+        if (!transcriptUri) {
+          throw new Error('Transcription completed but no transcript URI found');
+        }
+        
+        console.log(`📋 Transcript URI received: ${transcriptUri}`);
 
-    // Delete the uploaded file
-    fs.unlinkSync(req.file.path);
+        // Amazon Transcribe provides a PRE-SIGNED HTTPS URL when using service-managed buckets
+        // This URL is valid for 15 minutes and should be accessed directly via HTTPS
+        // If OutputBucketName was specified, it might be an S3 URI instead
+        let transcribedText;
+        
+        if (transcriptUri.startsWith('https://')) {
+          // Pre-signed HTTPS URL - use it directly (no credentials needed, valid for 15 min)
+          try {
+            console.log(`📥 Fetching transcript via pre-signed HTTPS URL...`);
+            const https = require('https');
+            
+            const transcriptData = await new Promise((resolve, reject) => {
+              const request = https.get(transcriptUri, (response) => {
+                if (response.statusCode !== 200) {
+                  reject(new Error(`Failed to fetch transcript: ${response.statusCode} ${response.statusMessage}`));
+                  return;
+                }
+                
+                let data = '';
+                response.on('data', (chunk) => {
+                  data += chunk;
+                });
+                response.on('end', () => {
+                  try {
+                    resolve(JSON.parse(data));
+                  } catch (e) {
+                    reject(new Error('Failed to parse transcript JSON: ' + e.message));
+                  }
+                });
+              });
+              
+              request.on('error', (error) => {
+                reject(error);
+              });
+              
+              request.setTimeout(15000, () => {
+                request.destroy();
+                reject(new Error('Request timeout'));
+              });
+            });
+            
+            transcribedText = transcriptData.results.transcripts[0].transcript;
+            console.log('✅ Successfully fetched transcript via pre-signed URL');
+          } catch (httpsError) {
+            console.error('❌ Failed to fetch transcript via HTTPS:', httpsError.message);
+            throw new Error(`Failed to fetch transcript: ${httpsError.message}. The pre-signed URL may have expired (valid for 15 minutes).`);
+          }
+        } else if (transcriptUri.startsWith('s3://')) {
+          // S3 URI - parse and use S3 GetObject (if OutputBucketName was specified)
+          const s3Match = transcriptUri.match(/s3:\/\/([^\/]+)\/(.+)/);
+          if (!s3Match) {
+            throw new Error('Invalid S3 URI format: ' + transcriptUri);
+          }
+          
+          const transcriptBucket = s3Match[1];
+          const transcriptKey = s3Match[2].split('?')[0]; // Remove query params
+          
+          console.log(`📥 Downloading transcript from S3: s3://${transcriptBucket}/${transcriptKey}`);
+          
+          const getObjectCommand = new GetObjectCommand({
+            Bucket: transcriptBucket,
+            Key: transcriptKey,
+          });
+          
+          const transcriptResponse = await s3Client.send(getObjectCommand);
+          const transcriptBody = await streamToString(transcriptResponse.Body);
+          const transcriptData = JSON.parse(transcriptBody);
+          
+          transcribedText = transcriptData.results.transcripts[0].transcript;
+          console.log('✅ Successfully downloaded transcript from S3');
+        } else {
+          throw new Error(`Unsupported transcript URI format: ${transcriptUri}`);
+        }
 
-    console.log('Transcription result:', response.data.text);
-    res.json({ text: response.data.text });
+        // Clean up: Delete files from S3
+        try {
+          // Delete the audio file we uploaded
+          await s3Client.send(new DeleteObjectCommand({ Bucket: s3Bucket, Key: s3Key }));
+          console.log(`✅ Cleaned up audio file from S3: ${s3Key}`);
+          
+          // Note: We don't delete the transcript from Transcribe's bucket
+          // as it's in AWS's managed bucket and will be auto-cleaned by AWS
+        } catch (cleanupError) {
+          console.warn('⚠️ Failed to cleanup S3 audio file:', cleanupError);
+        }
+
+        // Delete local file
+        fs.unlinkSync(req.file.path);
+
+        console.log('✅ Transcription result:', transcribedText);
+        res.json({ text: transcribedText });
+        return;
+      } else if (jobStatus === 'FAILED') {
+        throw new Error(jobResult.TranscriptionJob?.FailureReason || 'Transcription job failed');
+      }
+    }
+
+    if (jobStatus !== 'COMPLETED') {
+      throw new Error('Transcription job timed out');
+    }
   } catch (error) {
-    console.error('Transcription error:', error.response?.data || error.message);
+    console.error('❌ Transcription error:', error.message);
     
     // Clean up file on error
     if (req.file) {
@@ -535,10 +708,20 @@ router.post('/transcribe', upload.single('audio'), async (req, res) => {
     
     res.status(500).json({ 
       error: 'Failed to transcribe audio',
-      details: error.response?.data || error.message 
+      details: error.message 
     });
   }
 });
 
+// Helper function to convert stream to string
+async function streamToString(stream) {
+  const chunks = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString('utf-8');
+}
+
 module.exports = router;
+
 

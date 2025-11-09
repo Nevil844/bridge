@@ -1,4 +1,5 @@
 const express = require('express');
+const expressWs = require('express-ws');
 const cors = require('cors');
 require('dotenv').config();
 const appConfig = require('./config/app');
@@ -13,6 +14,7 @@ const chatRouter = require('./routes/chat');
 const modelsRouter = require('./routes/models');
 const oauthRouter = require('./routes/oauth');
 const waitlistRouter = require('./routes/waitlist');
+const { router: transcribeRouter, setupTranscribeWebSocket } = require('./routes/transcribe');
 
 // Services
 const integrationService = require('./db/services/integration');
@@ -20,6 +22,7 @@ const mcpManager = require('./mcp/manager');
 const { ensureUserIntegrationsLoaded, loadedIntegrationsCache } = require('./utils/integrationLoader');
 
 const app = express();
+const expressWsInstance = expressWs(app); // Enable WebSocket support
 const PORT = process.env.PORT || 3000;
 
 // CORS configuration
@@ -47,6 +50,10 @@ app.use('/api/models', modelsRouter);
 app.use('/api/oauth', oauthRouter);
 app.use('/api/integrations', oauthRouter); // OAuth routes also handle /api/integrations/:type/oauth-url
 app.use('/api/waitlist', waitlistRouter);
+app.use('/api/transcribe', transcribeRouter);
+
+// Setup WebSocket route for real-time transcription (must be after expressWs)
+setupTranscribeWebSocket(app);
 
 // Legacy integration endpoints (for backward compatibility)
 app.get('/api/integrations', async (req, res) => {
