@@ -111,15 +111,22 @@ class BedrockProvider {
       if (msg.role === 'system') continue;
       
       if (msg.role === 'user') {
+        // Skip user messages with empty content
+        const content = (msg.content || '').trim();
+        if (!content) {
+          console.warn('⚠️  Skipping user message with empty content');
+          continue;
+        }
         bedrockMessages.push({
           role: 'user',
-          content: msg.content || '',
+          content: content,
         });
       } else if (msg.role === 'assistant') {
         const content = [];
         
-        if (msg.content) {
-          content.push({ type: 'text', text: msg.content });
+        // Only add text content if it's non-empty
+        if (msg.content && msg.content.trim()) {
+          content.push({ type: 'text', text: msg.content.trim() });
         }
         
         if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
@@ -138,18 +145,31 @@ class BedrockProvider {
           }
         }
         
+        // Skip assistant messages with no content (no text and no tool calls)
+        if (content.length === 0) {
+          console.warn('⚠️  Skipping assistant message with no content or tool calls');
+          continue;
+        }
+        
         bedrockMessages.push({
           role: 'assistant',
-          content: content.length > 0 ? content : [{ type: 'text', text: '' }],
+          content: content,
         });
       } else if (msg.role === 'tool') {
+        // Skip tool messages with empty content
+        const toolContent = (msg.content || '').trim();
+        if (!toolContent) {
+          console.warn('⚠️  Skipping tool message with empty content');
+          continue;
+        }
+        
         bedrockMessages.push({
           role: 'user',
           content: [
             {
               type: 'tool_result',
               tool_use_id: msg.tool_call_id || 'unknown',
-              content: msg.content || '',
+              content: toolContent,
             },
           ],
         });

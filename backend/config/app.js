@@ -8,7 +8,7 @@ module.exports = {
   appName: process.env.APP_NAME || 'AI Assistant',
   
   // Default model
-  defaultModel: process.env.DEFAULT_MODEL || 'models/gemini-2.5-flash',
+  defaultModel: process.env.DEFAULT_MODEL || 'anthropic.claude-sonnet-4-20250514-v1:0',
   
   // Conversation settings
   conversation: {

@@ -1,8 +1,8 @@
 import { GlowingOrb } from '@/components/glowing-orb';
+import { MarkdownText } from '@/components/markdown-text';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ThinkingProcess } from '@/components/thinking-process';
-import { MarkdownText } from '@/components/markdown-text';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { API_ENDPOINTS } from '@/config/api';
 import { useAuth } from '@/hooks/use-auth';
@@ -60,7 +60,7 @@ export default function HomeScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('models/gemini-2.5-flash'); // Default to free model
+  const [selectedModel, setSelectedModel] = useState('anthropic.claude-sonnet-4-20250514-v1:0'); // Default to Claude Sonnet 4
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);

@@ -12,6 +12,7 @@ const authRouter = require('./routes/auth');
 const chatRouter = require('./routes/chat');
 const modelsRouter = require('./routes/models');
 const oauthRouter = require('./routes/oauth');
+const waitlistRouter = require('./routes/waitlist');
 
 // Services
 const integrationService = require('./db/services/integration');
@@ -45,6 +46,7 @@ app.use('/api/chat', chatRouter);
 app.use('/api/models', modelsRouter);
 app.use('/api/oauth', oauthRouter);
 app.use('/api/integrations', oauthRouter); // OAuth routes also handle /api/integrations/:type/oauth-url
+app.use('/api/waitlist', waitlistRouter);
 
 // Legacy integration endpoints (for backward compatibility)
 app.get('/api/integrations', async (req, res) => {

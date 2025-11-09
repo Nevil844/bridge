@@ -23,16 +23,20 @@ class ZomatoIntegration {
    */
   async connect(config) {
     // Zomato MCP server uses mcp-remote which handles OAuth internally
-    // We don't establish connection here - let getTools/callTool establish it when needed
-    // This allows mcp-remote to handle its own OAuth session
-    console.log(`✅ Zomato MCP connection prepared (mcp-remote will handle OAuth)`);
+    // If config exists, it means OAuth was already completed (stored in DB)
+    // mcp-remote should use its cached OAuth tokens, but we don't establish connection here
+    // Connection will be established lazily in getTools/callTool to avoid blocking
+    console.log(`✅ Zomato MCP connection prepared (OAuth already completed, will connect on first use)`);
     
+    // Return connection object - connection will be established lazily
+    // This prevents blocking on connect() and allows mcp-remote to handle OAuth if needed
     return { 
       client: null, 
       transport: null,
       serverUrl: this.serverUrl,
-      // Store config if provided (though MCP server doesn't use our OAuth tokens)
-      config: config || {}
+      config: config || {},
+      // Mark that OAuth was completed (config exists means integration is in DB)
+      oauthCompleted: !!config && Object.keys(config).length > 0
     };
   }
 
@@ -115,10 +119,19 @@ class ZomatoIntegration {
       connection._connecting = false; // Reset to allow retry
     }
     
+    // If OAuth was already completed (integration exists in DB), mcp-remote should use cached tokens
+    // Check if we have config indicating OAuth was completed
+    const oauthCompleted = connection.oauthCompleted || (connection.config && Object.keys(connection.config).length > 0);
+    
+    if (oauthCompleted) {
+      console.log(`✅ Zomato OAuth already completed - mcp-remote should use cached tokens`);
+    }
+    
     // Check if OAuth was recently attempted (within last 30 seconds only, not 2 minutes)
     // This prevents rapid retries but allows tools to be fetched after OAuth completes
+    // Skip this check if OAuth was already completed
     const now = Date.now();
-    if (connection._lastOAuthAttempt && (now - connection._lastOAuthAttempt) < 30000) {
+    if (!oauthCompleted && connection._lastOAuthAttempt && (now - connection._lastOAuthAttempt) < 30000) {
       console.log(`⏳ Zomato OAuth was very recently attempted, waiting a moment...`);
       // Wait a bit, then check if we have a client now
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -137,8 +150,12 @@ class ZomatoIntegration {
     }
     
     // Establish connection using mcp-remote (it handles OAuth internally)
+    // If OAuth was already completed, mcp-remote should use cached tokens and connect quickly
     connection._connecting = true;
-    connection._lastOAuthAttempt = now;
+    // Only set _lastOAuthAttempt if OAuth wasn't already completed
+    if (!oauthCompleted) {
+      connection._lastOAuthAttempt = now;
+    }
     
     try {
       console.log(`🔌 Establishing Zomato MCP connection via mcp-remote for tools discovery`);
@@ -148,6 +165,10 @@ class ZomatoIntegration {
         args: ['-y', 'mcp-remote', serverUrl],
         env: {
           ...process.env,
+          // Prevent mcp-remote from opening browser on server
+          // Browser should open on client (mobile device) instead
+          BROWSER: 'none',
+          NO_BROWSER: '1',
         },
       });
 
@@ -161,13 +182,38 @@ class ZomatoIntegration {
         }
       );
 
-      await newClient.connect(transport);
+      // Connect - mcp-remote handles its own OAuth internally
+      // It maintains its own cache separate from our DB
+      // If OAuth is needed, mcp-remote will prompt in browser
+      // We use a shorter timeout (10 seconds) to detect if OAuth is needed quickly
+      const connectPromise = newClient.connect(transport);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Connection timeout - OAuth may be required')), 10000)
+      );
+      
+      try {
+        await Promise.race([connectPromise, timeoutPromise]);
+        console.log(`✅ Zomato MCP connected successfully for tools discovery`);
+      } catch (error) {
+        // If timeout, mcp-remote is likely waiting for OAuth
+        // Since we prevented browser opening, we need to return OAuth URL to client
+        if (oauthCompleted) {
+          console.warn(`⚠️  Zomato connection timeout. mcp-remote's OAuth cache may be lost or expired.`);
+          console.warn(`    Our DB shows OAuth was completed, but mcp-remote needs its own OAuth session.`);
+          // Throw error with OAuth URL so client can open it
+          const oauthHandler = require('../../oauth/handler');
+          const authUrl = oauthHandler.getAuthUrl('zomato', connection.userId || 'default-user');
+          throw new Error(`OAuth_AUTHENTICATION_REQUIRED: Zomato OAuth is required. Please open this URL in your browser: ${authUrl}`);
+        }
+        // If OAuth wasn't completed, return OAuth URL
+        const oauthHandler = require('../../oauth/handler');
+        const authUrl = oauthHandler.getAuthUrl('zomato', connection.userId || 'default-user');
+        throw new Error(`OAuth_AUTHENTICATION_REQUIRED: Zomato OAuth is required. Please open this URL in your browser: ${authUrl}`);
+      }
       
       // Update the connection with the real client
       connection.client = newClient;
       connection.transport = transport;
-      
-      console.log(`✅ Zomato MCP connected successfully for tools discovery`);
       
       // Now get the tools from MCP server
       const response = await newClient.listTools();
@@ -191,11 +237,19 @@ class ZomatoIntegration {
         return [];
       }
       
-      // If OAuth is in progress (user needs to authenticate), return empty to avoid loops
-      if (error.message.includes('Authentication') || error.message.includes('OAuth') || error.message.includes('authorize') || error.message.includes('Please authorize')) {
-        console.log(`🔐 Zomato OAuth in progress - user needs to authenticate in browser. Returning empty tools to prevent duplicate prompts.`);
-        // Keep _lastOAuthAttempt set so we don't retry immediately
-        return [];
+      // If OAuth is in progress (user needs to authenticate), throw error with OAuth URL
+      if (error.message.includes('Authentication') || error.message.includes('OAuth') || error.message.includes('authorize') || error.message.includes('Please authorize') || error.message.includes('OAuth_AUTHENTICATION_REQUIRED')) {
+        // If error already contains OAuth URL, re-throw it
+        if (error.message.includes('OAuth_AUTHENTICATION_REQUIRED')) {
+          throw error;
+        }
+        
+        // Otherwise, generate OAuth URL and throw error
+        const oauthHandler = require('../../oauth/handler');
+        const authUrl = oauthHandler.getAuthUrl('zomato', connection.userId || 'default-user');
+        
+        console.log(`🔐 Zomato OAuth required - returning URL to client.`);
+        throw new Error(`OAuth_AUTHENTICATION_REQUIRED: Zomato OAuth is required. Please open this URL in your browser: ${authUrl}`);
       }
       
       // Reset OAuth attempt tracking on non-auth errors so we can retry
@@ -291,6 +345,10 @@ class ZomatoIntegration {
         args: ['-y', 'mcp-remote', serverUrl],
         env: {
           ...process.env,
+          // Prevent mcp-remote from opening browser on server
+          // Browser should open on client (mobile device) instead
+          BROWSER: 'none',
+          NO_BROWSER: '1',
         },
       });
 

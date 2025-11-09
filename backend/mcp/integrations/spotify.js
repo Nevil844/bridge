@@ -328,7 +328,7 @@ class SpotifyIntegration {
         }
         
         
-        // Check if there's an active device
+        // Check if there's an active device and get current playback state
         const deviceResult = await connection.client.callTool({
           name: 'SpotifyPlayback',
           arguments: { 
@@ -343,7 +343,15 @@ class SpotifyIntegration {
           };
         }
         
-        // Add the track to the queue first
+        // Ensure playback is active (resume if paused)
+        const resumeResult = await connection.client.callTool({
+          name: 'SpotifyPlayback',
+          arguments: { 
+            action: 'resume'
+          }
+        });
+        
+        // Add the track to the queue
         const queueResult = await connection.client.callTool({
           name: 'SpotifyQueue',
           arguments: { 
@@ -359,19 +367,34 @@ class SpotifyIntegration {
           };
         }
         
-        // Then skip to the next track (our new track)
-        const playResult = await connection.client.callTool({
+        // Wait a brief moment for queue to update
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Skip to the next track (our newly queued track) to play it immediately
+        const skipResult = await connection.client.callTool({
           name: 'SpotifyPlayback',
           arguments: { 
             action: 'skip'
           }
         });
         
-        if (playResult.isError) {
-          return {
-            isError: true,
-            content: `Playback failed: ${playResult.content?.[0]?.text || 'Unknown error'}`
-          };
+        if (skipResult.isError) {
+          // If skip fails, try to play the track directly using track URI
+          console.log(`⚠️ Skip failed, trying direct play with track URI...`);
+          const directPlayResult = await connection.client.callTool({
+            name: 'SpotifyPlayback',
+            arguments: { 
+              action: 'play',
+              track_uri: `spotify:track:${trackId}`
+            }
+          });
+          
+          if (directPlayResult.isError) {
+            return {
+              isError: true,
+              content: `Failed to play track: ${directPlayResult.content?.[0]?.text || 'Unknown error'}`
+            };
+          }
         }
         
         return {

@@ -292,7 +292,8 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   codeBlock: {
-    padding: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderRadius: 8,
     marginVertical: 8,
     overflow: 'hidden',
@@ -300,6 +301,7 @@ const styles = StyleSheet.create({
   codeBlockText: {
     fontFamily: 'monospace',
     fontSize: 14,
+    lineHeight: 20,
   },
   h1: {
     fontSize: 24,
