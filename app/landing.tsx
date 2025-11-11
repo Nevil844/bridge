@@ -8,32 +8,32 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Image,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
-    useWindowDimensions,
-    View
+  ActivityIndicator,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
+  View
 } from 'react-native';
 import Animated, {
-    cancelAnimation,
-    Easing,
-    Extrapolation,
-    FadeIn,
-    FadeInDown,
-    FadeInUp,
-    interpolate,
-    useAnimatedScrollHandler,
-    useAnimatedStyle,
-    useSharedValue,
-    withDelay,
-    withRepeat,
-    withSequence,
-    withSpring,
-    withTiming
+  cancelAnimation,
+  Easing,
+  Extrapolation,
+  FadeIn,
+  FadeInDown,
+  FadeInUp,
+  interpolate,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming
 } from 'react-native-reanimated';
 
 /**
@@ -411,8 +411,8 @@ export default function LandingScreen() {
                   { icon: 'link', title: 'Smart Integrations', description: 'GitHub, Zomato, Spotify, Zerodha — all connected seamlessly' },
                   { icon: 'gearshape.fill', title: 'Task Automation', description: 'Order food, manage code, trade stocks — all through AI' },
                   { icon: 'shield.fill', title: 'Privacy First', description: 'End‑to‑end encryption with OAuth 2.0 security' },
-                  { icon: 'bolt.fill', title: 'Lightning Fast', description: 'Claude Sonnet 4 & Gemini 2.5 Flash for instant responses' },
-                  { icon: 'sparkles', title: 'Transparent Reasoning', description: 'Explainable, multi‑step task plans (no sensitive data exposed)' },
+                  { icon: 'bolt.fill', title: 'Lightning Fast', description: 'Anthropic, OpenAI & Gemini models for instant responses' },
+                  { icon: 'sparkles', title: 'Transparent Reasoning', description: 'Explainable, multi‑step task plans' },
                 ].map((feature, index) => (
                   <AnimatedFeatureCard
                     key={index}
