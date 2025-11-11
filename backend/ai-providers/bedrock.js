@@ -29,6 +29,7 @@ class BedrockProvider {
    */
   getModels() {
     return [
+      { id: 'anthropic.claude-sonnet-4-5-20250929-v1:0', name: 'Claude Sonnet 3.5', tier: 'premium' },
       { id: 'anthropic.claude-sonnet-4-20250514-v1:0', name: 'Claude Sonnet 4', tier: 'premium' },
       { id: 'anthropic.claude-3-5-sonnet-20241022-v2:0', name: 'Claude 3.5 Sonnet', tier: 'premium' },
       { id: 'anthropic.claude-3-opus-20240229-v1:0', name: 'Claude 3 Opus', tier: 'premium' },

@@ -83,6 +83,14 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     logo: 'https://logo.clearbit.com/zomato.com',
     description: 'Discover restaurants, browse menus, create carts, and place food orders.',
   },
+  {
+    id: 'jira',
+    name: 'Jira',
+    type: 'jira',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Jira_Logo.svg/150px-Jira_Logo.svg.png',
+    description: 'Create and manage issues, projects, workflows, and more.',
+  },
 ];
 
 const UPCOMING_INTEGRATIONS: Integration[] = [
@@ -241,15 +249,7 @@ const UPCOMING_INTEGRATIONS: Integration[] = [
     connected: false,
     logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/LinkedIn_logo_initials.png/150px-LinkedIn_logo_initials.png',
     description: 'Manage your professional network, share content, and grow your career.',
-  },
-  {
-    id: 'jira',
-    name: 'Jira',
-    type: 'jira',
-    connected: false,
-    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Jira_Logo.svg/150px-Jira_Logo.svg.png',
-    description: 'Create issues, manage projects, and track development progress.',
-  },
+  }
 ];
 
 export default function IntegrationsScreen() {

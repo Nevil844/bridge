@@ -409,6 +409,25 @@ export default function HomeScreen() {
     }
   };
 
+  const handleRetry = (messageIndex: number) => {
+    if (isLoading) {
+      Alert.alert('Please wait', 'Your previous request is still processing.');
+      return;
+    }
+
+    const previousUserMessage = [...messages]
+      .slice(0, messageIndex)
+      .reverse()
+      .find((msg) => msg.isUser);
+
+    if (!previousUserMessage) {
+      Alert.alert('Retry Unavailable', 'No previous user message found to retry.');
+      return;
+    }
+
+    handleSendWithText(previousUserMessage.text);
+  };
+
   const handleSend = async () => {
     if (inputText.trim() && !isLoading) {
       const userMessage: Message = {
@@ -520,7 +539,7 @@ export default function HomeScreen() {
             msg.id === aiMessageId
               ? { 
                   ...msg, 
-                  text: `Error: ${error instanceof Error ? error.message : 'Could not connect to server'}\n\nMake sure the backend is running on ${API_ENDPOINTS.CHAT}` 
+                  text: `Something went wrong. Please try again.` 
                 }
               : msg
           )
@@ -908,31 +927,49 @@ export default function HomeScreen() {
                     isUser={message.isUser}
                   />
                   </View>
-                  <TouchableOpacity
+                  <View
                     style={[
-                      styles.copyButton,
-                      {
-                        backgroundColor: isDark ? 'rgba(128, 128, 128, 0.1)' : 'rgba(128, 128, 128, 0.05)',
-                        alignSelf: message.isUser ? 'flex-end' : 'flex-start',
-                      },
-                    ]}
-                    onPress={async () => {
-                      try {
-                        await Clipboard.setStringAsync(message.text);
-                        // Show brief feedback
-                        Alert.alert('Copied!', 'Message copied to clipboard', [{ text: 'OK' }]);
-                      } catch (error) {
-                        console.error('Failed to copy:', error);
-                        Alert.alert('Error', 'Failed to copy message');
-                      }
-                    }}
-                    activeOpacity={0.7}>
-                    <IconSymbol
-                      name="doc.on.doc"
-                      size={14}
-                      color={isDark ? '#9CA3AF' : '#6B7280'}
-                    />
-                  </TouchableOpacity>
+                      styles.messageActions,
+                      { alignSelf: message.isUser ? 'flex-end' : 'flex-start' },
+                    ]}>
+                    <TouchableOpacity
+                      style={[
+                        styles.actionButton,
+                        { backgroundColor: isDark ? 'rgba(128, 128, 128, 0.1)' : 'rgba(128, 128, 128, 0.05)' },
+                      ]}
+                      onPress={async () => {
+                        try {
+                          await Clipboard.setStringAsync(message.text);
+                          // Show brief feedback
+                          Alert.alert('Copied!', 'Message copied to clipboard', [{ text: 'OK' }]);
+                        } catch (error) {
+                          console.error('Failed to copy:', error);
+                          Alert.alert('Error', 'Failed to copy message');
+                        }
+                      }}
+                      activeOpacity={0.7}>
+                      <IconSymbol
+                        name="doc.on.doc"
+                        size={14}
+                        color={isDark ? '#9CA3AF' : '#6B7280'}
+                      />
+                    </TouchableOpacity>
+                    {!message.isUser && (
+                      <TouchableOpacity
+                        style={[
+                          styles.actionButton,
+                          { backgroundColor: isDark ? 'rgba(128, 128, 128, 0.1)' : 'rgba(128, 128, 128, 0.05)' },
+                        ]}
+                        onPress={() => handleRetry(messages.indexOf(message))}
+                        activeOpacity={0.7}>
+                        <IconSymbol
+                          name="arrow.clockwise"
+                          size={14}
+                          color={isDark ? '#9CA3AF' : '#6B7280'}
+                        />
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
               ))}
               {isLoading && (
@@ -1206,13 +1243,17 @@ const styles = StyleSheet.create({
   aiMessage: {
     alignSelf: 'flex-start',
   },
-  copyButton: {
+  messageActions: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 4,
+  },
+  actionButton: {
     width: 28,
     height: 28,
     borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 4,
     opacity: 0.7,
   },
   messageText: {

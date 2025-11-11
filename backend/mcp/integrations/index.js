@@ -9,6 +9,7 @@ const GmailIntegration = require('./gmail.js');
 const ZerodhaIntegration = require('./zerodha.js');
 const SpotifyIntegration = require('./spotify.js');
 const ZomatoIntegration = require('./zomato.js');
+const JiraIntegration = require('./jira.js');
 
 // Available integrations
 // Add new integrations here as you create them
@@ -55,6 +56,13 @@ const integrations = {
     icon: 'https://logo.clearbit.com/zomato.com',
     authType: 'oauth',
   },
+  jira: {
+    class: JiraIntegration,
+    name: 'Jira',
+    description: 'Create and manage issues, projects, workflows, and more',
+    icon: 'https://wac-cdn.atlassian.com/assets/img/favicons/atlassian/favicon-32x32.png',
+    authType: 'oauth', // Uses Atlassian Remote MCP Server with OAuth (recommended)
+  },
   // Future integrations:
   // slack: {
   //   class: SlackIntegration,
@@ -62,13 +70,6 @@ const integrations = {
   //   description: 'Send messages, read channels, and manage your workspace',
   //   icon: 'https://...',
   //   authType: 'oauth',
-  // },
-  // jira: {
-  //   class: JiraIntegration,
-  //   name: 'Jira',
-  //   description: 'Create and manage issues, projects, and workflows',
-  //   icon: 'https://...',
-  //   authType: 'api_key',
   // },
 };
 

@@ -115,6 +115,7 @@ router.get('/callback', async (req, res) => {
     );
 
     // Add to MCP manager (for immediate use)
+    // This will establish the connection with the new OAuth tokens
     await mcpManager.addIntegration(userId, integrationType, config);
     
     // Update cache to include this new integration
@@ -122,6 +123,9 @@ router.get('/callback', async (req, res) => {
       loadedIntegrationsCache.set(userId, new Set());
     }
     loadedIntegrationsCache.get(userId).add(integrationType);
+    
+    // Invalidate tools cache to force refresh
+    mcpManager.invalidateToolsCache(userId);
 
     console.log(`✅ ${integrationType} integration added successfully!`);
 

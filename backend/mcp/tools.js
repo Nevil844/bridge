@@ -178,6 +178,13 @@ function getIntegrationInstructions(integrationType) {
   This is the ONLY tool you should use for playing songs.
   It will automatically search and play the song in one step.`,
 
+    jira: `JIRA USAGE:
+    - User is authenticated with JIRA
+    - Common tasks: search or view issues, update fields, add comments, transition workflow states
+    - Use working memory to remember issue keys, project keys, and account IDs you have already retrieved
+    - JQL queries MUST include a restriction (e.g., "project = KAN" or "assignee = currentUser()") - unbounded queries are not allowed
+    - Use the appropriate tools when performing tasks`,
+
     zomato: `ZOMATO USAGE:
 - User is authenticated via OAuth (handled internally by mcp-remote)
 - Search restaurants, browse menus, manage cart, and place orders
