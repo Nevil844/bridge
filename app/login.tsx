@@ -1,23 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import { GlowingOrb } from '@/components/glowing-orb';
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
+import { API_ENDPOINTS } from '@/config/api';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { secureStorage, storage, STORAGE_KEYS } from '@/utils/storage';
+import * as WebBrowser from 'expo-web-browser';
+import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
   ActivityIndicator,
   Alert,
-  Platform,
   Image,
   Linking,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import * as WebBrowser from 'expo-web-browser';
-import { ThemedView } from '@/components/themed-view';
-import { ThemedText } from '@/components/themed-text';
-import { GlowingOrb } from '@/components/glowing-orb';
-import { useColorScheme } from '@/hooks/use-color-scheme';
-import { API_ENDPOINTS } from '@/config/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { storage, secureStorage, STORAGE_KEYS } from '@/utils/storage';
 
 // Complete web browser authentication when done
 WebBrowser.maybeCompleteAuthSession();
@@ -370,11 +369,16 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
       // MOBILE TEST MODE: Auto-login with existing user credentials
       // Skip OAuth flow on mobile for testing
-      const TEST_EMAIL = 'neviljobanputra34@gmail.com';
+      // Platform-specific test emails: iOS = nevil, Android = kushal
+      const TEST_EMAIL = Platform.OS === 'ios' 
+        ? 'neviljobanputra34@gmail.com' 
+        : Platform.OS === 'android' 
+        ? 'kushalnandha26@gmail.com' 
+        : null;
       const IS_MOBILE = Platform.OS !== 'web';
       
       if (IS_MOBILE && TEST_EMAIL) {
-        console.log('📱 MOBILE TEST MODE: Auto-logging in with', TEST_EMAIL);
+        console.log(`📱 MOBILE TEST MODE (${Platform.OS}): Auto-logging in with`, TEST_EMAIL);
         
         try {
           // Fetch user by email from backend

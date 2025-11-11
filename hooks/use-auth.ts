@@ -1,6 +1,7 @@
 import { API_ENDPOINTS } from '@/config/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 
 export interface User {
   id: string;
@@ -72,11 +73,15 @@ export function useAuth() {
       
       // TEST MODE: Auto-login with existing user for mobile testing
       // Only runs if NO userId in storage AND user hasn't explicitly logged out
-      // Set to null to disable test mode
-      const TEST_MODE_EMAIL = 'neviljobanputra34@gmail.com';
+      // Platform-specific test emails: iOS = nevil, Android = kushal
+      const TEST_MODE_EMAIL = Platform.OS === 'ios' 
+        ? 'neviljobanputra34@gmail.com' 
+        : Platform.OS === 'android' 
+        ? 'kushalnandha26@gmail.com' 
+        : null;
       
       if (TEST_MODE_EMAIL && !storedUserId && !hasExplicitlyLoggedOut) {
-        console.log('🧪 TEST MODE: Auto-logging in with', TEST_MODE_EMAIL);
+        console.log(`🧪 TEST MODE (${Platform.OS}): Auto-logging in with`, TEST_MODE_EMAIL);
         
         // Fetch user by email from backend
         const response = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${TEST_MODE_EMAIL}`);
