@@ -73,14 +73,9 @@ router.post('/', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const total = await prisma.waitlist.count();
-    const notified = await prisma.waitlist.count({
-      where: { notified: true },
-    });
 
     res.json({
       total,
-      notified,
-      pending: total - notified,
     });
   } catch (error) {
     console.error('❌ Error fetching waitlist stats:', error);

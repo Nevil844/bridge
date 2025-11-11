@@ -175,7 +175,6 @@ model Waitlist {
   id        String   @id @default(cuid())
   email     String   @unique
   createdAt DateTime @default(now())
-  notified  Boolean  @default(false) // Track if user was notified about launch
 
   @@index([email])
   @@index([createdAt])

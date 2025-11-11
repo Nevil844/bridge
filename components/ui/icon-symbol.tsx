@@ -33,6 +33,9 @@ const MAPPING = {
   'arrow.clockwise': 'refresh',
   // Pricing icons
   'checkmark.circle.fill': 'check-circle',
+  // Alert icons
+  'exclamationmark.triangle.fill': 'warning',
+  'info.circle.fill': 'info',
   // Thinking process icons
   'brain': 'psychology',
   'chevron.up': 'keyboard-arrow-up',
@@ -42,6 +45,12 @@ const MAPPING = {
   'arrow.up': 'arrow-upward',
   'stop.circle.fill': 'stop-circle',
   'doc.on.doc': 'content-copy',
+  // Landing page icons
+  'shield.fill': 'shield',
+  'bolt.fill': 'bolt',
+  'sparkles': 'auto-awesome',
+  'lock.fill': 'lock',
+  'arrow.right': 'arrow-forward',
 } as IconMapping;
 
 /**

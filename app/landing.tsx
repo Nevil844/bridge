@@ -1,3 +1,4 @@
+import { CustomAlert } from '@/components/custom-alert';
 import { GlowingOrb } from '@/components/glowing-orb';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -8,16 +9,17 @@ import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
+    Image,
     KeyboardAvoidingView,
     Platform,
     StyleSheet,
     TextInput,
     TouchableOpacity,
     useWindowDimensions,
-    View,
+    View
 } from 'react-native';
 import Animated, {
+    cancelAnimation,
     Easing,
     Extrapolation,
     FadeIn,
@@ -27,9 +29,11 @@ import Animated, {
     useAnimatedScrollHandler,
     useAnimatedStyle,
     useSharedValue,
+    withDelay,
     withRepeat,
     withSequence,
-    withTiming,
+    withSpring,
+    withTiming
 } from 'react-native-reanimated';
 
 /**
@@ -42,14 +46,183 @@ import Animated, {
  * - Accessible, responsive for mobile/web/tablet
  */
 
+interface LogoItem {
+  name: string;
+  logo: string;
+}
+
+/**
+ * Animated Feature Card Component
+ */
+function AnimatedFeatureCard({ 
+  feature, 
+  index, 
+  isDark, 
+  isMobile, 
+  isWeb 
+}: { 
+  feature: { icon: string; title: string; description: string }; 
+  index: number; 
+  isDark: boolean; 
+  isMobile: boolean; 
+  isWeb: boolean;
+}) {
+  const scale = useSharedValue(0);
+  const opacity = useSharedValue(0);
+  const translateY = useSharedValue(30);
+  
+  useEffect(() => {
+    // Sequential animation - each card animates after the previous one
+    const delay = index * 150; // 150ms delay between each card
+    
+    scale.value = withDelay(
+      delay,
+      withSpring(1, {
+        damping: 12,
+        stiffness: 100,
+      })
+    );
+    opacity.value = withDelay(
+      delay,
+      withTiming(1, { duration: 400 })
+    );
+    translateY.value = withDelay(
+      delay,
+      withSpring(0, {
+        damping: 12,
+        stiffness: 100,
+      })
+    );
+  }, [index]);
+  
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: scale.value },
+      { translateY: translateY.value },
+    ],
+    opacity: opacity.value,
+  }));
+  
+  return (
+    <Animated.View
+      style={[
+        styles.featureCard,
+        animatedStyle,
+        {
+          backgroundColor: isDark ? 'rgba(39,39,42,0.4)' : 'rgba(255,255,255,0.7)',
+          borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+          width: isMobile ? '100%' : isWeb ? '30%' : '48%',
+          maxWidth: isWeb ? 350 : undefined,
+        },
+      ]}
+    >
+      <View style={[styles.featureIconContainer, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
+        <IconSymbol name={feature.icon as any} size={22} color={isDark ? '#FFFFFF' : '#0F172A'} />
+      </View>
+      <ThemedText type="defaultSemiBold" style={[styles.featureTitle, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>
+        {feature.title}
+      </ThemedText>
+      <ThemedText style={[styles.featureDescription, { color: isDark ? '#A1A1AA' : '#64748B' }]}>
+        {feature.description}
+      </ThemedText>
+    </Animated.View>
+  );
+}
+
+/**
+ * Horizontal scrolling logos carousel component
+ */
+function AnimatedLogosCarousel({ logos, isDark }: { logos: LogoItem[]; isDark: boolean }) {
+  const translateX = useSharedValue(0);
+  const logoWidth = 120;
+  const logoSpacing = 24;
+  
+  // Memoize singleSetWidth to prevent unnecessary recalculations
+  const singleSetWidth = React.useMemo(
+    () => (logoWidth + logoSpacing) * logos.length,
+    [logos.length]
+  );
+  
+  useEffect(() => {
+    // Cancel any existing animation first to prevent accumulation
+    cancelAnimation(translateX);
+    
+    // Reset to 0 before starting new animation
+    translateX.value = 0;
+    
+    // Create infinite loop animation
+    // The animation will automatically reset to 0 after each cycle due to `false` parameter
+    translateX.value = withRepeat(
+      withTiming(-singleSetWidth, {
+        duration: 20000, // 20 seconds for one set
+        easing: Easing.linear,
+      }),
+      -1, // Infinite repeat
+      false // Reset to start (0) after each cycle
+    );
+    
+    return () => {
+      // Cancel animation on unmount or when dependencies change
+      cancelAnimation(translateX);
+      translateX.value = 0;
+    };
+  }, [singleSetWidth]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
+  // Duplicate logos 3 times for seamless infinite loop
+  // When first set scrolls out, second set is already in view
+  const duplicatedLogos = React.useMemo(() => [...logos, ...logos, ...logos], [logos]);
+
+  return (
+    <View style={styles.logoScrollWrapper}>
+      <Animated.View style={[styles.logoScrollContent, animatedStyle]}>
+        {duplicatedLogos.map((logo, index) => (
+          <View
+            key={`${logo.name}-${index}`}
+            style={[
+              styles.logoItem,
+              {
+                width: logoWidth,
+                marginRight: logoSpacing,
+                backgroundColor: isDark ? 'rgba(28,28,30,0.55)' : 'rgba(255,255,255,0.8)',
+                borderColor: isDark ? 'rgba(148,163,184,0.15)' : 'rgba(148,163,184,0.25)',
+              },
+            ]}
+          >
+            <Image
+              source={{ uri: logo.logo }}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
+          </View>
+        ))}
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function LandingScreen() {
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertType, setAlertType] = useState<'success' | 'error' | 'info'>('info');
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { width, height } = useWindowDimensions();
   const isWeb = Platform.OS === 'web';
   const isMobile = width < 768;
+
+  const showAlert = (title: string, message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertType(type);
+    setAlertVisible(true);
+  };
 
   // Layout memo
   const maxWidth = isWeb ? 1200 : width;
@@ -114,12 +287,16 @@ export default function LandingScreen() {
   // CTA logic
   const handleJoinWaitlist = async () => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!email.trim()) {
-      Alert.alert('Email Required', 'Please enter your email address.');
+    const trimmedEmail = email.trim();
+    
+    // Validate email - show popup if invalid
+    if (!trimmedEmail) {
+      showAlert('Enter Valid Email', 'Please enter your email address.', 'error');
       return;
     }
-    if (!emailRegex.test(email.trim())) {
-      Alert.alert('Invalid Email', 'Please enter a valid email address.');
+    
+    if (!emailRegex.test(trimmedEmail)) {
+      showAlert('Enter Valid Email', 'Please enter a valid email address.', 'error');
       return;
     }
 
@@ -134,24 +311,22 @@ export default function LandingScreen() {
       const data = await response.json();
 
       if (response.ok) {
-        Alert.alert(
-          '🎉 Welcome to the Future!',
-          "You've been added to the waitlist. Get ready for an AI experience like no other!",
-          [{ text: 'Awesome!', onPress: () => setEmail('') }]
-        );
+        // Clear email field immediately
+        setEmail('');
+        // Show success popup
+        showAlert('Added to Waitlist', "You've been added to the waitlist!", 'success');
       } else {
         if (data?.error?.includes('already exists')) {
-          Alert.alert(
-            '👋 We Remember You!',
-            "You're already on our exclusive waitlist. We'll notify you the moment we launch!"
-          );
+          // Clear email field even if already exists
+          setEmail('');
+          showAlert('Added to Waitlist', "You're already on our waitlist!", 'success');
         } else {
-          Alert.alert('Error', data?.error || 'Failed to join waitlist. Please try again.');
+          showAlert('Error', data?.error || 'Failed to join waitlist. Please try again.', 'error');
         }
       }
     } catch (error) {
       console.error('Error joining waitlist:', error);
-      Alert.alert('Connection Error', 'Unable to connect. Please check your internet and try again.');
+      showAlert('Connection Error', 'Unable to connect. Please check your internet and try again.', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -159,24 +334,16 @@ export default function LandingScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      {/* Ambient animated gradient background */}
+      {/* Times New Roman is a system font, no import needed */}
+      
+      {/* Clean minimal background */}
       <Animated.View style={StyleSheet.absoluteFill} pointerEvents="none">
-        <LinearGradient
-          colors={isDark ? ['#06080F', '#0E1633', '#0B1024'] : ['#EEF6FF', '#F4F7FF', '#FFFFFF']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFill}
-        />
-        {/* Soft noise overlay (simulated with semi-transparent layer) */}
         <View
           style={{
             ...StyleSheet.absoluteFillObject,
-            backgroundColor: isDark ? `rgba(8,12,24,${bgOverlayOpacity})` : `rgba(255,255,255,${bgOverlayOpacity})`,
+            backgroundColor: isDark ? '#09090B' : '#FAFAFA',
           }}
         />
-        {/* Floating blobs */}
-        <Animated.View style={[styles.blob, { top: -80, left: -60 }, floatStyle]} />
-        <Animated.View style={[styles.blobAlt, { bottom: -60, right: -40 }, pulseStyle]} />
       </Animated.View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
@@ -197,122 +364,96 @@ export default function LandingScreen() {
               </Animated.View>
 
               <Animated.View entering={FadeInUp.duration(900).delay(350)} style={styles.titleContainer}>
-                <LinearGradient
-                  colors={isDark ? ['#87C7FF', '#4A9EFF', '#87C7FF'] : ['#007AFF', '#5B8CFF', '#007AFF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.titleGradient}
+                <ThemedText 
+                  type="title" 
+                  style={[
+                    styles.heroTitle, 
+                    { 
+                      fontSize: isMobile ? 48 : 64, 
+                      color: isDark ? '#FFFFFF' : '#0F172A',
+                      fontFamily: isWeb ? '"Times New Roman", Times, serif' : undefined,
+                      fontWeight: isWeb ? '400' : '700',
+                      letterSpacing: isWeb ? 1 : 2,
+                      marginBottom: 32,
+                    }
+                  ]}
                 >
-                  <ThemedText type="title" style={[styles.heroTitle, { color: isDark ? '#EAF2FF' : '#FFFFFF' }]}>
-                    Bridge AI
-                  </ThemedText>
-                </LinearGradient>
-                <ThemedText style={[styles.heroSubtitle, { color: isDark ? '#E6EEFF' : '#0F172A' }]}>Your AI‑Powered Digital Assistant</ThemedText>
+                  Bridge AI
+                </ThemedText>
+                <ThemedText style={[styles.heroSubtitle, { color: isDark ? '#A1A1AA' : '#64748B' }]}>
+                  Your AI‑Powered Digital Assistant
+                </ThemedText>
               </Animated.View>
 
               <Animated.View entering={FadeIn.duration(900).delay(500)} style={styles.taglineContainer}>
-                <ThemedText style={[styles.tagline, { maxWidth: isMobile ? '100%' : 720, color: isDark ? '#C7D4F8' : '#334155' }]}>
+                <ThemedText style={[styles.tagline, { maxWidth: isMobile ? '100%' : 640, color: isDark ? '#D4D4D8' : '#475569' }]}>
                   Connect all your apps, automate your tasks, and unlock the full potential of AI with seamless integrations, advanced memory, and intelligent automation.
                 </ThemedText>
               </Animated.View>
             </Animated.View>
 
-            {/* Stats */}
-            <Animated.View entering={FadeInUp.duration(700).delay(750)} style={[styles.statsSection, { flexDirection: isMobile ? 'column' : 'row' }]}>
-              {[
-                { icon: 'link', number: '10+', label: 'Integrations', color: '#4ECDC4' },
-                { icon: 'bolt.fill', number: '1M+', label: 'AI Calls', color: '#FFD93D' },
-                { icon: 'brain', number: '∞', label: 'Possibilities', color: '#8B5CF6' },
-              ].map((stat, index) => (
-                <Animated.View
-                  key={index}
-                  entering={FadeIn.duration(550).delay(900 + index * 120)}
-                  style={[
-                    styles.statCard,
-                    {
-                      backgroundColor: isDark ? 'rgba(28,28,30,0.6)' : 'rgba(255,255,255,0.65)',
-                      borderColor: stat.color + '40',
-                      flex: isMobile ? undefined : 1,
-                      width: isMobile ? '100%' : undefined,
-                    },
-                  ]}
-                >
-                  <View style={[styles.statIconContainer, { backgroundColor: stat.color + '20' }]}> 
-                    <IconSymbol name={stat.icon as any} size={32} color={stat.color} />
-                  </View>
-                  <ThemedText style={[styles.statNumber, { color: isDark ? '#EAF2FF' : '#0F172A' }]}>{stat.number}</ThemedText>
-                  <ThemedText style={[styles.statLabel, { color: isDark ? '#A9B7D9' : '#475569' }]}>{stat.label}</ThemedText>
-                </Animated.View>
-              ))}
-            </Animated.View>
-
             {/* Features */}
-            <Animated.View entering={FadeInUp.duration(700).delay(1100)} style={styles.featuresSection}>
-              <ThemedText type="title" style={[styles.sectionTitle, { fontSize: isMobile ? 28 : 36, color: isDark ? '#EAF2FF' : '#0F172A' }]}>Powerful Features</ThemedText>
-              <ThemedText style={[styles.sectionSubtitle, { color: isDark ? '#A9B7D9' : '#64748B' }]}>Everything you need in one intelligent platform</ThemedText>
+            <Animated.View entering={FadeInUp.duration(700).delay(750)} style={styles.featuresSection}>
+              <ThemedText type="title" style={[styles.sectionTitle, { fontSize: isMobile ? 28 : 36, color: isDark ? '#FFFFFF' : '#0F172A' }]}>
+                Powerful Features
+              </ThemedText>
+              <ThemedText style={[styles.sectionSubtitle, { color: isDark ? '#A1A1AA' : '#64748B' }]}>
+                Everything you need in one intelligent platform
+              </ThemedText>
 
-              <View style={[styles.featuresGrid, { flexDirection: isMobile ? 'column' : 'row' }]}> 
+              <View style={[styles.featuresGrid, { 
+                flexDirection: isMobile ? 'column' : 'row',
+                flexWrap: 'wrap',
+                justifyContent: isWeb ? 'space-between' : 'center',
+              }]}>
                 {[
-                  { icon: 'brain', title: 'Advanced Memory', description: 'Semantic search with pgvector for context‑aware conversations', color: '#FF6B6B', gradient: ['#FF6B6B', '#EE5A6F'] },
-                  { icon: 'link', title: 'Smart Integrations', description: 'GitHub, Zomato, Spotify, Zerodha — all connected seamlessly', color: '#4ECDC4', gradient: ['#4ECDC4', '#45B7D1'] },
-                  { icon: 'gearshape.fill', title: 'Task Automation', description: 'Order food, manage code, trade stocks — all through AI', color: '#FFD93D', gradient: ['#FFD93D', '#FFC107'] },
-                  { icon: 'shield.fill', title: 'Privacy First', description: 'End‑to‑end encryption with OAuth 2.0 security', color: '#95E1D3', gradient: ['#95E1D3', '#6DD5D5'] },
-                  { icon: 'bolt.fill', title: 'Lightning Fast', description: 'Claude Sonnet 4 & Gemini 2.5 Flash for instant responses', color: '#A8E6CF', gradient: ['#A8E6CF', '#7ED8B7'] },
-                  { icon: 'sparkles', title: 'Transparent Reasoning', description: 'Explainable, multi‑step task plans (no sensitive data exposed)', color: '#FF9AA2', gradient: ['#FFB6C1', '#FF9AA2'] },
+                  { icon: 'brain', title: 'Advanced Memory', description: 'Semantic search with pgvector for context‑aware conversations' },
+                  { icon: 'link', title: 'Smart Integrations', description: 'GitHub, Zomato, Spotify, Zerodha — all connected seamlessly' },
+                  { icon: 'gearshape.fill', title: 'Task Automation', description: 'Order food, manage code, trade stocks — all through AI' },
+                  { icon: 'shield.fill', title: 'Privacy First', description: 'End‑to‑end encryption with OAuth 2.0 security' },
+                  { icon: 'bolt.fill', title: 'Lightning Fast', description: 'Claude Sonnet 4 & Gemini 2.5 Flash for instant responses' },
+                  { icon: 'sparkles', title: 'Transparent Reasoning', description: 'Explainable, multi‑step task plans (no sensitive data exposed)' },
                 ].map((feature, index) => (
-                  <Animated.View
+                  <AnimatedFeatureCard
                     key={index}
-                    entering={FadeInUp.duration(550).delay(1300 + index * 90)}
-                    style={[
-                      styles.featureCard,
-                      {
-                        backgroundColor: isDark ? 'rgba(28,28,30,0.55)' : 'rgba(255,255,255,0.8)',
-                        borderColor: isDark ? '#2E3A55' : '#E5EAF6',
-                        width: isMobile ? '100%' : '48%',
-                        shadowColor: feature.color,
-                      },
-                    ]}
-                  >
-                    <LinearGradient colors={[feature.gradient[0], feature.gradient[1]]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.featureIconContainer}>
-                      <IconSymbol name={feature.icon as any} size={28} color="#FFF" />
-                    </LinearGradient>
-                    <ThemedText type="defaultSemiBold" style={[styles.featureTitle, { color: isDark ? '#EAF2FF' : '#0F172A' }]}>{feature.title}</ThemedText>
-                    <ThemedText style={[styles.featureDescription, { color: isDark ? '#B6C4E6' : '#475569' }]}>{feature.description}</ThemedText>
-                  </Animated.View>
+                    feature={feature}
+                    index={index}
+                    isDark={isDark}
+                    isMobile={isMobile}
+                    isWeb={isWeb}
+                  />
                 ))}
               </View>
             </Animated.View>
 
-            {/* Integrations */}
+            {/* Integrations - Horizontal Scrolling Logos */}
             <Animated.View entering={FadeInUp.duration(700).delay(1700)} style={styles.integrationsSection}>
-              <ThemedText type="defaultSemiBold" style={[styles.sectionTitle, { fontSize: isMobile ? 24 : 32, color: isDark ? '#EAF2FF' : '#0F172A' }]}>Works With Your Favorite Apps</ThemedText>
-              <View style={[styles.integrationsGrid, { justifyContent: isMobile ? 'space-around' : 'center' }]}>
-                {[
-                  { name: 'GitHub', icon: 'chevron.left.forwardslash.chevron.right', color: '#6e5494' },
-                  { name: 'Zomato', icon: 'cart.fill', color: '#E23744' },
-                  { name: 'Spotify', icon: 'music.note', color: '#1DB954' },
-                  { name: 'Zerodha', icon: 'chart.line.uptrend.xyaxis', color: '#387ED1' },
-                  { name: 'Drive', icon: 'folder.fill', color: '#4285F4' },
-                  { name: 'Slack', icon: 'message.fill', color: '#4A154B' },
-                ].map((integration, index) => (
-                  <Animated.View
-                    key={index}
-                    entering={FadeIn.duration(500).delay(1850 + index * 80)}
-                    style={[
-                      styles.integrationCard,
-                      {
-                        backgroundColor: isDark ? 'rgba(28,28,30,0.55)' : 'rgba(255,255,255,0.8)',
-                        width: isMobile ? (width - contentPadding * 2 - 24) / 3 : 148,
-                        borderColor: 'rgba(148,163,184,0.25)'
-                      },
-                    ]}
-                  >
-                    <View style={[styles.integrationIconBg, { backgroundColor: integration.color + '20' }]}>
-                      <IconSymbol name={integration.icon as any} size={isMobile ? 28 : 36} color={integration.color} />
-                    </View>
-                    <ThemedText style={[styles.integrationName, { color: isDark ? '#D9E6FF' : '#334155' }]}>{integration.name}</ThemedText>
-                  </Animated.View>
-                ))}
+              <ThemedText type="title" style={[styles.sectionTitle, { fontSize: isMobile ? 28 : 36, color: isDark ? '#FFFFFF' : '#0F172A' }]}>
+                Works With Your Favorite Apps
+              </ThemedText>
+              <ThemedText style={[styles.sectionSubtitle, { color: isDark ? '#A1A1AA' : '#64748B', marginBottom: 32 }]}>
+                Seamlessly connect with the tools you use every day
+              </ThemedText>
+              
+              {/* Horizontal Scrolling Logos */}
+              <View style={styles.logoScrollContainer}>
+                <AnimatedLogosCarousel 
+                  logos={[
+                    { name: 'GitHub', logo: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png' },
+                    { name: 'Google Drive', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/da/Google_Drive_logo.png/240px-Google_Drive_logo.png' },
+                    { name: 'Gmail', logo: 'https://www.gstatic.com/images/branding/product/1x/gmail_2020q4_48dp.png' },
+                    { name: 'Zerodha', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/Zerodha_logo.svg/150px-Zerodha_logo.svg.png' },
+                    { name: 'Spotify', logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png' },
+                    { name: 'Zomato', logo: 'https://logo.clearbit.com/zomato.com' },
+                    { name: 'Jira', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Jira_Logo.svg/150px-Jira_Logo.svg.png' },
+                    { name: 'Slack', logo: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png' },
+                    { name: 'Notion', logo: 'https://www.notion.so/images/logo-ios.png' },
+                    { name: 'AWS', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/93/Amazon_Web_Services_Logo.svg/300px-Amazon_Web_Services_Logo.svg.png' },
+                    { name: 'Discord', logo: 'https://cdn-icons-png.flaticon.com/512/5968/5968756.png' },
+                    { name: 'LinkedIn', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/LinkedIn_logo_initials.png/150px-LinkedIn_logo_initials.png' },
+                  ]}
+                  isDark={isDark}
+                />
               </View>
             </Animated.View>
 
@@ -360,9 +501,9 @@ export default function LandingScreen() {
                     </View>
 
                     <TouchableOpacity
-                      style={[styles.joinButton, { opacity: isLoading || !email ? 0.6 : 1 }]}
+                      style={[styles.joinButton, { opacity: isLoading ? 0.6 : 1 }]}
                       onPress={handleJoinWaitlist}
-                      disabled={isLoading || !email}
+                      disabled={isLoading}
                       accessibilityRole="button"
                       accessibilityLabel="Join the waitlist"
                     >
@@ -390,12 +531,20 @@ export default function LandingScreen() {
             {/* Footer */}
             <Animated.View entering={FadeIn.duration(700).delay(2300)} style={styles.footerSection}>
               <View style={[styles.footerDivider, { backgroundColor: isDark ? 'rgba(148,163,184,0.15)' : 'rgba(148,163,184,0.25)' }]} />
-              <ThemedText style={[styles.footerText, { color: isDark ? '#A9B7D9' : '#64748B' }]}>Built with ❤️ using Claude Sonnet 4 & React Native</ThemedText>
-              <ThemedText style={[styles.footerSubtext, { color: isDark ? '#91A3CC' : '#94A3B8' }]}>© 2025 Bridge AI. All rights reserved.</ThemedText>
+              <ThemedText style={[styles.footerSubtext, { color: isDark ? '#91A3CC' : '#94A3B8' }]}>© 2025 Bridge. All rights reserved.</ThemedText>
             </Animated.View>
           </View>
         </Animated.ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Custom Alert Modal */}
+      <CustomAlert
+        visible={alertVisible}
+        title={alertTitle}
+        message={alertMessage}
+        type={alertType}
+        onClose={() => setAlertVisible(false)}
+      />
     </ThemedView>
   );
 }
@@ -426,49 +575,39 @@ const styles = StyleSheet.create({
   },
 
   // Hero
-  heroSection: { alignItems: 'center', marginBottom: 72 },
-  orbContainer: { marginBottom: 36 },
-  titleContainer: { alignItems: 'center', marginBottom: 14 },
-  titleGradient: { borderRadius: 18, paddingHorizontal: 28, paddingVertical: 10, marginBottom: 10, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 8 },
-  heroTitle: { fontSize: 56, fontWeight: '800', letterSpacing: -0.5 },
-  heroSubtitle: { fontSize: 22, fontWeight: '700', opacity: 0.95, textAlign: 'center' },
-  taglineContainer: { paddingHorizontal: 20, alignItems: 'center' },
-  tagline: { fontSize: 18, opacity: 0.8, textAlign: 'center', lineHeight: 28 },
-
-  // Stats
-  statsSection: { gap: 16, marginBottom: 88 },
-  statCard: {
-    padding: 28,
-    borderRadius: 20,
-    alignItems: 'center',
-    borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.1,
-    shadowRadius: 16,
-    elevation: 6,
-  },
-  statIconContainer: { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', marginBottom: 14 },
-  statNumber: { fontSize: 40, fontWeight: '800', marginBottom: 6, letterSpacing: -0.5 },
-  statLabel: { fontSize: 15, fontWeight: '700', opacity: 0.7 },
+  heroSection: { alignItems: 'center', marginBottom: 80 },
+  orbContainer: { marginBottom: 40 },
+  titleContainer: { alignItems: 'center', marginBottom: 12 },
+  heroTitle: { fontSize: 64, fontWeight: '400', letterSpacing: 2, textAlign: 'center' },
+  heroSubtitle: { fontSize: 18, fontWeight: '400', textAlign: 'center' },
+  taglineContainer: { paddingHorizontal: 20, alignItems: 'center', marginTop: 24 },
+  tagline: { fontSize: 16, textAlign: 'center', lineHeight: 24, fontWeight: '400' },
 
   // Features
-  featuresSection: { marginBottom: 92 },
-  sectionTitle: { fontWeight: '800', textAlign: 'center', marginBottom: 10 },
-  sectionSubtitle: { fontSize: 18, textAlign: 'center', marginBottom: 40 },
-  featuresGrid: { flexWrap: 'wrap', gap: 22 },
+  featuresSection: { marginBottom: 96, width: '100%' },
+  sectionTitle: { fontWeight: '600', textAlign: 'center', marginBottom: 12 },
+  sectionSubtitle: { fontSize: 16, textAlign: 'center', marginBottom: 48, fontWeight: '400' },
+  featuresGrid: { 
+    flexWrap: 'wrap', 
+    gap: 20,
+    width: '100%',
+  },
   featureCard: {
     padding: 24,
-    borderRadius: 20,
+    borderRadius: 12,
     borderWidth: 1,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
-    elevation: 8,
+    alignItems: 'flex-start',
   },
-  featureIconContainer: { width: 56, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 18 },
-  featureTitle: { fontSize: 20, marginBottom: 8 },
-  featureDescription: { fontSize: 15, lineHeight: 22 },
+  featureIconContainer: { 
+    width: 48, 
+    height: 48, 
+    borderRadius: 10, 
+    justifyContent: 'center', 
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  featureTitle: { fontSize: 17, marginBottom: 8, fontWeight: '600' },
+  featureDescription: { fontSize: 14, lineHeight: 20, fontWeight: '400' },
 
   // Integrations
   integrationsSection: { marginBottom: 92, alignItems: 'center' },
@@ -487,6 +626,36 @@ const styles = StyleSheet.create({
   },
   integrationIconBg: { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center' },
   integrationName: { fontSize: 14, fontWeight: '700' },
+  
+  // Logo Carousel
+  logoScrollContainer: { width: '100%', overflow: 'hidden', marginTop: 20 },
+  logoScrollWrapper: { 
+    height: 100, 
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  logoScrollContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: '100%',
+  },
+  logoItem: {
+    height: 80,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 12,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  logoImage: {
+    width: '100%',
+    height: '100%',
+  },
 
   // Waitlist
   waitlistSection: { marginBottom: 76 },
