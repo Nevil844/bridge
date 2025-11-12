@@ -174,10 +174,12 @@ model TokenUsage {
 model Waitlist {
   id        String   @id @default(cuid())
   email     String   @unique
+  isInvited Boolean  @default(false) // If true, user can access the app
   createdAt DateTime @default(now())
 
   @@index([email])
   @@index([createdAt])
+  @@index([isInvited])
   @@map("waitlist")
 }
 

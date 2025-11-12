@@ -83,5 +83,45 @@ router.get('/', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/waitlist/check
+ * Check if an email is invited
+ */
+router.get('/check', async (req, res) => {
+  try {
+    const { email } = req.query;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const waitlistEntry = await prisma.waitlist.findUnique({
+      where: { email: email.toLowerCase().trim() },
+      select: {
+        email: true,
+        isInvited: true,
+        createdAt: true,
+      },
+    });
+
+    if (!waitlistEntry) {
+      return res.json({
+        exists: false,
+        isInvited: false,
+      });
+    }
+
+    res.json({
+      exists: true,
+      isInvited: waitlistEntry.isInvited,
+      email: waitlistEntry.email,
+      createdAt: waitlistEntry.createdAt,
+    });
+  } catch (error) {
+    console.error('❌ Error checking waitlist:', error);
+    res.status(500).json({ error: 'Failed to check waitlist' });
+  }
+});
+
 module.exports = router;
 

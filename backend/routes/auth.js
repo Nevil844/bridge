@@ -1,10 +1,12 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
+const { PrismaClient } = require('@prisma/client');
 const userService = require('../db/services/user');
 const integrationService = require('../db/services/integration');
 const appConfig = require('../config/app');
 
 const router = express.Router();
+const prisma = new PrismaClient();
 
 // Store pending auth states (in production, use Redis or database)
 const pendingAuthStates = new Map();
@@ -186,6 +188,21 @@ router.get('/google/callback', async (req, res) => {
     
     const tokenData = await googleAuth.exchangeCodeForToken(code);
     const userInfo = await googleAuth.getUserInfo(tokenData.accessToken);
+
+    // Check if user is invited (invite-only mode)
+    const waitlistEntry = await prisma.waitlist.findUnique({
+      where: { email: userInfo.email.toLowerCase().trim() },
+    });
+
+    if (!waitlistEntry || !waitlistEntry.isInvited) {
+      console.log(`🚫 Access denied for ${userInfo.email} - not invited`);
+      return res.status(403).send(createErrorPage(
+        'Access Restricted',
+        'This app is currently invite-only. Please join the waitlist and wait for an invitation.'
+      ));
+    }
+
+    console.log(`✅ User ${userInfo.email} is invited, proceeding with login`);
 
     // Create or update user in database
     const user = await userService.getOrCreateUser(userInfo.email, userInfo.email);

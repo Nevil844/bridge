@@ -388,6 +388,21 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             const userData = await userResponse.json();
             console.log('✅ Test user loaded:', userData);
             
+            // Check if user is invited (invite-only mode)
+            const inviteCheck = await fetch(`${API_ENDPOINTS.WAITLIST}/check?email=${encodeURIComponent(TEST_EMAIL)}`);
+            if (inviteCheck.ok) {
+              const inviteData = await inviteCheck.json();
+              if (!inviteData.isInvited) {
+                Alert.alert(
+                  'Access Restricted',
+                  'This app is currently invite-only. Please join the waitlist and wait for an invitation.',
+                  [{ text: 'OK' }]
+                );
+                setIsLoading(false);
+                return;
+              }
+            }
+            
             // Store user ID
             await storage.setItem(STORAGE_KEYS.USER_ID, userData.id);
             
