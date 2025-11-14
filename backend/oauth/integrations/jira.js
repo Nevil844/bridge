@@ -129,6 +129,64 @@ class JiraOAuth {
   }
 
   /**
+   * Refresh access token using refresh token
+   * @param {string} refreshToken - Refresh token
+   * @returns {Promise<Object>} - New access token and expiry
+   */
+  async refreshAccessToken(refreshToken) {
+    if (!this.clientId || !this.clientSecret) {
+      throw new Error('JIRA client ID and secret are required for token refresh');
+    }
+
+    const axios = require('axios');
+    
+    try {
+      console.log('🔄 Refreshing JIRA access token...');
+      const response = await axios.post(
+        'https://auth.atlassian.com/oauth/token',
+        {
+          grant_type: 'refresh_token',
+          client_id: this.clientId,
+          client_secret: this.clientSecret,
+          refresh_token: refreshToken,
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      console.log('✅ Successfully refreshed JIRA access token');
+      return {
+        accessToken: response.data.access_token,
+        refreshToken: response.data.refresh_token || refreshToken, // Use new refresh token if provided, otherwise keep old one
+        expiresIn: response.data.expires_in,
+      };
+    } catch (error) {
+      console.error('❌ JIRA token refresh error:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        message: error.message,
+      });
+      
+      // Provide helpful error messages
+      if (error.response?.status === 400) {
+        const errorData = error.response.data;
+        if (errorData.error === 'invalid_grant') {
+          throw new Error('Invalid refresh token. The token may have expired or been revoked. Please re-authenticate.');
+        }
+        if (errorData.error === 'invalid_client') {
+          throw new Error('Invalid client credentials. Please check your ATLASSIAN_CLIENT_ID and ATLASSIAN_CLIENT_SECRET in .env');
+        }
+      }
+      
+      throw new Error(`Failed to refresh JIRA access token: ${error.response?.data?.error_description || error.message}`);
+    }
+  }
+
+  /**
    * Validate configuration
    * @returns {boolean} - True if configured (or using mcp-remote)
    */

@@ -192,7 +192,13 @@ class MCPManager {
           console.log(`  ✅ ${integrationData.name}: ${integrationTools.length} tools`);
           tools.push(...integrationTools);
         } catch (error) {
-          console.error(`  ❌ ${integrationData.name}: Failed to get tools - ${error.message}`);
+          // Handle OAuth errors gracefully - integration exists but needs OAuth
+          if (error.message && error.message.includes('OAuth_AUTHENTICATION_REQUIRED')) {
+            console.log(`  ⚠️  ${integrationData.name}: OAuth authentication required`);
+            // Don't add tools, but don't treat as fatal error
+          } else {
+            console.error(`  ❌ ${integrationData.name}: Failed to get tools - ${error.message}`);
+          }
         }
       } else {
         console.log(`  ⚠️  ${integrationData.name}: No active connection`);
@@ -235,7 +241,13 @@ class MCPManager {
           console.log(`  ✅ ${integrationData.name}: ${tools.length} tools`);
           allTools.push(...tools);
         } catch (error) {
-          console.error(`  ❌ Error listing tools for ${integrationData.type}:`, error.message);
+          // Handle OAuth errors gracefully - integration exists but needs OAuth
+          if (error.message && error.message.includes('OAuth_AUTHENTICATION_REQUIRED')) {
+            console.log(`  ⚠️  ${integrationData.name}: OAuth authentication required`);
+            // Don't add tools, but don't treat as fatal error
+          } else {
+            console.error(`  ❌ Error listing tools for ${integrationData.type}:`, error.message);
+          }
         }
       } else {
         console.warn(`  ⚠️  ${integrationData.name}: No active connection`);
@@ -302,7 +314,12 @@ class MCPManager {
             break;
           }
         } catch (error) {
-          // Silently skip integrations that can't list tools
+          // Handle OAuth errors - these are expected for lazy connections
+          if (error.message && error.message.includes('OAuth_AUTHENTICATION_REQUIRED')) {
+            // OAuth required - skip this integration for now
+            continue;
+          }
+          // Silently skip integrations that can't list tools for other reasons
           continue;
         }
       }

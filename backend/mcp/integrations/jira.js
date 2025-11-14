@@ -46,9 +46,12 @@ class JiraIntegration {
       // Check if we have OAuth tokens (accessToken or token indicates OAuth completed)
       const hasOAuthTokens = !!(config.accessToken || config.token || (config.refreshToken && config.accessToken));
       
-      // console.log(`✅ JIRA MCP connection prepared (OAuth via Atlassian Remote MCP Server, will connect on first use)`);
-      // console.log(`   OAuth tokens present: ${hasOAuthTokens ? 'Yes' : 'No'}`);
-      // console.log(`   Config keys: ${config ? Object.keys(config).join(', ') : 'none'}`);
+      console.log(`✅ JIRA MCP connection prepared (OAuth via Atlassian Remote MCP Server, will connect on first use)`);
+      console.log(`   OAuth tokens present: ${hasOAuthTokens ? 'Yes' : 'No'}`);
+      console.log(`   Config keys: ${config ? Object.keys(config).join(', ') : 'none'}`);
+      if (config.token) console.log(`   Has accessToken (as 'token'): Yes`);
+      if (config.accessToken) console.log(`   Has accessToken: Yes`);
+      if (config.refreshToken) console.log(`   Has refreshToken: Yes`);
       
       return {
         client: null,
@@ -134,12 +137,15 @@ class JiraIntegration {
       const hasOAuthTokens = connection.config && (connection.config.accessToken || connection.config.token || (connection.config.refreshToken && connection.config.accessToken));
       const oauthCompleted = connection.oauthCompleted || hasOAuthTokens;
       
-      // console.log(`🔍 JIRA OAuth status check:`, {
-      //   oauthCompleted: connection.oauthCompleted,
-      //   hasOAuthTokens: hasOAuthTokens,
-      //   configKeys: connection.config ? Object.keys(connection.config).join(', ') : 'none',
-      //   finalStatus: oauthCompleted
-      // });
+      console.log(`🔍 JIRA OAuth status check:`, {
+        oauthCompleted: connection.oauthCompleted,
+        hasOAuthTokens: hasOAuthTokens,
+        configKeys: connection.config ? Object.keys(connection.config).join(', ') : 'none',
+        hasToken: !!(connection.config?.token),
+        hasAccessToken: !!(connection.config?.accessToken),
+        hasRefreshToken: !!(connection.config?.refreshToken),
+        finalStatus: oauthCompleted
+      });
       
       // Prevent multiple simultaneous connection attempts
       if (connection._connecting) {

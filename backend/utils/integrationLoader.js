@@ -1,5 +1,6 @@
 const mcpManager = require('../mcp/manager');
 const integrationService = require('../db/services/integration');
+const integrationRegistry = require('../mcp/integrations/index.js');
 
 // Lazy load user integrations on-demand (multi-tenant friendly)
 // Cache loaded integrations in memory to avoid repeated DB queries
@@ -20,6 +21,17 @@ async function ensureUserIntegrationsLoaded(userId) {
     
     for (const integration of integrations) {
       if (integration.isActive) {
+        // Skip "google-auth" - it's just OAuth credentials, not an MCP integration
+        if (integration.provider === 'google-auth') {
+          continue;
+        }
+        
+        // Only load integrations that are registered in the integration registry
+        if (!integrationRegistry[integration.provider]) {
+          console.log(`⚠️  Skipping ${integration.provider} - not a registered MCP integration`);
+          continue;
+        }
+        
         try {
           await mcpManager.addIntegration(userId, integration.provider, integration.credentials);
           loadedProviders.add(integration.provider);
