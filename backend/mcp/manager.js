@@ -25,8 +25,18 @@ class MCPManager {
     try {
       const dbIntegrations = await integrationService.getUserIntegrations(userId);
       // Convert database format to manager format
+      // Filter out non-MCP integrations (like "google-auth" which is just OAuth, not an MCP tool)
+      // Only include integrations that are registered in the integration registry
       return dbIntegrations
         .filter(int => int.isActive)
+        .filter(int => {
+          // Exclude "google-auth" - it's just OAuth, not an MCP integration
+          if (int.provider === 'google-auth') {
+            return false;
+          }
+          // Only include integrations that are registered in the integration registry
+          return integrationRegistry[int.provider] !== undefined;
+        })
         .map(int => ({
           id: int.id,
           type: int.provider,
