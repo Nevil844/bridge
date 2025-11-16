@@ -114,7 +114,15 @@ class SpotifyIntegration {
       expires_at: Math.floor(Date.now() / 1000) + 3600, // Current time + 1 hour
     };
 
-    fs.writeFileSync(cacheFile, JSON.stringify(cacheData));
+    fs.writeFileSync(cacheFile, JSON.stringify(cacheData, null, 2));
+    
+    // Ensure the cache file has correct permissions (readable by the Python process)
+    try {
+      fs.chmodSync(cacheFile, 0o600); // Read/write for owner only
+    } catch (e) {
+      // chmod might fail on some systems, that's okay
+    }
+    
     console.log(`📝 Created Spotify cache at: ${cacheFile}`);
     
     return cacheFile;
@@ -133,12 +141,27 @@ class SpotifyIntegration {
       
       // Try to find processes (works on Unix-like systems)
       try {
-        const { stdout } = await execAsync('pgrep -f "spotify-mcp" || true');
-        const pids = stdout.trim().split('\n').filter(pid => pid);
+        // Kill spotify-mcp processes
+        const { stdout: spotifyPids } = await execAsync('pgrep -f "spotify-mcp" || true');
+        const pids = spotifyPids.trim().split('\n').filter(pid => pid);
         
-        if (pids.length > 0) {
-          console.log(`🧹 Cleaning up ${pids.length} existing Spotify MCP process(es)...`);
-          for (const pid of pids) {
+        // Also check for processes using common OAuth callback ports (8000-9000 range)
+        // The Python server might start an OAuth callback server on a random port
+        let portPids = [];
+        try {
+          // Check for processes listening on ports that might be OAuth callback servers
+          // Common ports: 8080, 8888, 3000, etc.
+          const { stdout: lsofOutput } = await execAsync('lsof -ti:8080,8888,3000,8000,8001,8002,8003,8004,8005 2>/dev/null || true');
+          portPids = lsofOutput.trim().split('\n').filter(pid => pid);
+        } catch (e) {
+          // lsof might not be available, that's okay
+        }
+        
+        const allPids = [...new Set([...pids, ...portPids])]; // Remove duplicates
+        
+        if (allPids.length > 0) {
+          console.log(`🧹 Cleaning up ${allPids.length} existing Spotify MCP process(es)...`);
+          for (const pid of allPids) {
             try {
               process.kill(parseInt(pid), 'SIGTERM');
               // Force kill after 1 second if still running
@@ -154,7 +177,7 @@ class SpotifyIntegration {
             }
           }
           // Wait a bit for processes to die
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       } catch (error) {
         // pgrep not available or no processes found, that's okay
@@ -210,13 +233,68 @@ class SpotifyIntegration {
       const refreshToken = config.refreshToken || '';
       const userId = config.userId || 'default-user';
       
+      // Validate and refresh token if needed before creating cache file
+      // This prevents the Python server from trying to start its own OAuth flow
+      let validAccessToken = accessToken;
+      let validRefreshToken = refreshToken;
+      
+      // Try to refresh token if we have a refresh token and the access token might be expired
+      // Use a timeout to prevent blocking if the API is slow
+      if (refreshToken && this.clientId && this.clientSecret) {
+        try {
+          const SpotifyOAuth = require('../../oauth/integrations/spotify.js');
+          const spotifyOAuth = new SpotifyOAuth();
+          
+          // Check if token needs refresh by attempting to validate it
+          // If validation fails, refresh it
+          // Use a timeout to prevent blocking
+          const validationPromise = spotifyOAuth.validateToken(accessToken);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Validation timeout')), 3000)
+          );
+          
+          try {
+            await Promise.race([validationPromise, timeoutPromise]);
+            console.log('✅ Spotify access token is valid');
+          } catch (validationError) {
+            // Token might be expired, try to refresh it
+            console.log('⚠️  Spotify access token validation failed, refreshing...');
+            try {
+              const refreshPromise = spotifyOAuth.refreshAccessToken(refreshToken);
+              const refreshTimeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Refresh timeout')), 5000)
+              );
+              const refreshResult = await Promise.race([refreshPromise, refreshTimeoutPromise]);
+              validAccessToken = refreshResult.accessToken;
+              console.log('✅ Spotify access token refreshed successfully');
+            } catch (refreshError) {
+              console.log('⚠️  Could not refresh token, using existing token:', refreshError.message);
+              // Continue with existing token - spotipy will handle refresh if needed
+            }
+          }
+        } catch (error) {
+          console.log('⚠️  Token validation/refresh failed, using existing token:', error.message);
+          // Continue with existing token - spotipy will handle refresh if needed
+        }
+      }
+      
       // Create spotipy cache file with our tokens
-      const cacheFile = this.createSpotifyCache(accessToken, refreshToken, userId);
+      const cacheFile = this.createSpotifyCache(validAccessToken, validRefreshToken, userId);
+      
+      // Ensure cache file path is absolute (spotipy requires absolute paths)
+      const absoluteCacheFile = path.resolve(cacheFile);
+      
+      // Verify cache file exists and is readable
+      if (!fs.existsSync(absoluteCacheFile)) {
+        throw new Error(`Cache file was not created: ${absoluteCacheFile}`);
+      }
       
       // Add uvx to PATH for this process
       const uvPath = path.join(os.homedir(), '.local', 'bin');
       const envPath = process.env.PATH || '';
       const newPath = `${uvPath}:${envPath}`;
+
+      console.log(`🔧 Starting Spotify MCP with cache file: ${absoluteCacheFile}`);
 
       const transport = new StdioClientTransport({
         command: 'uvx',
@@ -231,7 +309,7 @@ class SpotifyIntegration {
           SPOTIFY_CLIENT_ID: this.clientId,
           SPOTIFY_CLIENT_SECRET: this.clientSecret,
           SPOTIFY_REDIRECT_URI: 'http://127.0.0.1:3000/api/oauth/callback',
-          SPOTIPY_CACHE_PATH: cacheFile,
+          SPOTIPY_CACHE_PATH: absoluteCacheFile, // Use absolute path
         },
       });
 
