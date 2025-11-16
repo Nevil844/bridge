@@ -241,7 +241,37 @@ class JiraIntegration {
         
         console.error('❌ Error connecting to JIRA remote MCP:', error.message);
         
-        // Return OAuth URL on any connection error
+        // Catch mcp-remote errors (browser opening failures, port errors, etc.)
+        // These indicate OAuth is needed - return OAuth URL like Zerodha does
+        if (error.message.includes('Cannot read properties of null') || 
+            error.message.includes('port') ||
+            error.message.includes('Browser') ||
+            error.message.includes('Connection closed') ||
+            error.message.includes('Fatal error')) {
+          
+          // Get OAuth URL
+          let oauthUrl;
+          try {
+            const oauthHandler = require('../../oauth/handler');
+            oauthUrl = oauthHandler.getAuthUrl('jira', connection.userId || 'default-user');
+            console.log(`✅ JIRA OAuth credentials found`);
+            console.log(`🔐 JIRA OAuth URL generation:`, {
+              clientId: process.env.ATLASSIAN_CLIENT_ID ? process.env.ATLASSIAN_CLIENT_ID.substring(0, 10) + '...' : 'NOT SET',
+              redirectUri: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
+              scope: 'read:jira-work write:jira-work read:jira-user offline_access'
+            });
+            console.log(`✅ Generated JIRA OAuth URL: ${oauthUrl}`);
+            console.log(`⚠️  IMPORTANT: Make sure this redirect_uri matches EXACTLY in Atlassian Developer Console:`);
+            console.log(`    https://api.bridge.neviljobanputra.com/api/oauth/callback`);
+          } catch (e) {
+            oauthUrl = 'https://auth.atlassian.com/authorize';
+          }
+          
+          // Return error in format that AI can show to user with link
+          throw new Error(`OAuth_AUTHENTICATION_REQUIRED: ${oauthUrl}`);
+        }
+        
+        // For other errors, also return OAuth URL as fallback
         let oauthUrl;
         try {
           const oauthHandler = require('../../oauth/handler');
@@ -323,13 +353,18 @@ class JiraIntegration {
         oauthUrl = 'https://auth.atlassian.com/authorize';
       }
       
+      // Return error in format that AI can show to user with link (like Zerodha)
       return {
         isError: true,
-        content: JSON.stringify({
-          error: 'OAuth_AUTHENTICATION_REQUIRED',
-          message: 'JIRA authentication is in progress. Please complete OAuth flow.',
-          oauthUrl: oauthUrl
-        })
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            error: 'OAuth_AUTHENTICATION_REQUIRED',
+            message: `JIRA authentication is required. Please click this link to authorize: ${oauthUrl}`,
+            oauthUrl: oauthUrl,
+            instructions: 'Click the link above to complete JIRA authentication, then try your request again.'
+          })
+        }]
       };
     }
 
@@ -340,22 +375,33 @@ class JiraIntegration {
       console.error(`❌ Error calling JIRA tool ${toolName}:`, error.message);
       
       // Check if it's an OAuth error
-      if (error.message.includes('OAuth') || error.message.includes('authentication')) {
+      if (error.message.includes('OAuth') || error.message.includes('authentication') || error.message.includes('OAuth_AUTHENTICATION_REQUIRED')) {
         let oauthUrl;
-        try {
-          const oauthHandler = require('../../oauth/handler');
-          oauthUrl = oauthHandler.getAuthUrl('jira', connection.userId || 'default-user');
-        } catch (e) {
-          oauthUrl = 'https://auth.atlassian.com/authorize';
+        
+        // Extract OAuth URL from error message if present
+        if (error.message.includes('OAuth_AUTHENTICATION_REQUIRED:')) {
+          oauthUrl = error.message.split('OAuth_AUTHENTICATION_REQUIRED:')[1].trim();
+        } else {
+          try {
+            const oauthHandler = require('../../oauth/handler');
+            oauthUrl = oauthHandler.getAuthUrl('jira', connection.userId || 'default-user');
+          } catch (e) {
+            oauthUrl = 'https://auth.atlassian.com/authorize';
+          }
         }
         
+        // Return error in format that AI can show to user with link (like Zerodha)
         return {
           isError: true,
-          content: JSON.stringify({
-            error: 'OAuth_AUTHENTICATION_REQUIRED',
-            message: 'JIRA authentication is in progress. Please complete OAuth flow.',
-            oauthUrl: oauthUrl
-          })
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'OAuth_AUTHENTICATION_REQUIRED',
+              message: `JIRA authentication is required. Please click this link to authorize: ${oauthUrl}`,
+              oauthUrl: oauthUrl,
+              instructions: 'Click the link above to complete JIRA authentication, then try your request again.'
+            })
+          }]
         };
       }
       
