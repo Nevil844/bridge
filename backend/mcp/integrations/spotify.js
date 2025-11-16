@@ -128,9 +128,13 @@ class SpotifyIntegration {
     ].filter(name => name !== cacheFileName);
     
     // ALSO create in the default spotipy location (~/.cache-{username})
-    // spotipy might look here by default
+    // spotipy looks here by default if SPOTIPY_CACHE_PATH is not set
     const defaultCacheDir = os.homedir();
     const defaultCacheFile = path.join(defaultCacheDir, cacheFileName);
+    
+    // ALSO create in current working directory (spotipy might look here too)
+    // This is a fallback in case SPOTIPY_CACHE_PATH doesn't work
+    const cwdCacheFile = path.join(process.cwd(), cacheFileName);
     
     // spotipy cache format - must match exactly what spotipy expects
     // Note: expires_at should be a timestamp (seconds since epoch), not relative
@@ -162,12 +166,22 @@ class SpotifyIntegration {
     }
     
     // ALSO write to default spotipy location (home directory)
-    // spotipy might look here by default if SPOTIPY_CACHE_PATH is not set or not working
+    // spotipy looks here by default if SPOTIPY_CACHE_PATH is not set
     try {
       fs.writeFileSync(defaultCacheFile, cacheContent, 'utf8');
+      fs.chmodSync(defaultCacheFile, 0o666);
       console.log(`✅ Also created cache file in default location: ${defaultCacheFile}`);
     } catch (e) {
       console.log(`⚠️  Could not create cache file in default location: ${e.message}`);
+    }
+    
+    // ALSO write to current working directory (fallback)
+    try {
+      fs.writeFileSync(cwdCacheFile, cacheContent, 'utf8');
+      fs.chmodSync(cwdCacheFile, 0o666);
+      console.log(`✅ Also created cache file in CWD: ${cwdCacheFile}`);
+    } catch (e) {
+      console.log(`⚠️  Could not create cache file in CWD: ${e.message}`);
     }
     
     // Debug: Print cache file contents to verify format
@@ -388,9 +402,14 @@ class SpotifyIntegration {
         SPOTIPY_CLIENT_ID: this.clientId,
         SPOTIPY_CLIENT_SECRET: this.clientSecret,
         SPOTIPY_REDIRECT_URI: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
-        // Set SPOTIPY_CACHE_PATH to DIRECTORY - spotipy will look for .cache-{username} in it
-        // We've created the file with the correct username, so it should find it
-        SPOTIPY_CACHE_PATH: cacheDir, // Directory path, not file path
+        // CRITICAL: Don't set SPOTIPY_CACHE_PATH - let spotipy use default location
+        // We've created the cache file in ~/.cache-{username} which is spotipy's default
+        // Setting SPOTIPY_CACHE_PATH might interfere with spotipy's default behavior
+        // SPOTIPY_CACHE_PATH: cacheDir, // COMMENTED OUT - use default location instead
+        // Set HOME to ensure spotipy looks in the right place
+        HOME: os.homedir(),
+        // Set working directory to home so relative paths work
+        PWD: os.homedir(),
       },
     });
 
