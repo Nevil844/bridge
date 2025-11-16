@@ -92,8 +92,9 @@ class SpotifyIntegration {
    * On EC2, we need to ensure the file is readable by the Python process
    */
   async createSpotifyCache(accessToken, refreshToken, userId) {
-    // Use a directory that's accessible on EC2
-    const cacheDir = path.join(os.tmpdir(), 'spotify-mcp-cache');
+    // Use user's home directory instead of /tmp for better permissions on EC2
+    // /tmp might have restrictive permissions or be cleared
+    const cacheDir = path.join(os.homedir(), '.spotify-mcp-cache');
     if (!fs.existsSync(cacheDir)) {
       fs.mkdirSync(cacheDir, { recursive: true });
     }
@@ -147,17 +148,20 @@ class SpotifyIntegration {
       fs.writeFileSync(fallbackFile, cacheContent, 'utf8');
     }
     
-    // On EC2, set permissions to be readable by all (Python might run as different user)
+    // On EC2, set permissions to be world-readable (Python might run as different user)
     try {
-      fs.chmodSync(cacheFile, 0o644); // Readable by owner and group
+      // Make files world-readable and writable by owner
+      fs.chmodSync(cacheFile, 0o666); // Readable/writable by all
       for (const fallbackName of fallbackFiles) {
         const fallbackFile = path.join(cacheDir, fallbackName);
-        fs.chmodSync(fallbackFile, 0o644);
+        fs.chmodSync(fallbackFile, 0o666);
       }
-      fs.chmodSync(cacheDir, 0o755); // Directory must be readable/executable
+      // Make directory world-readable and executable
+      fs.chmodSync(cacheDir, 0o777); // Readable/writable/executable by all
+      console.log(`✅ Set permissions: cache files (0o666), directory (0o777)`);
     } catch (e) {
       // chmod might fail, continue anyway
-      console.log('Note: Could not set cache file permissions:', e.message);
+      console.log('⚠️  Could not set cache file permissions:', e.message);
     }
     
     // Verify file was created and is readable
@@ -180,8 +184,11 @@ class SpotifyIntegration {
       throw new Error(`Cache file verification failed: ${verifyError.message}`);
     }
     
-    // Return the directory path - spotipy will look for .cache-{username} in this directory
-    return path.resolve(cacheDir);
+    // Return both directory and cache file name
+    return {
+      cacheDir: path.resolve(cacheDir),
+      cacheFileName: cacheFileName
+    };
   }
 
   /**
@@ -291,9 +298,9 @@ class SpotifyIntegration {
     // Ensure token is valid before creating cache file
     const validToken = await this.ensureValidToken(accessToken, refreshToken);
 
-    // Create cache file - returns directory path
-    const cacheDir = await this.createSpotifyCache(validToken, refreshToken, userId);
-    const cacheFile = path.join(cacheDir, '.cache');
+    // Create cache file - returns directory path and the actual cache file name
+    const { cacheDir, cacheFileName } = await this.createSpotifyCache(validToken, refreshToken, userId);
+    const cacheFile = path.join(cacheDir, cacheFileName);
     
     // Verify cache file is readable
     try {
@@ -333,9 +340,9 @@ class SpotifyIntegration {
         SPOTIPY_CLIENT_ID: this.clientId,
         SPOTIPY_CLIENT_SECRET: this.clientSecret,
         SPOTIPY_REDIRECT_URI: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
-        // Set SPOTIPY_CACHE_PATH to directory - spotipy will look for .cache-{username} in this directory
-        // We've created .cache file in this directory as fallback
-        SPOTIPY_CACHE_PATH: cacheDir, // Directory path, not file path
+        // Set SPOTIPY_CACHE_PATH to the specific cache file (not directory)
+        // spotipy will use this exact file if it exists
+        SPOTIPY_CACHE_PATH: cacheFile, // Full path to cache file
       },
     });
 
