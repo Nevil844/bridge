@@ -183,8 +183,27 @@ class SpotifyIntegration {
       if (!parsed.access_token) {
         throw new Error('Cache file missing access_token');
       }
+      console.log(`✅ Verified cache file contains access_token (${parsed.access_token.substring(0, 20)}...)`);
     } catch (e) {
       throw new Error(`Cache file created but not readable: ${e.message}`);
+    }
+    
+    // Test if Python can read the cache file (simulate what spotipy will do)
+    try {
+      const { execSync } = require('child_process');
+      const systemCacheFile = cacheFiles[1]; // .cache-ubuntu
+      const pythonTest = execSync(`python3 -c "import json; f=open('${systemCacheFile}'); d=json.load(f); print('OK' if d.get('access_token') else 'FAIL')"`, {
+        encoding: 'utf8',
+        timeout: 2000,
+        stdio: 'pipe'
+      });
+      if (pythonTest.trim() === 'OK') {
+        console.log(`✅ Python can read cache file successfully`);
+      } else {
+        console.log(`⚠️  Python read test returned: ${pythonTest.trim()}`);
+      }
+    } catch (e) {
+      console.log(`⚠️  Python read test failed (non-fatal): ${e.message}`);
     }
     
     const absoluteUserCacheDir = path.resolve(userCacheDir);
@@ -193,8 +212,8 @@ class SpotifyIntegration {
     console.log(`   Files: ${fileNames}`);
     
     // Return both directory and the primary cache file path
-    // spotipy can use either - we'll try the file path first for more reliability
-    // Use the system username cache file (.cache-ubuntu) as that's what spotipy will look for
+    // Try directory first - spotipy looks for .cache-{username} in the directory
+    // If that doesn't work, we can fall back to the file path
     const systemCacheFile = path.resolve(cacheFiles[1]); // .cache-ubuntu (system username)
     return {
       directory: absoluteUserCacheDir,
@@ -326,11 +345,12 @@ class SpotifyIntegration {
     console.log(`   HOME: ${os.homedir()}`);
     console.log(`   PWD: ${process.cwd()}`);
     console.log(`   User: ${currentUser}`);
-    console.log(`   SPOTIPY_CACHE_PATH will be set to: ${cacheInfo.systemUsernameCacheFile}`);
+    console.log(`   SPOTIPY_CACHE_PATH will be set to: ${cacheInfo.directory} (directory)`);
+    console.log(`   spotipy will look for: .cache-${currentUser} in that directory`);
 
     // Create transport with all required environment variables
-    // SPOTIPY_CACHE_PATH can be either a directory or file path
-    // Using the file path directly is more reliable - spotipy will use it as-is
+    // SPOTIPY_CACHE_PATH should be a directory - spotipy looks for .cache-{username} in it
+    // We've created .cache-ubuntu which matches the system username
     const transport = new StdioClientTransport({
       command: 'uvx',
       args: [
@@ -344,7 +364,7 @@ class SpotifyIntegration {
         SPOTIPY_CLIENT_ID: this.clientId,
         SPOTIPY_CLIENT_SECRET: this.clientSecret,
         SPOTIPY_REDIRECT_URI: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
-        SPOTIPY_CACHE_PATH: cacheInfo.systemUsernameCacheFile, // Direct file path - more reliable
+        SPOTIPY_CACHE_PATH: cacheInfo.directory, // Directory path - spotipy looks for .cache-{username} in it
         HOME: os.homedir(),
         PWD: process.cwd(),
       },
