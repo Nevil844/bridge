@@ -329,10 +329,17 @@ class SpotifyIntegration {
     // Ensure token is valid before using
     const validToken = await this.ensureValidToken(accessToken, refreshToken);
 
-    // Create minimal cache file - spotify-mcp needs it, but keep it simple
-    // Store in /tmp for EC2 compatibility (always writable)
+    // Create minimal cache file - spotipy expects SPOTIPY_CACHE_PATH to be a directory
+    // and looks for .cache-{username} inside it
     const systemUsername = process.env.USER || process.env.USERNAME || 'ubuntu';
-    const cacheFile = `/tmp/.cache-${systemUsername}-${userId}`;
+    const cacheDir = `/tmp/spotify-cache-${userId}`;
+    const cacheFile = `${cacheDir}/.cache-${systemUsername}`;
+    
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(cacheDir)) {
+      fs.mkdirSync(cacheDir, { recursive: true });
+      fs.chmodSync(cacheDir, 0o777); // World-readable/executable
+    }
     
     const cacheData = {
       access_token: validToken,
@@ -346,14 +353,14 @@ class SpotifyIntegration {
     fs.writeFileSync(cacheFile, JSON.stringify(cacheData), 'utf8');
     fs.chmodSync(cacheFile, 0o666); // World-readable for Python process
     
-    console.log(`✅ Created minimal cache file: ${cacheFile}`);
+    console.log(`✅ Created cache file: ${cacheFile} in directory: ${cacheDir}`);
 
     // Setup PATH for uvx
     const uvPath = path.join(os.homedir(), '.local', 'bin');
     const envPath = process.env.PATH || '';
     const newPath = `${uvPath}:${envPath}`;
 
-    // Create transport - spotipy will read from cache file
+    // Create transport - spotipy will look for .cache-{username} in SPOTIPY_CACHE_PATH directory
     const transport = new StdioClientTransport({
       command: 'uvx',
       args: [
@@ -367,7 +374,7 @@ class SpotifyIntegration {
         SPOTIPY_CLIENT_ID: this.clientId,
         SPOTIPY_CLIENT_SECRET: this.clientSecret,
         SPOTIPY_REDIRECT_URI: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
-        SPOTIPY_CACHE_PATH: cacheFile, // Direct file path - simplest approach
+        SPOTIPY_CACHE_PATH: cacheDir, // Directory path - spotipy looks for .cache-{username} in it
         HOME: os.homedir(),
         PWD: process.cwd(),
       },
