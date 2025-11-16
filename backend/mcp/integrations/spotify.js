@@ -234,10 +234,11 @@ class SpotifyIntegration {
       throw new Error(`Cache file verification failed: ${verifyError.message}`);
     }
     
-    // Return both directory and cache file name
+    // Return both directory and cache file name, plus default cache file path
     return {
       cacheDir: path.resolve(cacheDir),
-      cacheFileName: cacheFileName
+      cacheFileName: cacheFileName,
+      defaultCacheFile: path.resolve(defaultCacheFile)
     };
   }
 
@@ -349,7 +350,7 @@ class SpotifyIntegration {
     const validToken = await this.ensureValidToken(accessToken, refreshToken);
 
     // Create cache file - returns directory path and the actual cache file name
-    const { cacheDir, cacheFileName } = await this.createSpotifyCache(validToken, refreshToken, userId);
+    const { cacheDir, cacheFileName, defaultCacheFile } = await this.createSpotifyCache(validToken, refreshToken, userId);
     const cacheFile = path.join(cacheDir, cacheFileName);
     
     // Verify cache file is readable
@@ -402,10 +403,9 @@ class SpotifyIntegration {
         SPOTIPY_CLIENT_ID: this.clientId,
         SPOTIPY_CLIENT_SECRET: this.clientSecret,
         SPOTIPY_REDIRECT_URI: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
-        // CRITICAL: Don't set SPOTIPY_CACHE_PATH - let spotipy use default location
-        // We've created the cache file in ~/.cache-{username} which is spotipy's default
-        // Setting SPOTIPY_CACHE_PATH might interfere with spotipy's default behavior
-        // SPOTIPY_CACHE_PATH: cacheDir, // COMMENTED OUT - use default location instead
+        // Set SPOTIPY_CACHE_PATH to the specific cache file path
+        // This is critical - spotipy needs to know where to find the cache file
+        SPOTIPY_CACHE_PATH: defaultCacheFile, // Full path to cache file
         // Set HOME to ensure spotipy looks in the right place
         HOME: os.homedir(),
         // Set working directory to home so relative paths work
