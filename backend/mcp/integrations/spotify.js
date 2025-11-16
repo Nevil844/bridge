@@ -127,17 +127,30 @@ class SpotifyIntegration {
       `.cache-${this.clientId?.replace(/[^a-zA-Z0-9]/g, '_') || 'default'}`,
     ].filter(name => name !== cacheFileName);
     
+    // ALSO create in the default spotipy location (~/.cache-{username})
+    // spotipy might look here by default
+    const defaultCacheDir = os.homedir();
+    const defaultCacheFile = path.join(defaultCacheDir, cacheFileName);
+    
     // spotipy cache format - must match exactly what spotipy expects
+    // Note: expires_at should be a timestamp (seconds since epoch), not relative
+    const now = Math.floor(Date.now() / 1000);
     const cacheData = {
       access_token: accessToken,
       token_type: 'Bearer',
       expires_in: 3600,
       refresh_token: refreshToken,
       scope: this.scopes,
-      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      expires_at: now + 3600, // Absolute timestamp, not relative
     };
+    
+    // Ensure all required fields are present
+    if (!cacheData.access_token || !cacheData.refresh_token) {
+      throw new Error('Cache data missing required fields');
+    }
 
-    const cacheContent = JSON.stringify(cacheData, null, 2);
+    // Write cache content - use compact JSON (no pretty printing) to match spotipy format
+    const cacheContent = JSON.stringify(cacheData);
     
     // Write primary cache file (with username if we have it)
     fs.writeFileSync(cacheFile, cacheContent, 'utf8');
@@ -148,6 +161,23 @@ class SpotifyIntegration {
       fs.writeFileSync(fallbackFile, cacheContent, 'utf8');
     }
     
+    // ALSO write to default spotipy location (home directory)
+    // spotipy might look here by default if SPOTIPY_CACHE_PATH is not set or not working
+    try {
+      fs.writeFileSync(defaultCacheFile, cacheContent, 'utf8');
+      console.log(`✅ Also created cache file in default location: ${defaultCacheFile}`);
+    } catch (e) {
+      console.log(`⚠️  Could not create cache file in default location: ${e.message}`);
+    }
+    
+    // Debug: Print cache file contents to verify format
+    console.log(`📋 Cache file format check:`);
+    console.log(`   File: ${cacheFile}`);
+    console.log(`   Size: ${cacheContent.length} bytes`);
+    console.log(`   Has access_token: ${cacheData.access_token ? 'YES' : 'NO'}`);
+    console.log(`   Has refresh_token: ${cacheData.refresh_token ? 'YES' : 'NO'}`);
+    console.log(`   expires_at: ${cacheData.expires_at} (${new Date(cacheData.expires_at * 1000).toISOString()})`);
+    
     // On EC2, set permissions to be world-readable (Python might run as different user)
     try {
       // Make files world-readable and writable by owner
@@ -155,6 +185,12 @@ class SpotifyIntegration {
       for (const fallbackName of fallbackFiles) {
         const fallbackFile = path.join(cacheDir, fallbackName);
         fs.chmodSync(fallbackFile, 0o666);
+      }
+      // Also set permissions on default cache file
+      try {
+        fs.chmodSync(defaultCacheFile, 0o666);
+      } catch (e) {
+        // Ignore if default file doesn't exist
       }
       // Make directory world-readable and executable
       fs.chmodSync(cacheDir, 0o777); // Readable/writable/executable by all
@@ -324,8 +360,20 @@ class SpotifyIntegration {
     console.log(`   Cache file: ${cacheFile}`);
     console.log(`   Cache dir: ${cacheDir}`);
     console.log(`   Client ID: ${this.clientId ? this.clientId.substring(0, 10) + '...' : 'NOT SET'}`);
+    
+    // Test if Python can read the cache file (simulate what spotipy will do)
+    try {
+      const testRead = fs.readFileSync(cacheFile, 'utf8');
+      const testParse = JSON.parse(testRead);
+      console.log(`✅ Python should be able to read cache file (verified)`);
+      console.log(`   Token in file: ${testParse.access_token ? testParse.access_token.substring(0, 20) + '...' : 'MISSING'}`);
+    } catch (e) {
+      console.error(`❌ ERROR: Cannot read cache file that we just created: ${e.message}`);
+    }
 
     // Create transport with all required environment variables
+    // IMPORTANT: Set SPOTIPY_CACHE_PATH to the DIRECTORY, not the file
+    // spotipy will look for .cache-{username} in that directory
     const transport = new StdioClientTransport({
       command: 'uvx',
       args: [
@@ -340,9 +388,9 @@ class SpotifyIntegration {
         SPOTIPY_CLIENT_ID: this.clientId,
         SPOTIPY_CLIENT_SECRET: this.clientSecret,
         SPOTIPY_REDIRECT_URI: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
-        // Set SPOTIPY_CACHE_PATH to the specific cache file (not directory)
-        // spotipy will use this exact file if it exists
-        SPOTIPY_CACHE_PATH: cacheFile, // Full path to cache file
+        // Set SPOTIPY_CACHE_PATH to DIRECTORY - spotipy will look for .cache-{username} in it
+        // We've created the file with the correct username, so it should find it
+        SPOTIPY_CACHE_PATH: cacheDir, // Directory path, not file path
       },
     });
 
