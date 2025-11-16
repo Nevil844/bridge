@@ -250,9 +250,9 @@ class SpotifyIntegration {
       env: {
         ...process.env,
         PATH: newPath,
-        SPOTIFY_CLIENT_ID: this.clientId,
-        SPOTIFY_CLIENT_SECRET: this.clientSecret,
-        SPOTIFY_REDIRECT_URI: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
+        SPOTIPY_CLIENT_ID: this.clientId,
+        SPOTIPY_CLIENT_SECRET: this.clientSecret,
+        SPOTIPY_REDIRECT_URI: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
         SPOTIPY_CACHE_PATH: cacheFile,
       },
     });
