@@ -89,14 +89,22 @@ class SpotifyIntegration {
 
   /**
    * Create Spotify cache file for spotipy
+   * On EC2, we need to ensure the file is readable by the Python process
    */
   createSpotifyCache(accessToken, refreshToken, userId) {
+    // Use a directory that's accessible on EC2
     const cacheDir = path.join(os.tmpdir(), 'spotify-mcp-cache');
     if (!fs.existsSync(cacheDir)) {
       fs.mkdirSync(cacheDir, { recursive: true });
     }
 
-    const cacheFile = path.join(cacheDir, `.spotify-cache-${userId}`);
+    // spotipy expects the cache file to be named based on username or client_id
+    // Try using client_id first, then fallback to userId
+    const cacheFileName = this.clientId 
+      ? `.cache-${this.clientId.replace(/[^a-zA-Z0-9]/g, '_')}`
+      : `.spotify-cache-${userId}`;
+    
+    const cacheFile = path.join(cacheDir, cacheFileName);
     
     // spotipy cache format - must match exactly what spotipy expects
     const cacheData = {
@@ -108,13 +116,33 @@ class SpotifyIntegration {
       expires_at: Math.floor(Date.now() / 1000) + 3600,
     };
 
-    fs.writeFileSync(cacheFile, JSON.stringify(cacheData));
+    // Write cache file
+    fs.writeFileSync(cacheFile, JSON.stringify(cacheData, null, 2), 'utf8');
     
-    // Set permissions (readable by owner only)
+    // On EC2, set permissions to be readable by all (Python might run as different user)
     try {
-      fs.chmodSync(cacheFile, 0o600);
+      fs.chmodSync(cacheFile, 0o644); // Readable by owner and group
+      fs.chmodSync(cacheDir, 0o755); // Directory must be readable/executable
     } catch (e) {
       // chmod might fail, continue anyway
+      console.log('Note: Could not set cache file permissions:', e.message);
+    }
+    
+    // Verify file was created and is readable
+    if (!fs.existsSync(cacheFile)) {
+      throw new Error(`Failed to create cache file: ${cacheFile}`);
+    }
+    
+    // Verify file contents
+    try {
+      const fileContents = fs.readFileSync(cacheFile, 'utf8');
+      const parsed = JSON.parse(fileContents);
+      if (!parsed.access_token || parsed.access_token !== accessToken) {
+        throw new Error('Cache file token mismatch');
+      }
+      console.log(`✅ Cache file created: ${cacheFile} (${fileContents.length} bytes, token: ${accessToken.substring(0, 20)}...)`);
+    } catch (verifyError) {
+      throw new Error(`Cache file verification failed: ${verifyError.message}`);
     }
     
     return path.resolve(cacheFile); // Return absolute path
@@ -229,9 +257,18 @@ class SpotifyIntegration {
 
     // Create cache file
     const cacheFile = this.createSpotifyCache(validToken, refreshToken, userId);
+    const cacheDir = path.dirname(cacheFile);
     
-    if (!fs.existsSync(cacheFile)) {
-      throw new Error(`Failed to create cache file: ${cacheFile}`);
+    // Verify cache file is readable
+    try {
+      const testRead = fs.readFileSync(cacheFile, 'utf8');
+      const testParse = JSON.parse(testRead);
+      if (!testParse.access_token) {
+        throw new Error('Cache file missing access_token');
+      }
+      console.log(`✅ Cache file verified before connection: ${cacheFile}`);
+    } catch (verifyError) {
+      throw new Error(`Cache file verification failed: ${verifyError.message}`);
     }
 
     // Setup PATH for uvx
@@ -239,7 +276,13 @@ class SpotifyIntegration {
     const envPath = process.env.PATH || '';
     const newPath = `${uvPath}:${envPath}`;
 
-    // Create transport
+    // Log environment setup for debugging
+    console.log(`🔧 Starting Spotify MCP with:`);
+    console.log(`   Cache file: ${cacheFile}`);
+    console.log(`   Cache dir: ${cacheDir}`);
+    console.log(`   Client ID: ${this.clientId ? this.clientId.substring(0, 10) + '...' : 'NOT SET'}`);
+
+    // Create transport with all required environment variables
     const transport = new StdioClientTransport({
       command: 'uvx',
       args: [
@@ -250,10 +293,13 @@ class SpotifyIntegration {
       env: {
         ...process.env,
         PATH: newPath,
+        // spotipy uses SPOTIPY_ prefix for environment variables
         SPOTIPY_CLIENT_ID: this.clientId,
         SPOTIPY_CLIENT_SECRET: this.clientSecret,
         SPOTIPY_REDIRECT_URI: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
-        SPOTIPY_CACHE_PATH: cacheFile,
+        SPOTIPY_CACHE_PATH: cacheFile, // Absolute path to cache file
+        // Also set as directory in case spotipy looks for it
+        SPOTIPY_CACHE_DIR: cacheDir,
       },
     });
 
@@ -270,14 +316,33 @@ class SpotifyIntegration {
 
     // Connect with timeout
     try {
+      // Double-check cache file exists right before connecting
+      if (!fs.existsSync(cacheFile)) {
+        throw new Error(`Cache file disappeared: ${cacheFile}`);
+      }
+      
+      // Verify cache file is still readable
+      try {
+        const lastCheck = fs.readFileSync(cacheFile, 'utf8');
+        const lastParse = JSON.parse(lastCheck);
+        if (!lastParse.access_token) {
+          throw new Error('Cache file missing access_token before connection');
+        }
+      } catch (e) {
+        throw new Error(`Cache file unreadable before connection: ${e.message}`);
+      }
+      
+      console.log(`🔌 Connecting to Spotify MCP server...`);
       await Promise.race([
         client.connect(transport),
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Connection timeout')), 30000)
         )
       ]);
+      console.log(`✅ Connected to Spotify MCP server`);
     } catch (error) {
       // Clean up on connection failure
+      console.error(`❌ Connection failed: ${error.message}`);
       try {
         await this.cleanupProcesses();
       } catch (e) {
