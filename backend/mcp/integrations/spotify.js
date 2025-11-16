@@ -121,20 +121,77 @@ class SpotifyIntegration {
   }
 
   /**
+   * Kill any existing Spotify MCP processes to prevent "Address already in use" errors
+   * This is a cleanup function to ensure no zombie processes are running
+   */
+  async killExistingProcesses() {
+    try {
+      // Find and kill any existing uvx spotify-mcp processes
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      
+      // Try to find processes (works on Unix-like systems)
+      try {
+        const { stdout } = await execAsync('pgrep -f "spotify-mcp" || true');
+        const pids = stdout.trim().split('\n').filter(pid => pid);
+        
+        if (pids.length > 0) {
+          console.log(`🧹 Cleaning up ${pids.length} existing Spotify MCP process(es)...`);
+          for (const pid of pids) {
+            try {
+              process.kill(parseInt(pid), 'SIGTERM');
+              // Force kill after 1 second if still running
+              setTimeout(() => {
+                try {
+                  process.kill(parseInt(pid), 'SIGKILL');
+                } catch (e) {
+                  // Process already dead, ignore
+                }
+              }, 1000);
+            } catch (e) {
+              // Process might already be dead, ignore
+            }
+          }
+          // Wait a bit for processes to die
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } catch (error) {
+        // pgrep not available or no processes found, that's okay
+      }
+    } catch (error) {
+      // Cleanup failed, but continue anyway
+      console.log('Note: Could not clean up existing processes:', error.message);
+    }
+  }
+
+  /**
    * Connect to Spotify MCP server
    * Uses the Python-based spotify-mcp package via uvx
    * @param {Object} config - Integration configuration
    * @param {string} config.token - Spotify access token (encrypted)
    * @param {string} config.refreshToken - Spotify refresh token
    * @param {string} config.userId - User ID for cache file
+   * @param {number} retryCount - Internal retry counter (prevents infinite recursion)
    * @returns {Promise<Object>} - MCP client and process
    */
-  async connect(config) {
+  async connect(config, retryCount = 0) {
     if (!config || !config.token) {
       throw new Error('Spotify access token is required');
     }
 
+    // Prevent infinite recursion
+    const MAX_RETRIES = 2;
+    if (retryCount > MAX_RETRIES) {
+      throw new Error('Failed to connect after multiple retries - address may still be in use');
+    }
+
     try {
+      // Clean up any existing processes before connecting (only on first attempt)
+      if (retryCount === 0) {
+        await this.killExistingProcesses();
+      }
+      
       // Decrypt the access token with improved error handling
       let accessToken;
       try {
@@ -190,13 +247,31 @@ class SpotifyIntegration {
 
       await client.connect(transport);
       
-      return { 
+      // Store process reference if available for cleanup
+      const connection = { 
         client, 
         transport,
         token: config.token,
         refreshToken: config.refreshToken,
       };
+      
+      // Try to access the process from transport for proper cleanup
+      if (transport.process) {
+        connection.process = transport.process;
+      }
+      
+      return connection;
     } catch (error) {
+      // Handle "Address already in use" error specifically
+      if (error.message && (error.message.includes('Address already in use') || error.message.includes('Errno 98'))) {
+        console.log(`⚠️  Address already in use (attempt ${retryCount + 1}/${MAX_RETRIES + 1}) - cleaning up and retrying...`);
+        await this.killExistingProcesses();
+        // Wait a bit before retrying
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Retry connection with incremented counter
+        return this.connect(config, retryCount + 1);
+      }
+      
       console.error('Failed to connect to Spotify MCP:', error.message);
       throw error;
     }
@@ -209,8 +284,54 @@ class SpotifyIntegration {
   async disconnect(connection) {
     if (connection) {
       try {
+        // Kill the underlying process first (before closing client)
+        let processToKill = null;
+        
+        // Check if we stored the process reference directly
+        if (connection.process) {
+          processToKill = connection.process;
+        }
+        // Check if transport has the process
+        else if (connection.transport && connection.transport.process) {
+          processToKill = connection.transport.process;
+        }
+        
+        if (processToKill && !processToKill.killed) {
+          try {
+            // Try graceful shutdown first
+            processToKill.kill('SIGTERM');
+            
+            // Force kill after 2 seconds if still running
+            setTimeout(() => {
+              try {
+                if (processToKill && !processToKill.killed) {
+                  processToKill.kill('SIGKILL');
+                }
+              } catch (e) {
+                // Process might already be dead, ignore
+              }
+            }, 2000);
+          } catch (error) {
+            console.log('Error killing transport process:', error.message);
+          }
+        }
+        
+        // Close the client
         if (connection.client) {
-          await connection.client.close();
+          try {
+            await connection.client.close();
+          } catch (error) {
+            // Client might already be closed, ignore
+          }
+        }
+        
+        // Also try to close the transport if it has a close method
+        if (connection.transport && typeof connection.transport.close === 'function') {
+          try {
+            await connection.transport.close();
+          } catch (error) {
+            // Transport might already be closed, ignore
+          }
         }
       } catch (error) {
         console.error('Error disconnecting Spotify:', error.message);
