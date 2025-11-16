@@ -242,7 +242,7 @@ class JiraIntegration {
         console.error('❌ Error connecting to JIRA remote MCP:', error.message);
         
         // Catch mcp-remote errors (browser opening failures, port errors, etc.)
-        // These indicate OAuth is needed - return OAuth URL like Zerodha does
+        // These indicate OAuth is needed - return a special "authenticate" tool like Zerodha's login tool
         if (error.message.includes('Cannot read properties of null') || 
             error.message.includes('port') ||
             error.message.includes('Browser') ||
@@ -267,8 +267,18 @@ class JiraIntegration {
             oauthUrl = 'https://auth.atlassian.com/authorize';
           }
           
-          // Return error in format that AI can show to user with link
-          throw new Error(`OAuth_AUTHENTICATION_REQUIRED: ${oauthUrl}`);
+          // Return a special "authenticate" tool that the AI can call to show the OAuth URL
+          // This is similar to how Zerodha returns a "login" tool
+          return [{
+            name: 'jira_authenticate',
+            description: `JIRA authentication is required. This tool will provide the authorization link. Call this first to authenticate with JIRA.`,
+            inputSchema: {
+              type: 'object',
+              properties: {},
+              required: []
+            },
+            _oauthUrl: oauthUrl // Store OAuth URL in tool metadata
+          }];
         }
         
         // For other errors, also return OAuth URL as fallback
@@ -305,6 +315,29 @@ class JiraIntegration {
    * @returns {Promise<any>} - Tool result
    */
   async callTool(connection, toolName, args) {
+    // Handle special authenticate tool (similar to Zerodha's login tool)
+    if (toolName === 'jira_authenticate') {
+      let oauthUrl;
+      try {
+        const oauthHandler = require('../../oauth/handler');
+        oauthUrl = oauthHandler.getAuthUrl('jira', connection.userId || 'default-user');
+      } catch (e) {
+        oauthUrl = 'https://auth.atlassian.com/authorize';
+      }
+      
+      return {
+        isError: false,
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            message: `JIRA authentication is required. Please click this link to authorize: ${oauthUrl}`,
+            oauthUrl: oauthUrl,
+            instructions: 'Click the link above to complete JIRA authentication. After authorizing, you can try your request again.'
+          })
+        }]
+      };
+    }
+    
     const { client, serverUrl } = connection;
     
     // Log tool call with arguments for debugging
