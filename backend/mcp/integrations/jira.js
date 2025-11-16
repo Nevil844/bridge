@@ -34,16 +34,99 @@ class JiraIntegration {
       throw new Error('JIRA configuration is required');
     }
 
-    // Default to OAuth via Atlassian Remote MCP Server (recommended)
-    // Only use API token if explicitly provided
-    const useApiToken = config.email && config.apiToken && config.instanceUrl;
-    const useOAuth = !useApiToken; // Use OAuth if API token not provided
+    // Check if we have OAuth tokens (accessToken or token)
+    const hasOAuthTokens = !!(config.accessToken || config.token);
+    const hasApiToken = config.email && config.apiToken && config.instanceUrl;
 
-    if (useOAuth) {
-      // Use mcp-remote for Atlassian Remote MCP Server (OAuth-based)
-      const serverUrl = config.serverUrl || this.serverUrl;
+    // If we have OAuth tokens, use official Jira MCP server with OAuth
+    // Otherwise fall back to API token or mcp-remote
+    if (hasOAuthTokens) {
+      // Decrypt token if needed
+      let accessToken = config.accessToken || config.token;
       
-      // Check if we have OAuth tokens (accessToken or token indicates OAuth completed)
+      // Try to decrypt if it's encrypted
+      try {
+        if (accessToken.includes(':')) {
+          const crypto = require('crypto');
+          const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'change-this-to-a-secure-32-char-key!!';
+          const parts = accessToken.split(':');
+          if (parts.length >= 2) {
+            const iv = Buffer.from(parts.shift(), 'hex');
+            const encryptedText = parts.join(':');
+            const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
+            const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+            let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+            decrypted += decipher.final('utf8');
+            accessToken = decrypted;
+          }
+        }
+      } catch (e) {
+        // If decryption fails, use token as-is (might already be plain text)
+      }
+
+      // Try to get cloud ID and site info from access token
+      // Then use official Jira MCP server with OAuth token
+      try {
+        const axios = require('axios');
+        
+        // Get accessible resources (cloud IDs) from access token
+        const resourcesResponse = await axios.get('https://api.atlassian.com/oauth/token/accessible-resources', {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json',
+          },
+          timeout: 10000,
+        });
+
+        if (resourcesResponse.data && resourcesResponse.data.length > 0) {
+          // Use the first accessible resource (usually the main Jira site)
+          const resource = resourcesResponse.data[0];
+          const cloudId = resource.id;
+          const siteUrl = resource.url;
+          
+          console.log(`✅ Got JIRA cloud ID: ${cloudId} for site: ${siteUrl}`);
+          
+          // Try using official Jira MCP server with OAuth token
+          // The server might support OAuth via environment variables
+          const transport = new StdioClientTransport({
+            command: 'npx',
+            args: ['-y', '@modelcontextprotocol/server-jira'],
+            env: {
+              ...process.env,
+              ATLASSIAN_ACCESS_TOKEN: accessToken,
+              ATLASSIAN_CLOUD_ID: cloudId,
+              ATLASSIAN_SITE_URL: siteUrl,
+              ATLASSIAN_REFRESH_TOKEN: config.refreshToken || '',
+            },
+          });
+
+          const client = new Client(
+            {
+              name: 'bridge-ai-jira-oauth',
+              version: '1.0.0',
+            },
+            {
+              capabilities: {},
+            }
+          );
+
+          await client.connect(transport);
+          console.log(`✅ Connected to JIRA MCP server with OAuth token`);
+          return { client, transport, config, userId: config.userId, cloudId, siteUrl };
+        } else {
+          throw new Error('No accessible Jira resources found for this access token');
+        }
+      } catch (error) {
+        console.error(`⚠️  Failed to connect with OAuth token:`, error.message);
+        console.error(`   Falling back to mcp-remote...`);
+        // Fall through to mcp-remote
+      }
+    }
+
+    // Use mcp-remote for Atlassian Remote MCP Server (OAuth-based)
+    // This is used when we don't have tokens yet or OAuth token method failed
+    if (!hasApiToken) {
+      const serverUrl = config.serverUrl || this.serverUrl;
       const hasOAuthTokens = !!(config.accessToken || config.token || (config.refreshToken && config.accessToken));
       
       console.log(`✅ JIRA MCP connection prepared (OAuth via Atlassian Remote MCP Server, will connect on first use)`);
@@ -58,8 +141,8 @@ class JiraIntegration {
         transport: null,
         serverUrl: serverUrl,
         config: config,
-        userId: config.userId, // Pass userId for OAuth URL generation
-        oauthCompleted: hasOAuthTokens // More accurate check for OAuth completion
+        userId: config.userId,
+        oauthCompleted: hasOAuthTokens
       };
     }
 
