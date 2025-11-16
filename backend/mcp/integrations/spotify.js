@@ -1,10 +1,13 @@
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
-const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+
+const execAsync = promisify(exec);
 
 /**
  * Spotify MCP Integration
@@ -28,34 +31,30 @@ class SpotifyIntegration {
   decryptToken(encryptedToken) {
     // Check if token is already plain text (not encrypted)
     if (!encryptedToken.includes(':')) {
-      console.log('Token appears to be plain text, using directly');
       return encryptedToken;
     }
 
-    // Try multiple decryption methods in order of preference
+    // Try multiple decryption methods
     const methods = [
       // Method 1: Storage system method (scryptSync with salt)
       () => {
         const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'change-this-to-a-secure-32-char-key!!';
-        const ALGORITHM = 'aes-256-cbc';
-        
         const parts = encryptedToken.split(':');
         if (parts.length < 2) throw new Error('Invalid token format');
         
         const iv = Buffer.from(parts.shift(), 'hex');
         const encryptedText = parts.join(':');
         const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
-        const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+        const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
         let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
         decrypted += decipher.final('utf8');
         return decrypted;
       },
       
-      // Method 2: Direct key method (old method)
+      // Method 2: Direct key method
       () => {
         const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'change-this-to-a-secure-32-char-key!!';
         const key = Buffer.from(ENCRYPTION_KEY).subarray(0, 32);
-        
         const [ivHex, encrypted] = encryptedToken.split(':');
         if (!ivHex || !encrypted) throw new Error('Invalid token format');
         
@@ -78,23 +77,18 @@ class SpotifyIntegration {
         return methods[i]();
       } catch (error) {
         if (i === methods.length - 1) {
-          // Last method failed, try to use token as-is if it looks like a valid token
+          // Last method failed, try to use token as-is if it looks valid
           if (encryptedToken.startsWith('BQ') && encryptedToken.length > 100) {
-            console.log('Using token as-is (appears to be valid Spotify token)');
             return encryptedToken;
           }
-          console.error(`All decryption methods failed. Method ${i + 1} error:`, error.message);
-          throw new Error('Failed to decrypt token with any method');
+          throw new Error('Failed to decrypt token');
         }
-        // Try next method
-        continue;
       }
     }
   }
 
   /**
    * Create Spotify cache file for spotipy
-   * The Spotify MCP uses spotipy which expects tokens in a cache file
    */
   createSpotifyCache(accessToken, refreshToken, userId) {
     const cacheDir = path.join(os.tmpdir(), 'spotify-mcp-cache');
@@ -104,323 +98,252 @@ class SpotifyIntegration {
 
     const cacheFile = path.join(cacheDir, `.spotify-cache-${userId}`);
     
-    // spotipy cache format
+    // spotipy cache format - must match exactly what spotipy expects
     const cacheData = {
       access_token: accessToken,
       token_type: 'Bearer',
       expires_in: 3600,
       refresh_token: refreshToken,
       scope: this.scopes,
-      expires_at: Math.floor(Date.now() / 1000) + 3600, // Current time + 1 hour
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
     };
 
-    fs.writeFileSync(cacheFile, JSON.stringify(cacheData, null, 2));
+    fs.writeFileSync(cacheFile, JSON.stringify(cacheData));
     
-    // Ensure the cache file has correct permissions (readable by the Python process)
+    // Set permissions (readable by owner only)
     try {
-      fs.chmodSync(cacheFile, 0o600); // Read/write for owner only
+      fs.chmodSync(cacheFile, 0o600);
     } catch (e) {
-      // chmod might fail on some systems, that's okay
+      // chmod might fail, continue anyway
     }
     
-    console.log(`📝 Created Spotify cache at: ${cacheFile}`);
-    
-    return cacheFile;
+    return path.resolve(cacheFile); // Return absolute path
   }
 
   /**
-   * Kill any existing Spotify MCP processes to prevent "Address already in use" errors
-   * This is a cleanup function to ensure no zombie processes are running
+   * Clean up any existing spotify-mcp processes
    */
-  async killExistingProcesses() {
+  async cleanupProcesses() {
     try {
-      // Find and kill any existing uvx spotify-mcp processes
-      const { exec } = require('child_process');
-      const { promisify } = require('util');
-      const execAsync = promisify(exec);
+      const currentPid = process.pid;
       
-      // Try to find processes (works on Unix-like systems)
+      // Find spotify-mcp processes
       try {
-        // Kill spotify-mcp processes
-        const { stdout: spotifyPids } = await execAsync('pgrep -f "spotify-mcp" || true');
-        const pids = spotifyPids.trim().split('\n').filter(pid => pid);
-        
-        // Also check for processes using common OAuth callback ports (8000-9000 range)
-        // The Python server might start an OAuth callback server on a random port
-        let portPids = [];
-        try {
-          // Check for processes listening on ports that might be OAuth callback servers
-          // Common ports: 8080, 8888, 3000, etc.
-          const { stdout: lsofOutput } = await execAsync('lsof -ti:8080,8888,3000,8000,8001,8002,8003,8004,8005 2>/dev/null || true');
-          portPids = lsofOutput.trim().split('\n').filter(pid => pid);
-        } catch (e) {
-          // lsof might not be available, that's okay
-        }
-        
-        const allPids = [...new Set([...pids, ...portPids])]; // Remove duplicates
-        
-        if (allPids.length > 0) {
-          console.log(`🧹 Cleaning up ${allPids.length} existing Spotify MCP process(es)...`);
-          for (const pid of allPids) {
+        const { stdout } = await execAsync('pgrep -f "spotify-mcp" 2>/dev/null || true');
+        const pids = stdout.trim().split('\n').filter(pid => {
+          const pidNum = parseInt(pid);
+          return pid && !isNaN(pidNum) && pidNum > 0 && pidNum !== currentPid;
+        });
+
+        if (pids.length > 0) {
+          console.log(`🧹 Cleaning up ${pids.length} existing Spotify MCP process(es)...`);
+          
+          for (const pidStr of pids) {
+            const pid = parseInt(pidStr);
             try {
-              process.kill(parseInt(pid), 'SIGTERM');
-              // Force kill after 1 second if still running
-              setTimeout(() => {
-                try {
-                  process.kill(parseInt(pid), 'SIGKILL');
-                } catch (e) {
-                  // Process already dead, ignore
-                }
-              }, 1000);
+              // Check if process exists
+              process.kill(pid, 0);
+              // Kill it
+              process.kill(pid, 'SIGTERM');
             } catch (e) {
-              // Process might already be dead, ignore
+              // Process doesn't exist or already dead, ignore
             }
           }
-          // Wait a bit for processes to die
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Wait for processes to die
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
-      } catch (error) {
-        // pgrep not available or no processes found, that's okay
+      } catch (e) {
+        // pgrep might not be available, that's okay
       }
     } catch (error) {
-      // Cleanup failed, but continue anyway
-      console.log('Note: Could not clean up existing processes:', error.message);
+      // Cleanup errors are non-fatal
+      console.log('Note: Process cleanup encountered an error (non-fatal)');
+    }
+  }
+
+  /**
+   * Validate and refresh token if needed
+   */
+  async ensureValidToken(accessToken, refreshToken) {
+    if (!refreshToken || !this.clientId || !this.clientSecret) {
+      return accessToken; // Can't refresh, return as-is
+    }
+
+    try {
+      const SpotifyOAuth = require('../../oauth/integrations/spotify.js');
+      const spotifyOAuth = new SpotifyOAuth();
+      
+      // Try to validate token with timeout
+      try {
+        await Promise.race([
+          spotifyOAuth.validateToken(accessToken),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
+        ]);
+        return accessToken; // Token is valid
+      } catch (validationError) {
+        // Token invalid or expired, refresh it
+        console.log('⚠️  Token validation failed, refreshing...');
+        const refreshResult = await Promise.race([
+          spotifyOAuth.refreshAccessToken(refreshToken),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+        ]);
+        console.log('✅ Token refreshed successfully');
+        return refreshResult.accessToken;
+      }
+    } catch (error) {
+      console.log('⚠️  Could not validate/refresh token, using existing:', error.message);
+      return accessToken; // Fallback to existing token
     }
   }
 
   /**
    * Connect to Spotify MCP server
-   * Uses the Python-based spotify-mcp package via uvx
-   * @param {Object} config - Integration configuration
-   * @param {string} config.token - Spotify access token (encrypted)
-   * @param {string} config.refreshToken - Spotify refresh token
-   * @param {string} config.userId - User ID for cache file
-   * @param {number} retryCount - Internal retry counter (prevents infinite recursion)
-   * @returns {Promise<Object>} - MCP client and process
    */
-  async connect(config, retryCount = 0) {
+  async connect(config) {
     if (!config || !config.token) {
       throw new Error('Spotify access token is required');
     }
 
-    // Prevent infinite recursion
-    const MAX_RETRIES = 2;
-    if (retryCount > MAX_RETRIES) {
-      throw new Error('Failed to connect after multiple retries - address may still be in use');
+    // Clean up any existing processes first
+    await this.cleanupProcesses();
+
+    // Decrypt token
+    let accessToken;
+    try {
+      accessToken = this.decryptToken(config.token);
+    } catch (decryptError) {
+      // Try using token as-is if it looks valid
+      if (config.token.startsWith('BQ') && config.token.length > 100) {
+        accessToken = config.token;
+      } else {
+        throw new Error('Invalid token format');
+      }
     }
 
+    const refreshToken = config.refreshToken || '';
+    const userId = config.userId || 'default-user';
+
+    // Ensure token is valid before creating cache file
+    const validToken = await this.ensureValidToken(accessToken, refreshToken);
+
+    // Create cache file
+    const cacheFile = this.createSpotifyCache(validToken, refreshToken, userId);
+    
+    if (!fs.existsSync(cacheFile)) {
+      throw new Error(`Failed to create cache file: ${cacheFile}`);
+    }
+
+    // Setup PATH for uvx
+    const uvPath = path.join(os.homedir(), '.local', 'bin');
+    const envPath = process.env.PATH || '';
+    const newPath = `${uvPath}:${envPath}`;
+
+    // Create transport
+    const transport = new StdioClientTransport({
+      command: 'uvx',
+      args: [
+        '--python', '3.12',
+        '--from', 'git+https://github.com/varunneal/spotify-mcp',
+        'spotify-mcp'
+      ],
+      env: {
+        ...process.env,
+        PATH: newPath,
+        SPOTIFY_CLIENT_ID: this.clientId,
+        SPOTIFY_CLIENT_SECRET: this.clientSecret,
+        SPOTIFY_REDIRECT_URI: 'http://127.0.0.1:3000/api/oauth/callback',
+        SPOTIPY_CACHE_PATH: cacheFile,
+      },
+    });
+
+    // Create client
+    const client = new Client(
+      {
+        name: 'bridge-ai-spotify',
+        version: '1.0.0',
+      },
+      {
+        capabilities: {},
+      }
+    );
+
+    // Connect with timeout
     try {
-      // Clean up any existing processes before connecting (only on first attempt)
-      if (retryCount === 0) {
-        await this.killExistingProcesses();
-      }
-      
-      // Decrypt the access token with improved error handling
-      let accessToken;
-      try {
-        accessToken = this.decryptToken(config.token);
-      } catch (decryptError) {
-        console.log('Decryption failed, trying to use token as-is...');
-        // If decryption fails, try using the token directly
-        if (config.token.startsWith('BQ') && config.token.length > 100) {
-          accessToken = config.token;
-          console.log('Using token as-is (appears to be valid Spotify token)');
-        } else {
-          throw new Error('Invalid token format and decryption failed');
-        }
-      }
-      
-      const refreshToken = config.refreshToken || '';
-      const userId = config.userId || 'default-user';
-      
-      // Validate and refresh token if needed before creating cache file
-      // This prevents the Python server from trying to start its own OAuth flow
-      let validAccessToken = accessToken;
-      let validRefreshToken = refreshToken;
-      
-      // Try to refresh token if we have a refresh token and the access token might be expired
-      // Use a timeout to prevent blocking if the API is slow
-      if (refreshToken && this.clientId && this.clientSecret) {
-        try {
-          const SpotifyOAuth = require('../../oauth/integrations/spotify.js');
-          const spotifyOAuth = new SpotifyOAuth();
-          
-          // Check if token needs refresh by attempting to validate it
-          // If validation fails, refresh it
-          // Use a timeout to prevent blocking
-          const validationPromise = spotifyOAuth.validateToken(accessToken);
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Validation timeout')), 3000)
-          );
-          
-          try {
-            await Promise.race([validationPromise, timeoutPromise]);
-            console.log('✅ Spotify access token is valid');
-          } catch (validationError) {
-            // Token might be expired, try to refresh it
-            console.log('⚠️  Spotify access token validation failed, refreshing...');
-            try {
-              const refreshPromise = spotifyOAuth.refreshAccessToken(refreshToken);
-              const refreshTimeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Refresh timeout')), 5000)
-              );
-              const refreshResult = await Promise.race([refreshPromise, refreshTimeoutPromise]);
-              validAccessToken = refreshResult.accessToken;
-              console.log('✅ Spotify access token refreshed successfully');
-            } catch (refreshError) {
-              console.log('⚠️  Could not refresh token, using existing token:', refreshError.message);
-              // Continue with existing token - spotipy will handle refresh if needed
-            }
-          }
-        } catch (error) {
-          console.log('⚠️  Token validation/refresh failed, using existing token:', error.message);
-          // Continue with existing token - spotipy will handle refresh if needed
-        }
-      }
-      
-      // Create spotipy cache file with our tokens
-      const cacheFile = this.createSpotifyCache(validAccessToken, validRefreshToken, userId);
-      
-      // Ensure cache file path is absolute (spotipy requires absolute paths)
-      const absoluteCacheFile = path.resolve(cacheFile);
-      
-      // Verify cache file exists and is readable
-      if (!fs.existsSync(absoluteCacheFile)) {
-        throw new Error(`Cache file was not created: ${absoluteCacheFile}`);
-      }
-      
-      // Add uvx to PATH for this process
-      const uvPath = path.join(os.homedir(), '.local', 'bin');
-      const envPath = process.env.PATH || '';
-      const newPath = `${uvPath}:${envPath}`;
-
-      console.log(`🔧 Starting Spotify MCP with cache file: ${absoluteCacheFile}`);
-
-      const transport = new StdioClientTransport({
-        command: 'uvx',
-        args: [
-          '--python', '3.12',
-          '--from', 'git+https://github.com/varunneal/spotify-mcp',
-          'spotify-mcp'
-        ],
-        env: {
-          ...process.env,
-          PATH: newPath,
-          SPOTIFY_CLIENT_ID: this.clientId,
-          SPOTIFY_CLIENT_SECRET: this.clientSecret,
-          SPOTIFY_REDIRECT_URI: 'http://127.0.0.1:3000/api/oauth/callback',
-          SPOTIPY_CACHE_PATH: absoluteCacheFile, // Use absolute path
-        },
-      });
-
-      const client = new Client(
-        {
-          name: 'bridge-ai-spotify',
-          version: '1.0.0',
-        },
-        {
-          capabilities: {},
-        }
-      );
-
-      await client.connect(transport);
-      
-      // Store process reference if available for cleanup
-      const connection = { 
-        client, 
-        transport,
-        token: config.token,
-        refreshToken: config.refreshToken,
-      };
-      
-      // Try to access the process from transport for proper cleanup
-      if (transport.process) {
-        connection.process = transport.process;
-      }
-      
-      return connection;
+      await Promise.race([
+        client.connect(transport),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), 30000)
+        )
+      ]);
     } catch (error) {
-      // Handle "Address already in use" error specifically
-      if (error.message && (error.message.includes('Address already in use') || error.message.includes('Errno 98'))) {
-        console.log(`⚠️  Address already in use (attempt ${retryCount + 1}/${MAX_RETRIES + 1}) - cleaning up and retrying...`);
-        await this.killExistingProcesses();
-        // Wait a bit before retrying
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        // Retry connection with incremented counter
-        return this.connect(config, retryCount + 1);
+      // Clean up on connection failure
+      try {
+        await this.cleanupProcesses();
+      } catch (e) {
+        // Ignore cleanup errors
       }
-      
-      console.error('Failed to connect to Spotify MCP:', error.message);
       throw error;
     }
+
+    return {
+      client,
+      transport,
+      token: config.token,
+      refreshToken: config.refreshToken,
+      process: transport.process,
+    };
   }
 
   /**
    * Disconnect from Spotify MCP server
-   * @param {Object} connection - Connection object with client and process
    */
   async disconnect(connection) {
-    if (connection) {
-      try {
-        // Kill the underlying process first (before closing client)
-        let processToKill = null;
-        
-        // Check if we stored the process reference directly
-        if (connection.process) {
-          processToKill = connection.process;
-        }
-        // Check if transport has the process
-        else if (connection.transport && connection.transport.process) {
-          processToKill = connection.transport.process;
-        }
-        
-        if (processToKill && !processToKill.killed) {
-          try {
-            // Try graceful shutdown first
-            processToKill.kill('SIGTERM');
-            
-            // Force kill after 2 seconds if still running
-            setTimeout(() => {
-              try {
-                if (processToKill && !processToKill.killed) {
-                  processToKill.kill('SIGKILL');
-                }
-              } catch (e) {
-                // Process might already be dead, ignore
+    if (!connection) return;
+
+    try {
+      // Kill process if available
+      if (connection.process && !connection.process.killed) {
+        try {
+          connection.process.kill('SIGTERM');
+          setTimeout(() => {
+            try {
+              if (connection.process && !connection.process.killed) {
+                connection.process.kill('SIGKILL');
               }
-            }, 2000);
-          } catch (error) {
-            console.log('Error killing transport process:', error.message);
-          }
+            } catch (e) {
+              // Ignore
+            }
+          }, 2000);
+        } catch (e) {
+          // Ignore
         }
-        
-        // Close the client
-        if (connection.client) {
-          try {
-            await connection.client.close();
-          } catch (error) {
-            // Client might already be closed, ignore
-          }
-        }
-        
-        // Also try to close the transport if it has a close method
-        if (connection.transport && typeof connection.transport.close === 'function') {
-          try {
-            await connection.transport.close();
-          } catch (error) {
-            // Transport might already be closed, ignore
-          }
-        }
-      } catch (error) {
-        console.error('Error disconnecting Spotify:', error.message);
       }
+
+      // Close client
+      if (connection.client) {
+        try {
+          await connection.client.close();
+        } catch (e) {
+          // Ignore
+        }
+      }
+
+      // Close transport
+      if (connection.transport && typeof connection.transport.close === 'function') {
+        try {
+          await connection.transport.close();
+        } catch (e) {
+          // Ignore
+        }
+      }
+    } catch (error) {
+      console.error('Error disconnecting Spotify:', error.message);
     }
   }
 
   /**
    * Get available tools from Spotify MCP
-   * @param {Object} connection - Connection object with client
-   * @returns {Promise<Array>} - List of available tools
    */
   async getTools(connection) {
     if (!connection || !connection.client) {
@@ -429,14 +352,10 @@ class SpotifyIntegration {
 
     try {
       const response = await connection.client.listTools();
+      const tools = response.tools || [];
       
-      if (response.tools && response.tools.length > 0) {
-        console.log(`   📋 Spotify: ${response.tools.length} tools`);
-      }
-      
-      // Add a custom search and play tool
-      const customTools = response.tools || [];
-      customTools.push({
+      // Add custom search and play tool
+      tools.push({
         name: 'SpotifySearchAndPlay',
         description: 'Search for a song and immediately play it',
         inputSchema: {
@@ -451,7 +370,7 @@ class SpotifyIntegration {
         }
       });
       
-      return customTools;
+      return tools;
     } catch (error) {
       console.error('❌ Error getting Spotify tools:', error.message);
       return [];
@@ -460,10 +379,6 @@ class SpotifyIntegration {
 
   /**
    * Call a tool on the Spotify MCP server
-   * @param {Object} connection - Connection object with client
-   * @param {string} toolName - Name of the tool to call
-   * @param {Object} args - Tool arguments
-   * @returns {Promise<any>} - Tool result
    */
   async callTool(connection, toolName, args) {
     if (!connection || !connection.client) {
@@ -473,133 +388,7 @@ class SpotifyIntegration {
     try {
       // Handle custom search and play tool
       if (toolName === 'SpotifySearchAndPlay') {
-        console.log(`🎵 SpotifySearchAndPlay: Searching for "${args.query}"`);
-        
-        // First, search for the song
-        const searchResult = await connection.client.callTool({
-          name: 'SpotifySearch',
-          arguments: { qtype: 'track', query: args.query }
-        });
-        
-        if (searchResult.isError) {
-          console.error(`❌ Search failed: ${searchResult.content?.[0]?.text || 'Unknown error'}`);
-          return searchResult;
-        }
-        
-        // Extract track ID from search results
-        let searchData;
-        try {
-          if (searchResult.content && searchResult.content[0] && searchResult.content[0].text) {
-            searchData = JSON.parse(searchResult.content[0].text);
-          } else if (searchResult.content && typeof searchResult.content === 'string') {
-            searchData = JSON.parse(searchResult.content);
-          } else {
-            return {
-              isError: true,
-              content: 'Unexpected search result format'
-            };
-          }
-        } catch (parseError) {
-          return {
-            isError: true,
-            content: 'Failed to parse search results'
-          };
-        }
-        
-        if (!searchData.tracks || searchData.tracks.length === 0) {
-          return {
-            isError: true,
-            content: 'No tracks found for the search query'
-          };
-        }
-        
-        const trackId = searchData.tracks[0].id;
-        const trackName = searchData.tracks[0].name;
-        
-        // Handle both "artist" (singular) and "artists" (plural) formats
-        let artistName;
-        if (searchData.tracks[0].artist) {
-          artistName = searchData.tracks[0].artist;
-        } else if (searchData.tracks[0].artists && searchData.tracks[0].artists.length > 0) {
-          artistName = searchData.tracks[0].artists[0];
-        } else {
-          artistName = 'Unknown Artist';
-        }
-        
-        
-        // Check if there's an active device and get current playback state
-        const deviceResult = await connection.client.callTool({
-          name: 'SpotifyPlayback',
-          arguments: { 
-            action: 'get'
-          }
-        });
-        
-        if (deviceResult.isError) {
-          return {
-            isError: true,
-            content: `No active Spotify device found. Please open Spotify on a device and try again.`
-          };
-        }
-        
-        // Ensure playback is active (resume if paused)
-        const resumeResult = await connection.client.callTool({
-          name: 'SpotifyPlayback',
-          arguments: { 
-            action: 'resume'
-          }
-        });
-        
-        // Add the track to the queue
-        const queueResult = await connection.client.callTool({
-          name: 'SpotifyQueue',
-          arguments: { 
-            action: 'add',
-            track_id: trackId
-          }
-        });
-        
-        if (queueResult.isError) {
-          return {
-            isError: true,
-            content: `Failed to add track to queue: ${queueResult.content?.[0]?.text || 'Unknown error'}`
-          };
-        }
-        
-        // Wait a brief moment for queue to update
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        // Skip to the next track (our newly queued track) to play it immediately
-        const skipResult = await connection.client.callTool({
-          name: 'SpotifyPlayback',
-          arguments: { 
-            action: 'skip'
-          }
-        });
-        
-        if (skipResult.isError) {
-          // If skip fails, try to play the track directly using track URI
-          console.log(`⚠️ Skip failed, trying direct play with track URI...`);
-          const directPlayResult = await connection.client.callTool({
-            name: 'SpotifyPlayback',
-            arguments: { 
-              action: 'play',
-              track_uri: `spotify:track:${trackId}`
-            }
-          });
-          
-          if (directPlayResult.isError) {
-            return {
-              isError: true,
-              content: `Failed to play track: ${directPlayResult.content?.[0]?.text || 'Unknown error'}`
-            };
-          }
-        }
-        
-        return {
-          isError: false,
-          content: `Now playing: ${trackName} by ${artistName}`
-        };
+        return await this.handleSearchAndPlay(connection, args);
       }
       
       // Handle regular tools
@@ -619,7 +408,113 @@ class SpotifyIntegration {
     }
   }
 
+  /**
+   * Handle the custom SpotifySearchAndPlay tool
+   */
+  async handleSearchAndPlay(connection, args) {
+    console.log(`🎵 SpotifySearchAndPlay: Searching for "${args.query}"`);
+    
+    // Search for the song
+    const searchResult = await connection.client.callTool({
+      name: 'SpotifySearch',
+      arguments: { qtype: 'track', query: args.query }
+    });
+    
+    if (searchResult.isError) {
+      return {
+        isError: true,
+        content: searchResult.content?.[0]?.text || 'Search failed'
+      };
+    }
+    
+    // Parse search results
+    let searchData;
+    try {
+      const contentText = searchResult.content?.[0]?.text || 
+                         (typeof searchResult.content === 'string' ? searchResult.content : '{}');
+      searchData = JSON.parse(contentText);
+    } catch (parseError) {
+      return {
+        isError: true,
+        content: 'Failed to parse search results'
+      };
+    }
+    
+    if (!searchData.tracks || searchData.tracks.length === 0) {
+      return {
+        isError: true,
+        content: 'No tracks found for the search query'
+      };
+    }
+    
+    const track = searchData.tracks[0];
+    const trackId = track.id;
+    const trackName = track.name;
+    const artistName = track.artist || 
+                      (track.artists && track.artists[0]) || 
+                      'Unknown Artist';
+    
+    // Check for active device
+    const deviceResult = await connection.client.callTool({
+      name: 'SpotifyPlayback',
+      arguments: { action: 'get' }
+    });
+    
+    if (deviceResult.isError) {
+      return {
+        isError: true,
+        content: 'No active Spotify device found. Please open Spotify on a device and try again.'
+      };
+    }
+    
+    // Resume playback if paused
+    await connection.client.callTool({
+      name: 'SpotifyPlayback',
+      arguments: { action: 'resume' }
+    });
+    
+    // Add track to queue
+    const queueResult = await connection.client.callTool({
+      name: 'SpotifyQueue',
+      arguments: { action: 'add', track_id: trackId }
+    });
+    
+    if (queueResult.isError) {
+      return {
+        isError: true,
+        content: `Failed to add track to queue: ${queueResult.content?.[0]?.text || 'Unknown error'}`
+      };
+    }
+    
+    // Wait for queue to update
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    // Skip to next track (the one we just queued)
+    const skipResult = await connection.client.callTool({
+      name: 'SpotifyPlayback',
+      arguments: { action: 'skip' }
+    });
+    
+    if (skipResult.isError) {
+      // Try direct play as fallback
+      const playResult = await connection.client.callTool({
+        name: 'SpotifyPlayback',
+        arguments: { action: 'play', track_uri: `spotify:track:${trackId}` }
+      });
+      
+      if (playResult.isError) {
+        return {
+          isError: true,
+          content: `Failed to play track: ${playResult.content?.[0]?.text || 'Unknown error'}`
+        };
+      }
+    }
+    
+    return {
+      isError: false,
+      content: `Now playing: ${trackName} by ${artistName}`
+    };
+  }
 }
 
 module.exports = SpotifyIntegration;
-
