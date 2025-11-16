@@ -326,31 +326,23 @@ class SpotifyIntegration {
     const refreshToken = config.refreshToken || '';
     const userId = config.userId || 'default-user';
 
-    // Ensure token is valid before creating cache file
+    // Ensure token is valid before using
     const validToken = await this.ensureValidToken(accessToken, refreshToken);
-
-    // Create cache directory and files
-    const cacheInfo = await this.createSpotifyCache(validToken, refreshToken, userId);
 
     // Setup PATH for uvx
     const uvPath = path.join(os.homedir(), '.local', 'bin');
     const envPath = process.env.PATH || '';
     const newPath = `${uvPath}:${envPath}`;
 
-    // Log environment for debugging (EC2/pm2)
-    const currentUser = process.env.USER || process.env.USERNAME || 'unknown';
-    console.log(`🔧 Spotify MCP Environment:`);
-    console.log(`   Cache directory: ${cacheInfo.directory}`);
-    console.log(`   Cache file: ${cacheInfo.systemUsernameCacheFile}`);
-    console.log(`   HOME: ${os.homedir()}`);
-    console.log(`   PWD: ${process.cwd()}`);
-    console.log(`   User: ${currentUser}`);
-    console.log(`   SPOTIPY_CACHE_PATH will be set to: ${cacheInfo.directory} (directory)`);
-    console.log(`   spotipy will look for: .cache-${currentUser} in that directory`);
+    // Pass credentials directly via environment variables - NO CACHE FILE!
+    // Store tokens in memory/DB like other integrations, pass via env vars
+    console.log(`🔧 Spotify MCP Environment (no cache file):`);
+    console.log(`   Passing credentials via environment variables`);
+    console.log(`   Access token: ${validToken.substring(0, 20)}...`);
+    console.log(`   Refresh token: ${refreshToken ? refreshToken.substring(0, 20) + '...' : 'not provided'}`);
 
-    // Create transport with all required environment variables
-    // SPOTIPY_CACHE_PATH should be a directory - spotipy looks for .cache-{username} in it
-    // We've created .cache-ubuntu which matches the system username
+    // Create transport with credentials as environment variables
+    // spotify-mcp should be able to use these directly
     const transport = new StdioClientTransport({
       command: 'uvx',
       args: [
@@ -364,7 +356,10 @@ class SpotifyIntegration {
         SPOTIPY_CLIENT_ID: this.clientId,
         SPOTIPY_CLIENT_SECRET: this.clientSecret,
         SPOTIPY_REDIRECT_URI: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
-        SPOTIPY_CACHE_PATH: cacheInfo.directory, // Directory path - spotipy looks for .cache-{username} in it
+        // Pass tokens directly - no cache file needed!
+        SPOTIPY_ACCESS_TOKEN: validToken,
+        SPOTIPY_REFRESH_TOKEN: refreshToken,
+        SPOTIPY_USER_ID: userId,
         HOME: os.homedir(),
         PWD: process.cwd(),
       },
@@ -506,19 +501,39 @@ class SpotifyIntegration {
         return await this.handleSearchAndPlay(connection, args);
       }
       
-      // Handle regular tools
-      const result = await connection.client.callTool({ 
-        name: toolName, 
-        arguments: args 
-      });
+      console.log(`🎵 Calling Spotify tool: ${toolName} with args:`, JSON.stringify(args).substring(0, 200));
+      
+      // Use a longer timeout for Spotify API calls (60 seconds instead of 30)
+      // Spotify API calls can take time, especially if token refresh is needed
+      const result = await Promise.race([
+        connection.client.callTool({ 
+          name: toolName, 
+          arguments: args 
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Spotify tool call timeout after 60 seconds')), 60000)
+        )
+      ]);
       
       if (result.isError) {
-        console.error(`❌ Spotify ${toolName}: ${result.content?.[0]?.text || 'Unknown error'}`);
+        const errorText = result.content?.[0]?.text || 'Unknown error';
+        console.error(`❌ Spotify ${toolName} error: ${errorText.substring(0, 500)}`);
+      } else {
+        console.log(`✅ Spotify ${toolName} completed successfully`);
       }
       
       return result;
     } catch (error) {
       console.error(`❌ Error calling Spotify tool ${toolName}:`, error.message);
+      
+      // If it's a timeout, provide more context
+      if (error.message.includes('timeout')) {
+        console.error(`   This might indicate:`);
+        console.error(`   - Spotify API is slow or unreachable`);
+        console.error(`   - Token refresh is hanging`);
+        console.error(`   - Network connectivity issues`);
+      }
+      
       throw error;
     }
   }
