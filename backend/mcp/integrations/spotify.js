@@ -91,20 +91,40 @@ class SpotifyIntegration {
    * Create Spotify cache file for spotipy
    * On EC2, we need to ensure the file is readable by the Python process
    */
-  createSpotifyCache(accessToken, refreshToken, userId) {
+  async createSpotifyCache(accessToken, refreshToken, userId) {
     // Use a directory that's accessible on EC2
     const cacheDir = path.join(os.tmpdir(), 'spotify-mcp-cache');
     if (!fs.existsSync(cacheDir)) {
       fs.mkdirSync(cacheDir, { recursive: true });
     }
 
-    // spotipy expects the cache file to be named based on username or client_id
-    // Try using client_id first, then fallback to userId
-    const cacheFileName = this.clientId 
-      ? `.cache-${this.clientId.replace(/[^a-zA-Z0-9]/g, '_')}`
-      : `.spotify-cache-${userId}`;
+    // spotipy expects the cache file to be named .cache-{username}
+    // We'll try to get the username from the token, but if that fails,
+    // we'll create multiple cache files as fallbacks
+    let username = null;
+    try {
+      // Try to get username from token by making a quick API call
+      const axios = require('axios');
+      const response = await axios.get('https://api.spotify.com/v1/me', {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+        timeout: 2000
+      });
+      username = response.data.id || response.data.display_name || null;
+      console.log(`✅ Got Spotify username: ${username}`);
+    } catch (e) {
+      // If we can't get username, that's okay - we'll use fallbacks
+      console.log('⚠️  Could not get Spotify username, using fallback cache files');
+    }
     
+    // Create cache file with username if we have it
+    const cacheFileName = username ? `.cache-${username}` : '.cache';
     const cacheFile = path.join(cacheDir, cacheFileName);
+    
+    // Also create fallback cache files
+    const fallbackFiles = [
+      '.cache', // Generic fallback
+      `.cache-${this.clientId?.replace(/[^a-zA-Z0-9]/g, '_') || 'default'}`,
+    ].filter(name => name !== cacheFileName);
     
     // spotipy cache format - must match exactly what spotipy expects
     const cacheData = {
@@ -116,12 +136,24 @@ class SpotifyIntegration {
       expires_at: Math.floor(Date.now() / 1000) + 3600,
     };
 
-    // Write cache file
-    fs.writeFileSync(cacheFile, JSON.stringify(cacheData, null, 2), 'utf8');
+    const cacheContent = JSON.stringify(cacheData, null, 2);
+    
+    // Write primary cache file (with username if we have it)
+    fs.writeFileSync(cacheFile, cacheContent, 'utf8');
+    
+    // Also write fallback cache files
+    for (const fallbackName of fallbackFiles) {
+      const fallbackFile = path.join(cacheDir, fallbackName);
+      fs.writeFileSync(fallbackFile, cacheContent, 'utf8');
+    }
     
     // On EC2, set permissions to be readable by all (Python might run as different user)
     try {
       fs.chmodSync(cacheFile, 0o644); // Readable by owner and group
+      for (const fallbackName of fallbackFiles) {
+        const fallbackFile = path.join(cacheDir, fallbackName);
+        fs.chmodSync(fallbackFile, 0o644);
+      }
       fs.chmodSync(cacheDir, 0o755); // Directory must be readable/executable
     } catch (e) {
       // chmod might fail, continue anyway
@@ -141,11 +173,15 @@ class SpotifyIntegration {
         throw new Error('Cache file token mismatch');
       }
       console.log(`✅ Cache file created: ${cacheFile} (${fileContents.length} bytes, token: ${accessToken.substring(0, 20)}...)`);
+      if (fallbackFiles.length > 0) {
+        console.log(`✅ Created ${fallbackFiles.length} fallback cache file(s)`);
+      }
     } catch (verifyError) {
       throw new Error(`Cache file verification failed: ${verifyError.message}`);
     }
     
-    return path.resolve(cacheFile); // Return absolute path
+    // Return the directory path - spotipy will look for .cache-{username} in this directory
+    return path.resolve(cacheDir);
   }
 
   /**
@@ -255,9 +291,9 @@ class SpotifyIntegration {
     // Ensure token is valid before creating cache file
     const validToken = await this.ensureValidToken(accessToken, refreshToken);
 
-    // Create cache file
-    const cacheFile = this.createSpotifyCache(validToken, refreshToken, userId);
-    const cacheDir = path.dirname(cacheFile);
+    // Create cache file - returns directory path
+    const cacheDir = await this.createSpotifyCache(validToken, refreshToken, userId);
+    const cacheFile = path.join(cacheDir, '.cache');
     
     // Verify cache file is readable
     try {
@@ -297,9 +333,9 @@ class SpotifyIntegration {
         SPOTIPY_CLIENT_ID: this.clientId,
         SPOTIPY_CLIENT_SECRET: this.clientSecret,
         SPOTIPY_REDIRECT_URI: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
-        SPOTIPY_CACHE_PATH: cacheFile, // Absolute path to cache file
-        // Also set as directory in case spotipy looks for it
-        SPOTIPY_CACHE_DIR: cacheDir,
+        // Set SPOTIPY_CACHE_PATH to directory - spotipy will look for .cache-{username} in this directory
+        // We've created .cache file in this directory as fallback
+        SPOTIPY_CACHE_PATH: cacheDir, // Directory path, not file path
       },
     });
 
