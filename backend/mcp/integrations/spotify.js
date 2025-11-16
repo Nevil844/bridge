@@ -414,7 +414,7 @@ class SpotifyIntegration {
     return {
       client,
       transport,
-      token: config.token,
+      token: validToken, // Store the valid token for direct API testing
       refreshToken: config.refreshToken,
       process: transport.process,
     };
@@ -518,6 +518,61 @@ class SpotifyIntegration {
       
       console.log(`🎵 Calling Spotify tool: ${toolName} with args:`, JSON.stringify(args).substring(0, 200));
       
+      // For SpotifyPlayback with 'get' action, try direct API call first (bypass MCP if it's hanging)
+      // This works around the EC2 timeout issue where spotify-mcp hangs
+      if (toolName === 'SpotifyPlayback' && args.action === 'get' && connection.token) {
+        try {
+          console.log(`🎵 Attempting direct Spotify API call (bypassing MCP)...`);
+          const axios = require('axios');
+          const apiStart = Date.now();
+          const apiResponse = await Promise.race([
+            axios.get('https://api.spotify.com/v1/me/player/currently-playing', {
+              headers: { 
+                'Authorization': `Bearer ${connection.token}`,
+                'Content-Type': 'application/json'
+              },
+              timeout: 10000
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Direct API timeout')), 10000))
+          ]);
+          const apiDuration = Date.now() - apiStart;
+          
+          // Format response to match MCP tool response format
+          const track = apiResponse.data?.item;
+          if (track) {
+            const result = {
+              isError: false,
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  is_playing: apiResponse.data.is_playing,
+                  track: {
+                    name: track.name,
+                    artist: track.artists?.map(a => a.name).join(', ') || 'Unknown',
+                    album: track.album?.name || 'Unknown',
+                    duration_ms: track.duration_ms,
+                    progress_ms: apiResponse.data.progress_ms
+                  }
+                })
+              }]
+            };
+            console.log(`✅ Direct Spotify API call successful (${apiDuration}ms) - bypassed MCP`);
+            return result;
+          } else {
+            return {
+              isError: false,
+              content: [{
+                type: 'text',
+                text: JSON.stringify({ message: 'No track currently playing' })
+              }]
+            };
+          }
+        } catch (directApiError) {
+          console.log(`⚠️  Direct API call failed: ${directApiError.message} - falling back to MCP`);
+          // Fall through to MCP call
+        }
+      }
+      
       // Use a longer timeout for Spotify API calls (60 seconds instead of 30)
       // Spotify API calls can take time, especially if token refresh is needed
       const result = await Promise.race([
@@ -547,6 +602,7 @@ class SpotifyIntegration {
         console.error(`   - Spotify API is slow or unreachable`);
         console.error(`   - Token refresh is hanging`);
         console.error(`   - Network connectivity issues`);
+        console.error(`   - spotify-mcp Python process is hanging`);
       }
       
       throw error;
