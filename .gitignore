@@ -3,6 +3,7 @@
 # dependencies
 node_modules/
 
+.spotify-mcp-cache/
 # Expo
 .expo/
 dist/
