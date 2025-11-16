@@ -252,7 +252,7 @@ class SpotifyIntegration {
         PATH: newPath,
         SPOTIFY_CLIENT_ID: this.clientId,
         SPOTIFY_CLIENT_SECRET: this.clientSecret,
-        SPOTIFY_REDIRECT_URI: 'http://127.0.0.1:3000/api/oauth/callback',
+        SPOTIFY_REDIRECT_URI: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
         SPOTIPY_CACHE_PATH: cacheFile,
       },
     });
