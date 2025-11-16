@@ -329,20 +329,31 @@ class SpotifyIntegration {
     // Ensure token is valid before using
     const validToken = await this.ensureValidToken(accessToken, refreshToken);
 
+    // Create minimal cache file - spotify-mcp needs it, but keep it simple
+    // Store in /tmp for EC2 compatibility (always writable)
+    const systemUsername = process.env.USER || process.env.USERNAME || 'ubuntu';
+    const cacheFile = `/tmp/.cache-${systemUsername}-${userId}`;
+    
+    const cacheData = {
+      access_token: validToken,
+      token_type: 'Bearer',
+      expires_in: 3600,
+      refresh_token: refreshToken,
+      scope: this.scopes,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    };
+    
+    fs.writeFileSync(cacheFile, JSON.stringify(cacheData), 'utf8');
+    fs.chmodSync(cacheFile, 0o666); // World-readable for Python process
+    
+    console.log(`✅ Created minimal cache file: ${cacheFile}`);
+
     // Setup PATH for uvx
     const uvPath = path.join(os.homedir(), '.local', 'bin');
     const envPath = process.env.PATH || '';
     const newPath = `${uvPath}:${envPath}`;
 
-    // Pass credentials directly via environment variables - NO CACHE FILE!
-    // Store tokens in memory/DB like other integrations, pass via env vars
-    console.log(`🔧 Spotify MCP Environment (no cache file):`);
-    console.log(`   Passing credentials via environment variables`);
-    console.log(`   Access token: ${validToken.substring(0, 20)}...`);
-    console.log(`   Refresh token: ${refreshToken ? refreshToken.substring(0, 20) + '...' : 'not provided'}`);
-
-    // Create transport with credentials as environment variables
-    // spotify-mcp should be able to use these directly
+    // Create transport - spotipy will read from cache file
     const transport = new StdioClientTransport({
       command: 'uvx',
       args: [
@@ -356,10 +367,7 @@ class SpotifyIntegration {
         SPOTIPY_CLIENT_ID: this.clientId,
         SPOTIPY_CLIENT_SECRET: this.clientSecret,
         SPOTIPY_REDIRECT_URI: 'https://api.bridge.neviljobanputra.com/api/oauth/callback',
-        // Pass tokens directly - no cache file needed!
-        SPOTIPY_ACCESS_TOKEN: validToken,
-        SPOTIPY_REFRESH_TOKEN: refreshToken,
-        SPOTIPY_USER_ID: userId,
+        SPOTIPY_CACHE_PATH: cacheFile, // Direct file path - simplest approach
         HOME: os.homedir(),
         PWD: process.cwd(),
       },
