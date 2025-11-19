@@ -206,19 +206,30 @@ class JiraIntegration {
       }
     );
 
-    const authListener = chunk => {
+    let authReject;
+    const authPromise = new Promise((_, reject) => {
+      authReject = reject;
+    });
+
+    const captureAuthLink = chunk => {
       const text = chunk.toString();
       const match = text.match(/https:\/\/mcp\.atlassian\.com\/[^\s]+/);
       if (match) {
         connection.pendingAuthUrl = match[0];
+        if (authReject) {
+          authReject(new Error(`OAuth_AUTHENTICATION_REQUIRED: ${connection.pendingAuthUrl}`));
+          authReject = null;
+        }
       }
     };
 
-    transport.process?.stderr?.on('data', authListener);
+    transport.process?.stdout?.on('data', captureAuthLink);
+    transport.process?.stderr?.on('data', captureAuthLink);
 
     try {
       await Promise.race([
         client.connect(transport),
+        authPromise,
         new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Connection timeout - OAuth may be required')), 30000)
         ),
@@ -231,7 +242,8 @@ class JiraIntegration {
       connection.pendingAuthUrl = null;
     } catch (error) {
       connection._connecting = false;
-      transport.process?.stderr?.off('data', authListener);
+      transport.process?.stdout?.off('data', captureAuthLink);
+      transport.process?.stderr?.off('data', captureAuthLink);
       try {
         await transport.close();
       } catch (e) {
@@ -254,7 +266,8 @@ class JiraIntegration {
 
       throw error;
     } finally {
-      transport.process?.stderr?.off('data', authListener);
+      transport.process?.stdout?.off('data', captureAuthLink);
+      transport.process?.stderr?.off('data', captureAuthLink);
     }
   }
 
