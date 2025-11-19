@@ -26,6 +26,25 @@ class JiraIntegration {
     this.remoteArgs = process.env.ATLASSIAN_MCP_ARGS
       ? process.env.ATLASSIAN_MCP_ARGS.split(' ')
       : ['-y', 'mcp-remote'];
+    
+    // Validate npx availability on startup (warn but don't fail)
+    this.validateNpxAvailability();
+  }
+
+  /**
+   * Validate that npx is available (for better error messages on EC2)
+   */
+  validateNpxAvailability() {
+    if (this.remoteCommand === 'npx' && !process.env.ATLASSIAN_MCP_COMMAND) {
+      try {
+        const { execSync } = require('child_process');
+        execSync('which npx', { timeout: 2000, stdio: 'ignore' });
+      } catch (error) {
+        console.warn('⚠️  npx not found in PATH. JIRA MCP may fail to connect.');
+        console.warn('   On EC2, ensure Node.js is installed: sudo yum install nodejs npm (Amazon Linux)');
+        console.warn('   Or set ATLASSIAN_MCP_COMMAND to the full path of npx');
+      }
+    }
   }
 
   /**
@@ -37,6 +56,8 @@ class JiraIntegration {
       throw new Error('Jira OAuth token missing – reconnect Jira from settings.');
     }
 
+    // CRITICAL: Verify token is valid before passing to mcp-remote
+    // On EC2, mcp-remote can't do OAuth, so we must have a valid token
     let verifiedTenant = {};
     try {
       verifiedTenant = await this.getCloudIdFromToken(config.token);
@@ -44,8 +65,15 @@ class JiraIntegration {
         `✅ Jira token verified for site ${verifiedTenant.siteUrl || 'unknown-site'} (${verifiedTenant.cloudId})`
       );
     } catch (error) {
-      console.warn(`⚠️  Jira token verification failed: ${error.message}`);
-      // Non-fatal – Atlassian Remote MCP may still complete OAuth. We'll fall back to stored config.
+      console.error(`❌ Jira token verification failed: ${error.message}`);
+      console.error('   On EC2, mcp-remote cannot do OAuth - token must be valid');
+      console.error('   Please reconnect Jira to get a fresh token');
+      // On EC2, we should fail here rather than let mcp-remote try OAuth
+      if (process.env.NODE_ENV === 'production' || process.env.BACKEND_URL) {
+        throw new Error(`Invalid Jira token. On EC2, token must be valid. Please reconnect: ${error.message}`);
+      }
+      // Non-fatal in development – Atlassian Remote MCP may still complete OAuth locally
+      console.warn('   Continuing anyway (development mode) - mcp-remote may attempt OAuth');
     }
 
     return {
@@ -165,6 +193,10 @@ class JiraIntegration {
       }
 
       if (error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND')) {
+        console.error('   💡 Network error detected. On EC2, check:');
+        console.error('      - Security groups allow outbound HTTPS (port 443)');
+        console.error('      - Internet gateway is attached to VPC');
+        console.error('      - DNS resolution is working (try: nslookup mcp.atlassian.com)');
         return {
           isError: true,
           content: [
@@ -172,7 +204,24 @@ class JiraIntegration {
               type: 'text',
               text: JSON.stringify({
                 error: 'Jira MCP unreachable',
-                message: 'The Atlassian remote MCP server is not reachable right now. Please retry shortly.',
+                message: 'The Atlassian remote MCP server is not reachable right now. Please retry shortly. On EC2, check network connectivity and security groups.',
+              }),
+            },
+          ],
+        };
+      }
+      
+      // Handle npx/node not found errors
+      if (error.message.includes('ENOENT') || error.message.includes('not found')) {
+        console.error('   💡 npx/node not found. On EC2, ensure Node.js is installed.');
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                error: 'Jira MCP setup error',
+                message: 'npx is not available. On EC2, ensure Node.js and npm are installed and in PATH. You can also set ATLASSIAN_MCP_COMMAND to the full path of npx.',
               }),
             },
           ],
@@ -259,6 +308,12 @@ class JiraIntegration {
     const env = this.prepareRemoteEnv(connection);
 
     console.log(`🔌 Connecting to Atlassian remote MCP (${serverUrl})...`);
+    console.log(`   Command: ${this.remoteCommand} ${[...this.remoteArgs, serverUrl].join(' ')}`);
+    console.log(`   Environment: ATLASSIAN_ACCESS_TOKEN=${connection.token ? '***' : 'missing'}, ATLASSIAN_CLOUD_ID=${connection.cloudId || 'missing'}`);
+    
+    // Log backend URL for debugging (important for OAuth redirects on EC2)
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:3000';
+    console.log(`   Backend URL: ${backendUrl} (used for OAuth redirects)`);
 
     const transport = new StdioClientTransport({
       command: this.remoteCommand,
@@ -280,11 +335,20 @@ class JiraIntegration {
 
     const authLinkListener = chunk => {
       const text = chunk.toString();
+      
+      // Log mcp-remote output for debugging (especially important on EC2)
+      if (text.includes('wait-for-auth') || text.includes('127.0.0.1')) {
+        console.warn('⚠️  mcp-remote is trying to do OAuth on localhost (this won\'t work on EC2)');
+        console.warn('   Ensure ATLASSIAN_ACCESS_TOKEN is set and valid');
+        console.warn('   Output:', text.substring(0, 200));
+      }
+      
       const match = text.match(/https:\/\/mcp\.atlassian\.com\/[^\s]+/);
 
       if (match) {
         connection.pendingAuthUrl = match[0];
         console.log(`🔐 Jira OAuth link captured: ${connection.pendingAuthUrl}`);
+        console.warn('⚠️  mcp-remote is requesting OAuth - this should not happen if token is valid');
         authPromiseReject?.(new Error(`${OAUTH_ERROR}: ${connection.pendingAuthUrl}`));
       }
     };
@@ -297,11 +361,21 @@ class JiraIntegration {
     transport.process?.stderr?.on('data', authLinkListener);
 
     try {
+      // On EC2, mcp-remote may take longer to initialize, especially if it's trying to do OAuth
+      // Increase timeout to 30 seconds to allow time for token validation
+      const connectionTimeout = 30000;
+      
       await Promise.race([
         client.connect(transport),
         authPromise,
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Connection timeout - OAuth may be required')), 15000)
+          setTimeout(() => {
+            // Check if mcp-remote is stuck in "wait-for-auth" (common on EC2)
+            console.error('❌ Connection timeout after 30s');
+            console.error('   This usually means mcp-remote is waiting for OAuth on localhost');
+            console.error('   On EC2, ensure ATLASSIAN_ACCESS_TOKEN is valid and not expired');
+            reject(new Error('Connection timeout - mcp-remote may be waiting for OAuth. On EC2, ensure token is valid.'));
+          }, connectionTimeout)
         ),
       ]);
 
@@ -323,6 +397,23 @@ class JiraIntegration {
         throw new Error(`${OAUTH_ERROR}: ${url}`);
       }
 
+      // Enhanced error logging for EC2 debugging
+      const errorMessage = error.message || String(error);
+      console.error('❌ JIRA MCP connection failed:', errorMessage);
+      
+      // Check for common EC2 issues
+      if (errorMessage.includes('ENOENT') || errorMessage.includes('not found')) {
+        console.error('   💡 This usually means npx/node is not in PATH. On EC2, ensure Node.js is installed and in PATH.');
+        console.error('   💡 You can set ATLASSIAN_MCP_COMMAND to the full path of npx if needed.');
+      }
+      if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND')) {
+        console.error('   💡 Network connectivity issue. Check EC2 security groups and outbound internet access.');
+        console.error('   💡 Ensure the EC2 instance can reach mcp.atlassian.com');
+      }
+      if (errorMessage.includes('timeout')) {
+        console.error('   💡 Connection timeout. This may indicate network issues or firewall blocking.');
+      }
+
       throw error;
     } finally {
       transport.process?.stdout?.off('data', authLinkListener);
@@ -341,14 +432,31 @@ class JiraIntegration {
   }
 
   prepareRemoteEnv(connection) {
-    return {
+    const env = {
       ...process.env,
       ATLASSIAN_ACCESS_TOKEN: connection.token || '',
       ATLASSIAN_CLOUD_ID: connection.cloudId || '',
       ATLASSIAN_SITE_URL: connection.siteUrl || '',
+      // Prevent mcp-remote from opening browser (critical for EC2)
       BROWSER: 'none',
       NO_BROWSER: '1',
+      // Additional flags to prevent interactive OAuth on EC2
+      CI: 'true',
+      // Tell mcp-remote to use provided token instead of doing OAuth
+      // (mcp-remote should detect ATLASSIAN_ACCESS_TOKEN and skip OAuth)
     };
+    
+    // Log what we're passing (without exposing token)
+    console.log(`   Environment variables for mcp-remote:`, {
+      ATLASSIAN_ACCESS_TOKEN: connection.token ? '***set***' : 'missing',
+      ATLASSIAN_CLOUD_ID: connection.cloudId || 'missing',
+      ATLASSIAN_SITE_URL: connection.siteUrl || 'missing',
+      BROWSER: env.BROWSER,
+      NO_BROWSER: env.NO_BROWSER,
+      CI: env.CI,
+    });
+    
+    return env;
   }
 
   isOAuthError(error) {
