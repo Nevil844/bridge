@@ -3,112 +3,134 @@ const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio
 const axios = require('axios');
 const oauthHandler = require('../../oauth/handler');
 
+const OAUTH_ERROR = 'OAuth_AUTHENTICATION_REQUIRED';
+
 /**
- * JIRA MCP Integration
- * Uses Atlassian's Remote MCP Server via mcp-remote.
- * When OAuth is required, surfaces the authorization URL back to the chatbot
- * so the user can click it and complete login.
- * Docs: https://www.atlassian.com/blog/announcements/remote-mcp-server
+ * Jira MCP Integration
+ * Rewritten to follow the hardened patterns we now use for GitHub (explicit token checks),
+ * Zerodha (pre-flight verification), and Zomato (lazy mcp-remote connect with OAuth backpressure).
+ *
+ * References:
+ * - Atlassian Remote MCP Server announcement/blog (Nov 2024) – OAuth-in-browser flow
+ * - mcp-jira / jira-context-mcp OSS repos – examples of tool surfaces and issue workflows
  */
 class JiraIntegration {
   constructor() {
     this.name = 'Jira';
     this.type = 'jira';
-    this.description = 'Create and manage issues, projects, workflows, and more';
+    this.description = 'Create and manage Jira projects, issues, boards, and workflows';
     this.icon = 'https://wac-cdn.atlassian.com/assets/img/favicons/atlassian/favicon-32x32.png';
+
     this.serverUrl = process.env.ATLASSIAN_MCP_SERVER_URL || 'https://mcp.atlassian.com/v1/sse';
+    this.remoteCommand = process.env.ATLASSIAN_MCP_COMMAND || 'npx';
+    this.remoteArgs = process.env.ATLASSIAN_MCP_ARGS
+      ? process.env.ATLASSIAN_MCP_ARGS.split(' ')
+      : ['-y', 'mcp-remote'];
   }
 
   /**
-   * Get cloud ID and site URL from access token
+   * Connect builds a lazy connection descriptor – we do NOT spin up the remote process here.
+   * @param {Object} config
    */
-  async getCloudIdFromToken(accessToken) {
-    try {
-      const response = await axios.get('https://api.atlassian.com/oauth/token/accessible-resources', {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/json',
-        },
-        timeout: 10000,
-      });
-
-      if (response.data && response.data.length > 0) {
-        const resource = response.data[0];
-        return {
-          cloudId: resource.id,
-          siteUrl: resource.url,
-        };
-      }
-      throw new Error('No accessible Jira resources found');
-    } catch (error) {
-      throw new Error(`Failed to get cloud ID: ${error.message}`);
+  async connect(config = {}) {
+    if (!config.token) {
+      throw new Error('Jira OAuth token missing – reconnect Jira from settings.');
     }
-  }
 
-  /**
-   * Prepare connection metadata (lazy connection via mcp-remote)
-   */
-  async connect(config) {
+    let verifiedTenant = {};
+    try {
+      verifiedTenant = await this.getCloudIdFromToken(config.token);
+      console.log(
+        `✅ Jira token verified for site ${verifiedTenant.siteUrl || 'unknown-site'} (${verifiedTenant.cloudId})`
+      );
+    } catch (error) {
+      console.warn(`⚠️  Jira token verification failed: ${error.message}`);
+      // Non-fatal – Atlassian Remote MCP may still complete OAuth. We'll fall back to stored config.
+    }
+
     return {
       client: null,
       transport: null,
-      serverUrl: config?.serverUrl || this.serverUrl,
-      config,
-      userId: config?.userId || 'default-user',
-      oauthCompleted: !!config?.token,
+      serverUrl: config.serverUrl || this.serverUrl,
+      userId: config.userId || 'default-user',
+      token: config.token,
+      siteUrl: config.siteUrl || verifiedTenant.siteUrl || null,
+      cloudId: config.cloudId || verifiedTenant.cloudId || null,
+      oauthCompleted: true,
       pendingAuthUrl: null,
       _connecting: false,
+      _lastAuthFailure: null,
     };
   }
 
   /**
-   * Disconnect from JIRA MCP server
+   * Lookup accessible Jira tenants for the token – mirrors the REST guidance from Atlassian docs.
    */
+  async getCloudIdFromToken(accessToken) {
+    const response = await axios.get('https://api.atlassian.com/oauth/token/accessible-resources', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+      },
+      timeout: 10000,
+    });
+
+    if (Array.isArray(response.data) && response.data.length > 0) {
+      const resource = response.data[0];
+      return {
+        cloudId: resource.id,
+        siteUrl: resource.url,
+      };
+    }
+
+    throw new Error('No accessible Jira Cloud sites tied to this token');
+  }
+
   async disconnect(connection) {
-    if (connection && connection.client) {
+    if (!connection) return;
+
+    if (connection.client) {
       try {
         await connection.client.close();
       } catch (error) {
-        console.error('Error disconnecting JIRA:', error.message);
+        console.error('Error closing Jira MCP client:', error.message);
       }
     }
-    if (connection && connection.transport) {
+
+    if (connection.transport) {
       try {
         await connection.transport.close();
-      } catch (error) {
-        // Ignore
+      } catch {
+        // ignore
       }
     }
+
+    connection.client = null;
+    connection.transport = null;
+    connection._connecting = false;
   }
 
-  /**
-   * Get available tools from JIRA MCP
-   */
   async getTools(connection) {
     const client = await this.ensureConnection(connection, { forTools: true });
     if (!client) {
-      // OAuth needed – return authenticate tool
       return this.getOAuthToolList(connection);
     }
 
     try {
       const response = await client.listTools();
       const tools = response.tools || [];
-      console.log(`✅ JIRA: Got ${tools.length} tools from MCP server`);
+      console.log(`✅ Jira: ${tools.length} MCP tools discovered`);
       return tools;
     } catch (error) {
-      if (error.message && error.message.includes('OAuth_AUTHENTICATION_REQUIRED')) {
+      if (this.isOAuthError(error)) {
         return this.getOAuthToolList(connection);
       }
-      console.error('❌ Error getting JIRA tools:', error.message);
+      console.error('❌ Jira getTools failure:', error.message);
       throw error;
     }
   }
 
-  /**
-   * Call a tool on the JIRA MCP server
-   */
-  async callTool(connection, toolName, args) {
+  async callTool(connection, toolName, args = {}) {
     if (toolName === 'jira_authenticate') {
       return this.buildOAuthResponse(connection);
     }
@@ -119,30 +141,75 @@ class JiraIntegration {
     }
 
     try {
-      console.log(`🔧 JIRA callTool: ${toolName}`, JSON.stringify(args, null, 2).substring(0, 500));
+      console.log(`🔧 Jira callTool -> ${toolName}`, JSON.stringify(args).substring(0, 400));
       const result = await client.callTool({ name: toolName, arguments: args });
+
       if (result.isError) {
-        const errorText = result.content?.[0]?.text || JSON.stringify(result.content);
-        console.log(`   ❌ JIRA tool ${toolName} error:`, errorText.substring(0, 300));
+        const text = result.content?.[0]?.text || '';
+        console.error(`   ❌ Jira tool error: ${text.substring(0, 300)}`);
+
+        if (this.isSessionExpired(text) && toolName !== 'jira_authenticate') {
+          console.log('   🔄 Session invalid – surfacing OAuth response');
+          return this.buildOAuthResponse(connection);
+        }
       } else {
-        console.log(`   ✅ JIRA tool ${toolName} success`);
+        console.log(`   ✅ Jira tool ${toolName} completed`);
       }
+
       return result;
     } catch (error) {
-      if (error.message && error.message.includes('OAuth_AUTHENTICATION_REQUIRED')) {
+      console.error(`❌ Jira callTool exception (${toolName}):`, error.message);
+
+      if (this.isOAuthError(error)) {
         return this.buildOAuthResponse(connection);
       }
-      console.error(`❌ Error calling JIRA tool ${toolName}:`, error.message);
+
+      if (error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND')) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                error: 'Jira MCP unreachable',
+                message: 'The Atlassian remote MCP server is not reachable right now. Please retry shortly.',
+              }),
+            },
+          ],
+        };
+      }
+
       throw error;
     }
   }
 
-  /**
-   * Ensure remote connection (via mcp-remote). Returns client or null if OAuth needed.
-   */
+  async getResources(connection) {
+    const client = await this.ensureConnection(connection, { forTools: true });
+    if (!client) {
+      return [];
+    }
+
+    try {
+      const response = await client.listResources();
+      return response.resources || [];
+    } catch (error) {
+      console.error('❌ Jira listResources failed:', error.message);
+      return [];
+    }
+  }
+
+  async readResource(connection, resourceUri) {
+    const client = await this.ensureConnection(connection);
+    if (!client) {
+      throw new Error('Jira authentication required before reading resources');
+    }
+
+    return client.readResource({ uri: resourceUri });
+  }
+
   async ensureConnection(connection, { forTools = false } = {}) {
     if (!connection) {
-      throw new Error('JIRA connection not initialized');
+      throw new Error('Jira connection not initialized');
     }
 
     if (connection.client) {
@@ -150,17 +217,19 @@ class JiraIntegration {
     }
 
     if (connection._connecting) {
-      let waitCount = 0;
-      while (connection._connecting && waitCount < 60) {
+      let waitCycles = 0;
+      while (connection._connecting && waitCycles < 40) {
         await new Promise(resolve => setTimeout(resolve, 500));
-        waitCount++;
-        if (connection.client) {
+        waitCycles += 1;
+
+        if (connection.client && !connection._connecting) {
           return connection.client;
         }
       }
+
       if (connection._connecting) {
-        console.warn('JIRA connection attempt timed out');
-        return null;
+        console.warn('Jira connection attempt still in progress after 20s, aborting wait.');
+        connection._connecting = false;
       }
     }
 
@@ -168,13 +237,16 @@ class JiraIntegration {
       await this.connectRemote(connection);
       return connection.client;
     } catch (error) {
-      if (error.message && error.message.includes('OAuth_AUTHENTICATION_REQUIRED')) {
-        console.log('⚠️  JIRA: OAuth authentication required');
+      if (this.isOAuthError(error)) {
+        console.log('🔐 Jira OAuth required');
         return null;
       }
+
       if (forTools) {
+        console.warn('⚠️  Jira ensureConnection (for tools) failed:', error.message);
         return null;
       }
+
       throw error;
     }
   }
@@ -184,98 +256,126 @@ class JiraIntegration {
     connection.pendingAuthUrl = null;
 
     const serverUrl = connection.serverUrl || this.serverUrl;
-    console.log(`🔌 Establishing JIRA MCP connection via Atlassian Remote MCP Server...`);
+    const env = this.prepareRemoteEnv(connection);
+
+    console.log(`🔌 Connecting to Atlassian remote MCP (${serverUrl})...`);
 
     const transport = new StdioClientTransport({
-      command: 'npx',
-      args: ['-y', 'mcp-remote', serverUrl],
-      env: {
-        ...process.env,
-        BROWSER: 'none', // Prevent launching browser on the server
-        NO_BROWSER: '1',
-      },
+      command: this.remoteCommand,
+      args: [...this.remoteArgs, serverUrl],
+      env,
     });
 
     const client = new Client(
       {
-        name: 'bridge-ai-jira-remote',
-        version: '1.0.0',
+        name: 'bridge-ai-jira',
+        version: '2.0.0',
       },
       {
         capabilities: {},
       }
     );
 
-    let authReject;
-    const authPromise = new Promise((_, reject) => {
-      authReject = reject;
-    });
+    let authPromiseReject = null;
 
-    const captureAuthLink = chunk => {
+    const authLinkListener = chunk => {
       const text = chunk.toString();
       const match = text.match(/https:\/\/mcp\.atlassian\.com\/[^\s]+/);
+
       if (match) {
         connection.pendingAuthUrl = match[0];
-        if (authReject) {
-          authReject(new Error(`OAuth_AUTHENTICATION_REQUIRED: ${connection.pendingAuthUrl}`));
-          authReject = null;
-        }
+        console.log(`🔐 Jira OAuth link captured: ${connection.pendingAuthUrl}`);
+        authPromiseReject?.(new Error(`${OAUTH_ERROR}: ${connection.pendingAuthUrl}`));
       }
     };
 
-    transport.process?.stdout?.on('data', captureAuthLink);
-    transport.process?.stderr?.on('data', captureAuthLink);
+    const authPromise = new Promise((_, reject) => {
+      authPromiseReject = reject;
+    });
+
+    transport.process?.stdout?.on('data', authLinkListener);
+    transport.process?.stderr?.on('data', authLinkListener);
 
     try {
       await Promise.race([
         client.connect(transport),
         authPromise,
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Connection timeout - OAuth may be required')), 30000)
+          setTimeout(() => reject(new Error('Connection timeout - OAuth may be required')), 15000)
         ),
       ]);
 
-      console.log(`✅ JIRA MCP connected successfully via Atlassian Remote MCP Server`);
+      console.log('✅ Jira MCP connected');
       connection.client = client;
       connection.transport = transport;
       connection._connecting = false;
       connection.pendingAuthUrl = null;
     } catch (error) {
+      await this.safeCloseTransport(transport, authLinkListener);
+      connection.client = null;
+      connection.transport = null;
       connection._connecting = false;
-      transport.process?.stdout?.off('data', captureAuthLink);
-      transport.process?.stderr?.off('data', captureAuthLink);
-      try {
-        await transport.close();
-      } catch (e) {
-        // Ignore
-      }
 
-      if (
-        connection.pendingAuthUrl ||
-        error.message.includes('OAuth') ||
-        error.message.includes('authorize') ||
-        error.message.includes('Authentication required')
-      ) {
+      if (this.isOAuthError(error) || connection.pendingAuthUrl) {
         const url =
           connection.pendingAuthUrl ||
-          (connection.userId ? oauthHandler.getAuthUrl('jira', connection.userId) : null) ||
-          'https://mcp.atlassian.com/v1/authorize';
-        connection.pendingAuthUrl = url;
-        throw new Error(`OAuth_AUTHENTICATION_REQUIRED: ${url}`);
+          oauthHandler.getAuthUrl('jira', connection.userId || 'default-user');
+        throw new Error(`${OAUTH_ERROR}: ${url}`);
       }
 
       throw error;
     } finally {
-      transport.process?.stdout?.off('data', captureAuthLink);
-      transport.process?.stderr?.off('data', captureAuthLink);
+      transport.process?.stdout?.off('data', authLinkListener);
+      transport.process?.stderr?.off('data', authLinkListener);
     }
   }
 
-  getOAuthToolList(connection) {
+  async safeCloseTransport(transport, listener) {
+    transport.process?.stdout?.off('data', listener);
+    transport.process?.stderr?.off('data', listener);
+    try {
+      await transport.close();
+    } catch {
+      // ignore
+    }
+  }
+
+  prepareRemoteEnv(connection) {
+    return {
+      ...process.env,
+      ATLASSIAN_ACCESS_TOKEN: connection.token || '',
+      ATLASSIAN_CLOUD_ID: connection.cloudId || '',
+      ATLASSIAN_SITE_URL: connection.siteUrl || '',
+      BROWSER: 'none',
+      NO_BROWSER: '1',
+    };
+  }
+
+  isOAuthError(error) {
+    return (
+      !error
+      ? false
+      : error.message?.includes(OAUTH_ERROR) ||
+        error.message?.includes('OAuth') ||
+        error.message?.includes('authorize') ||
+        error.message?.includes('Authentication required')
+    );
+  }
+
+  isSessionExpired(text = '') {
+    return (
+      text.includes('Unauthorized') ||
+      text.includes('invalid token') ||
+      text.includes('expired') ||
+      text.includes('OAuth')
+    );
+  }
+
+  getOAuthToolList() {
     return [
       {
         name: 'jira_authenticate',
-        description: 'Complete Jira authentication so tools can be used.',
+        description: 'Complete Jira OAuth to unlock MCP tools.',
         inputSchema: {
           type: 'object',
           properties: {},
@@ -287,8 +387,7 @@ class JiraIntegration {
   buildOAuthResponse(connection) {
     const url =
       connection?.pendingAuthUrl ||
-      (connection?.userId ? oauthHandler.getAuthUrl('jira', connection.userId) : null) ||
-      'https://mcp.atlassian.com/v1/authorize';
+      oauthHandler.getAuthUrl('jira', connection?.userId || 'default-user');
 
     return {
       isError: false,
@@ -296,7 +395,8 @@ class JiraIntegration {
         {
           type: 'text',
           text: JSON.stringify({
-            message: 'Please authorize Jira by opening the link below, completing login, then retry your request.',
+            message:
+              'Authenticate with Jira by opening the link below, completing login, then ask your question again.',
             oauthUrl: url,
           }),
         },
