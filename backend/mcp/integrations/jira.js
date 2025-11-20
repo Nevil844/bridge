@@ -1,18 +1,25 @@
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
 const axios = require('axios');
-const oauthHandler = require('../../oauth/handler');
-
-const OAUTH_ERROR = 'OAuth_AUTHENTICATION_REQUIRED';
 
 /**
- * Jira MCP Integration
- * Rewritten to follow the hardened patterns we now use for GitHub (explicit token checks),
- * Zerodha (pre-flight verification), and Zomato (lazy mcp-remote connect with OAuth backpressure).
- *
- * References:
- * - Atlassian Remote MCP Server announcement/blog (Nov 2024) – OAuth-in-browser flow
- * - mcp-jira / jira-context-mcp OSS repos – examples of tool surfaces and issue workflows
+ * JIRA MCP Integration
+ * 
+ * This integration supports both Atlassian Remote MCP Server and direct JIRA API calls.
+ * 
+ * Atlassian Remote MCP Server approach:
+ * - Uses npx mcp-remote to connect to Atlassian's hosted MCP server
+ * - Requires OAuth token and cloud ID
+ * - Provides rich MCP tools for JIRA and Confluence
+ * 
+ * Direct API approach (fallback):
+ * - Uses JIRA REST API directly
+ * - Simpler, more reliable
+ * - Requires base URL, email, and API token
+ * 
+ * Environment Variables:
+ * - JIRA_USE_DIRECT_API: Set to 'true' to use direct API instead of MCP remote
+ * - ATLASSIAN_MCP_SERVER_URL: URL for Atlassian remote MCP (default: https://mcp.atlassian.com/v1/sse)
  */
 class JiraIntegration {
   constructor() {
@@ -20,116 +27,120 @@ class JiraIntegration {
     this.type = 'jira';
     this.description = 'Create and manage Jira projects, issues, boards, and workflows';
     this.icon = 'https://wac-cdn.atlassian.com/assets/img/favicons/atlassian/favicon-32x32.png';
-
-    this.serverUrl = process.env.ATLASSIAN_MCP_SERVER_URL || 'https://mcp.atlassian.com/v1/sse';
-    this.remoteCommand = process.env.ATLASSIAN_MCP_COMMAND || 'npx';
-    this.remoteArgs = process.env.ATLASSIAN_MCP_ARGS
-      ? process.env.ATLASSIAN_MCP_ARGS.split(' ')
-      : ['-y', 'mcp-remote'];
     
-    // Validate npx availability on startup (warn but don't fail)
-    this.validateNpxAvailability();
+    // Configuration
+    this.useDirectApi = process.env.JIRA_USE_DIRECT_API === 'true';
+    this.serverUrl = process.env.ATLASSIAN_MCP_SERVER_URL || 'https://mcp.atlassian.com/v1/sse';
+    
+    // OAuth error constant
+    this.OAUTH_ERROR = 'OAuth_AUTHENTICATION_REQUIRED';
   }
 
   /**
-   * Validate that npx is available (for better error messages on EC2)
-   */
-  validateNpxAvailability() {
-    if (this.remoteCommand === 'npx' && !process.env.ATLASSIAN_MCP_COMMAND) {
-      try {
-        const { execSync } = require('child_process');
-        execSync('which npx', { timeout: 2000, stdio: 'ignore' });
-      } catch (error) {
-        console.warn('⚠️  npx not found in PATH. JIRA MCP may fail to connect.');
-        console.warn('   On EC2, ensure Node.js is installed: sudo yum install nodejs npm (Amazon Linux)');
-        console.warn('   Or set ATLASSIAN_MCP_COMMAND to the full path of npx');
-      }
-    }
-  }
-
-  /**
-   * Connect builds a lazy connection descriptor – we do NOT spin up the remote process here.
-   * @param {Object} config
+   * Connect to JIRA
+   * Supports both MCP remote and direct API modes
    */
   async connect(config = {}) {
     if (!config.token) {
-      throw new Error('Jira OAuth token missing – reconnect Jira from settings.');
+      throw new Error('JIRA access token is required');
     }
 
-    // CRITICAL: Verify token is valid before passing to mcp-remote
-    // On EC2, mcp-remote can't do OAuth, so we must have a valid token
-    let verifiedTenant = {};
+    // Verify token and get cloud ID
+    let cloudInfo = null;
+    let tokenValid = false;
     try {
-      verifiedTenant = await this.getCloudIdFromToken(config.token);
-      console.log(
-        `✅ Jira token verified for site ${verifiedTenant.siteUrl || 'unknown-site'} (${verifiedTenant.cloudId})`
-      );
+      cloudInfo = await this.getAccessibleResources(config.token);
+      console.log(`✅ JIRA token verified for site: ${cloudInfo.siteUrl} (${cloudInfo.cloudId})`);
+      tokenValid = true;
     } catch (error) {
-      console.error(`❌ Jira token verification failed: ${error.message}`);
-      console.error('   On EC2, mcp-remote cannot do OAuth - token must be valid');
-      console.error('   Please reconnect Jira to get a fresh token');
-      // On EC2, we should fail here rather than let mcp-remote try OAuth
-      if (process.env.NODE_ENV === 'production' || process.env.BACKEND_URL) {
-        throw new Error(`Invalid Jira token. On EC2, token must be valid. Please reconnect: ${error.message}`);
-      }
-      // Non-fatal in development – Atlassian Remote MCP may still complete OAuth locally
-      console.warn('   Continuing anyway (development mode) - mcp-remote may attempt OAuth');
-    }
-
-    return {
-      client: null,
-      transport: null,
-      serverUrl: config.serverUrl || this.serverUrl,
-      userId: config.userId || 'default-user',
-      token: config.token,
-      siteUrl: config.siteUrl || verifiedTenant.siteUrl || null,
-      cloudId: config.cloudId || verifiedTenant.cloudId || null,
-      oauthCompleted: true,
-      pendingAuthUrl: null,
-      _connecting: false,
-      _lastAuthFailure: null,
-    };
-  }
-
-  /**
-   * Lookup accessible Jira tenants for the token – mirrors the REST guidance from Atlassian docs.
-   */
-  async getCloudIdFromToken(accessToken) {
-    const response = await axios.get('https://api.atlassian.com/oauth/token/accessible-resources', {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/json',
-      },
-      timeout: 10000,
-    });
-
-    if (Array.isArray(response.data) && response.data.length > 0) {
-      const resource = response.data[0];
-      return {
-        cloudId: resource.id,
-        siteUrl: resource.url,
+      console.error(`❌ JIRA token verification failed: ${error.message}`);
+      // Don't throw - return connection object with error state
+      // This allows the integration to provide OAuth placeholder tools
+      cloudInfo = {
+        cloudId: null,
+        siteUrl: null,
+        name: null,
       };
     }
 
-    throw new Error('No accessible Jira Cloud sites tied to this token');
+    // Determine mode
+    if (this.useDirectApi) {
+      // Direct API mode - no MCP client needed
+      return {
+        mode: 'direct',
+        token: config.token,
+        cloudId: cloudInfo.cloudId,
+        siteUrl: cloudInfo.siteUrl,
+        userId: config.userId || 'default-user',
+        email: config.email || null,
+        tokenValid,
+      };
+    } else {
+      // MCP Remote mode - lazy connection
+      return {
+        mode: 'mcp',
+        client: null,
+        transport: null,
+        token: config.token,
+        cloudId: cloudInfo.cloudId,
+        siteUrl: cloudInfo.siteUrl,
+        userId: config.userId || 'default-user',
+        _connecting: false,
+        tokenValid,
+      };
+    }
   }
 
+  /**
+   * Get accessible JIRA resources for the token
+   */
+  async getAccessibleResources(accessToken) {
+    try {
+      const response = await axios.get('https://api.atlassian.com/oauth/token/accessible-resources', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+        },
+        timeout: 10000,
+      });
+
+      if (Array.isArray(response.data) && response.data.length > 0) {
+        const resource = response.data[0];
+        return {
+          cloudId: resource.id,
+          siteUrl: resource.url,
+          name: resource.name,
+        };
+      }
+
+      throw new Error('No accessible JIRA Cloud sites found for this token');
+    } catch (error) {
+      if (error.response?.status === 401) {
+        throw new Error('Token is invalid or expired. Please reconnect JIRA.');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Disconnect
+   */
   async disconnect(connection) {
     if (!connection) return;
 
-    if (connection.client) {
+    if (connection.mode === 'mcp' && connection.client) {
       try {
         await connection.client.close();
       } catch (error) {
-        console.error('Error closing Jira MCP client:', error.message);
+        console.error('Error closing JIRA MCP client:', error.message);
       }
     }
 
     if (connection.transport) {
       try {
         await connection.transport.close();
-      } catch {
-        // ignore
+      } catch (error) {
+        // Ignore
       }
     }
 
@@ -138,186 +149,481 @@ class JiraIntegration {
     connection._connecting = false;
   }
 
+  /**
+   * Get available tools
+   */
   async getTools(connection) {
-    const client = await this.ensureConnection(connection, { forTools: true });
-    if (!client) {
-      return this.getOAuthToolList(connection);
+    if (!connection) {
+      throw new Error('JIRA connection not initialized');
     }
 
-    try {
-      const response = await client.listTools();
-      const tools = response.tools || [];
-      console.log(`✅ Jira: ${tools.length} MCP tools discovered`);
-      return tools;
-    } catch (error) {
-      if (this.isOAuthError(error)) {
-        return this.getOAuthToolList(connection);
+    // If token is invalid, return OAuth placeholder tools
+    if (connection.tokenValid === false) {
+      console.log('⚠️  JIRA token is invalid, returning OAuth placeholder tools');
+      return this.getOAuthPlaceholderTools();
+    }
+
+    if (connection.mode === 'direct') {
+      return this.getDirectApiTools();
+    } else {
+      // MCP mode - connect and get tools from remote
+      try {
+        const client = await this.ensureMCPConnection(connection);
+        if (!client) {
+          return this.getOAuthPlaceholderTools();
+        }
+
+        const response = await client.listTools();
+        const tools = response.tools || [];
+        console.log(`✅ JIRA MCP: ${tools.length} tools available`);
+        return tools;
+      } catch (error) {
+        if (this.isOAuthError(error)) {
+          return this.getOAuthPlaceholderTools();
+        }
+        console.error('Error getting JIRA tools:', error.message);
+        // Fallback to direct API tools on error
+        return this.getDirectApiTools();
       }
-      console.error('❌ Jira getTools failure:', error.message);
-      throw error;
     }
   }
 
+  /**
+   * Get tools for direct API mode
+   */
+  getDirectApiTools() {
+    return [
+      {
+        name: 'jira_search_issues',
+        description: 'Search JIRA issues using JQL (JIRA Query Language)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            jql: {
+              type: 'string',
+              description: 'JQL query (e.g., "project = PROJ AND status = Open")'
+            },
+            maxResults: {
+              type: 'number',
+              description: 'Maximum number of results (default: 50, max: 100)'
+            },
+          },
+          required: ['jql']
+        }
+      },
+      {
+        name: 'jira_get_issue',
+        description: 'Get details of a specific JIRA issue by key',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            issueKey: {
+              type: 'string',
+              description: 'Issue key (e.g., "PROJ-123")'
+            }
+          },
+          required: ['issueKey']
+        }
+      },
+      {
+        name: 'jira_create_issue',
+        description: 'Create a new JIRA issue',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            project: {
+              type: 'string',
+              description: 'Project key'
+            },
+            summary: {
+              type: 'string',
+              description: 'Issue summary/title'
+            },
+            description: {
+              type: 'string',
+              description: 'Issue description'
+            },
+            issueType: {
+              type: 'string',
+              description: 'Issue type (e.g., "Bug", "Task", "Story")'
+            }
+          },
+          required: ['project', 'summary', 'issueType']
+        }
+      },
+      {
+        name: 'jira_update_issue',
+        description: 'Update an existing JIRA issue',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            issueKey: {
+              type: 'string',
+              description: 'Issue key (e.g., "PROJ-123")'
+            },
+            summary: {
+              type: 'string',
+              description: 'New summary (optional)'
+            },
+            description: {
+              type: 'string',
+              description: 'New description (optional)'
+            }
+          },
+          required: ['issueKey']
+        }
+      },
+      {
+        name: 'jira_add_comment',
+        description: 'Add a comment to a JIRA issue',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            issueKey: {
+              type: 'string',
+              description: 'Issue key (e.g., "PROJ-123")'
+            },
+            comment: {
+              type: 'string',
+              description: 'Comment text'
+            }
+          },
+          required: ['issueKey', 'comment']
+        }
+      },
+      {
+        name: 'jira_transition_issue',
+        description: 'Transition an issue to a new status',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            issueKey: {
+              type: 'string',
+              description: 'Issue key (e.g., "PROJ-123")'
+            },
+            transitionName: {
+              type: 'string',
+              description: 'Transition name (e.g., "Done", "In Progress")'
+            }
+          },
+          required: ['issueKey', 'transitionName']
+        }
+      },
+      {
+        name: 'jira_list_projects',
+        description: 'List all accessible JIRA projects',
+        inputSchema: {
+          type: 'object',
+          properties: {}
+        }
+      }
+    ];
+  }
+
+  /**
+   * Get OAuth placeholder tools
+   */
+  getOAuthPlaceholderTools() {
+    return [
+      {
+        name: 'jira_authenticate',
+        description: 'Complete JIRA OAuth to unlock tools',
+        inputSchema: {
+          type: 'object',
+          properties: {}
+        }
+      }
+    ];
+  }
+
+  /**
+   * Call a tool
+   */
   async callTool(connection, toolName, args = {}) {
+    if (!connection) {
+      throw new Error('JIRA connection not initialized');
+    }
+
+    // Handle OAuth tool
     if (toolName === 'jira_authenticate') {
       return this.buildOAuthResponse(connection);
     }
 
-    const client = await this.ensureConnection(connection);
+    // If token is invalid, return OAuth response
+    if (connection.tokenValid === false) {
+      console.log('⚠️  JIRA token is invalid, requesting re-authentication');
+      return this.buildOAuthResponse(connection);
+    }
+
+    if (connection.mode === 'direct') {
+      return await this.callDirectApiTool(connection, toolName, args);
+    } else {
+      return await this.callMCPTool(connection, toolName, args);
+    }
+  }
+
+  /**
+   * Call tool via MCP remote
+   */
+  async callMCPTool(connection, toolName, args) {
+    const client = await this.ensureMCPConnection(connection);
     if (!client) {
       return this.buildOAuthResponse(connection);
     }
 
     try {
-      console.log(`🔧 Jira callTool -> ${toolName}`, JSON.stringify(args).substring(0, 400));
+      console.log(`🔧 JIRA MCP: ${toolName}`);
       const result = await client.callTool({ name: toolName, arguments: args });
 
       if (result.isError) {
         const text = result.content?.[0]?.text || '';
-        console.error(`   ❌ Jira tool error: ${text.substring(0, 300)}`);
+        console.error(`❌ JIRA MCP error: ${text.substring(0, 200)}`);
 
-        if (this.isSessionExpired(text) && toolName !== 'jira_authenticate') {
-          console.log('   🔄 Session invalid – surfacing OAuth response');
+        // Check for session expiration
+        if (this.isSessionExpired(text)) {
           return this.buildOAuthResponse(connection);
         }
       } else {
-        console.log(`   ✅ Jira tool ${toolName} completed`);
+        console.log(`✅ JIRA MCP: ${toolName} completed`);
       }
 
       return result;
     } catch (error) {
-      console.error(`❌ Jira callTool exception (${toolName}):`, error.message);
+      console.error(`❌ JIRA MCP error (${toolName}):`, error.message);
 
       if (this.isOAuthError(error)) {
         return this.buildOAuthResponse(connection);
       }
 
-      if (error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND')) {
-        console.error('   💡 Network error detected. On EC2, check:');
-        console.error('      - Security groups allow outbound HTTPS (port 443)');
-        console.error('      - Internet gateway is attached to VPC');
-        console.error('      - DNS resolution is working (try: nslookup mcp.atlassian.com)');
-        return {
-          isError: true,
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                error: 'Jira MCP unreachable',
-                message: 'The Atlassian remote MCP server is not reachable right now. Please retry shortly. On EC2, check network connectivity and security groups.',
-              }),
-            },
-          ],
-        };
-      }
-      
-      // Handle npx/node not found errors
-      if (error.message.includes('ENOENT') || error.message.includes('not found')) {
-        console.error('   💡 npx/node not found. On EC2, ensure Node.js is installed.');
-        return {
-          isError: true,
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                error: 'Jira MCP setup error',
-                message: 'npx is not available. On EC2, ensure Node.js and npm are installed and in PATH. You can also set ATLASSIAN_MCP_COMMAND to the full path of npx.',
-              }),
-            },
-          ],
-        };
-      }
-
       throw error;
     }
   }
 
-  async getResources(connection) {
-    const client = await this.ensureConnection(connection, { forTools: true });
-    if (!client) {
-      return [];
-    }
+  /**
+   * Call tool via direct API
+   */
+  async callDirectApiTool(connection, toolName, args) {
+    const baseUrl = `${connection.siteUrl}/rest/api/3`;
+    const headers = {
+      Authorization: `Bearer ${connection.token}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    };
 
     try {
-      const response = await client.listResources();
-      return response.resources || [];
+      let result;
+
+      switch (toolName) {
+        case 'jira_search_issues': {
+          const { jql, maxResults = 50 } = args;
+          const response = await axios.get(`${baseUrl}/search`, {
+            headers,
+            params: {
+              jql,
+              maxResults: Math.min(maxResults, 100),
+            },
+            timeout: 30000,
+          });
+          result = response.data;
+          break;
+        }
+
+        case 'jira_get_issue': {
+          const { issueKey } = args;
+          const response = await axios.get(`${baseUrl}/issue/${issueKey}`, {
+            headers,
+            timeout: 10000,
+          });
+          result = response.data;
+          break;
+        }
+
+        case 'jira_create_issue': {
+          const { project, summary, description, issueType } = args;
+          const response = await axios.post(`${baseUrl}/issue`, {
+            fields: {
+              project: { key: project },
+              summary,
+              description: description ? {
+                type: 'doc',
+                version: 1,
+                content: [{
+                  type: 'paragraph',
+                  content: [{ type: 'text', text: description }]
+                }]
+              } : undefined,
+              issuetype: { name: issueType }
+            }
+          }, {
+            headers,
+            timeout: 10000,
+          });
+          result = response.data;
+          break;
+        }
+
+        case 'jira_update_issue': {
+          const { issueKey, summary, description } = args;
+          const fields = {};
+          if (summary) fields.summary = summary;
+          if (description) {
+            fields.description = {
+              type: 'doc',
+              version: 1,
+              content: [{
+                type: 'paragraph',
+                content: [{ type: 'text', text: description }]
+              }]
+            };
+          }
+          await axios.put(`${baseUrl}/issue/${issueKey}`, { fields }, {
+            headers,
+            timeout: 10000,
+          });
+          result = { message: 'Issue updated successfully', issueKey };
+          break;
+        }
+
+        case 'jira_add_comment': {
+          const { issueKey, comment } = args;
+          const response = await axios.post(`${baseUrl}/issue/${issueKey}/comment`, {
+            body: {
+              type: 'doc',
+              version: 1,
+              content: [{
+                type: 'paragraph',
+                content: [{ type: 'text', text: comment }]
+              }]
+            }
+          }, {
+            headers,
+            timeout: 10000,
+          });
+          result = response.data;
+          break;
+        }
+
+        case 'jira_transition_issue': {
+          const { issueKey, transitionName } = args;
+          
+          // Get available transitions
+          const transitionsResponse = await axios.get(`${baseUrl}/issue/${issueKey}/transitions`, {
+            headers,
+            timeout: 10000,
+          });
+          
+          const transition = transitionsResponse.data.transitions.find(
+            t => t.name.toLowerCase() === transitionName.toLowerCase()
+          );
+          
+          if (!transition) {
+            throw new Error(`Transition "${transitionName}" not found. Available: ${transitionsResponse.data.transitions.map(t => t.name).join(', ')}`);
+          }
+          
+          await axios.post(`${baseUrl}/issue/${issueKey}/transitions`, {
+            transition: { id: transition.id }
+          }, {
+            headers,
+            timeout: 10000,
+          });
+          
+          result = { message: `Issue transitioned to ${transitionName}`, issueKey, transitionName };
+          break;
+        }
+
+        case 'jira_list_projects': {
+          const response = await axios.get(`${baseUrl}/project`, {
+            headers,
+            timeout: 10000,
+          });
+          result = response.data;
+          break;
+        }
+
+        default:
+          throw new Error(`Unknown tool: ${toolName}`);
+      }
+
+      return {
+        isError: false,
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2)
+        }]
+      };
     } catch (error) {
-      console.error('❌ Jira listResources failed:', error.message);
-      return [];
+      console.error(`❌ JIRA API error (${toolName}):`, error.message);
+      
+      return {
+        isError: true,
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            error: error.message,
+            details: error.response?.data || null,
+            status: error.response?.status || null,
+          })
+        }]
+      };
     }
   }
 
-  async readResource(connection, resourceUri) {
-    const client = await this.ensureConnection(connection);
-    if (!client) {
-      throw new Error('Jira authentication required before reading resources');
-    }
-
-    return client.readResource({ uri: resourceUri });
-  }
-
-  async ensureConnection(connection, { forTools = false } = {}) {
-    if (!connection) {
-      throw new Error('Jira connection not initialized');
-    }
-
+  /**
+   * Ensure MCP connection is established
+   */
+  async ensureMCPConnection(connection) {
     if (connection.client) {
       return connection.client;
     }
 
     if (connection._connecting) {
-      let waitCycles = 0;
-      while (connection._connecting && waitCycles < 40) {
+      // Wait for connection to complete
+      for (let i = 0; i < 60; i++) {
         await new Promise(resolve => setTimeout(resolve, 500));
-        waitCycles += 1;
-
-        if (connection.client && !connection._connecting) {
-          return connection.client;
-        }
-      }
-
-      if (connection._connecting) {
-        console.warn('Jira connection attempt still in progress after 20s, aborting wait.');
-        connection._connecting = false;
+        if (connection.client) return connection.client;
+        if (!connection._connecting) break;
       }
     }
 
+    // Start connection
+    connection._connecting = true;
+
     try {
-      await this.connectRemote(connection);
+      await this.connectMCPRemote(connection);
+      connection._connecting = false;
       return connection.client;
     } catch (error) {
+      connection._connecting = false;
+      
       if (this.isOAuthError(error)) {
-        console.log('🔐 Jira OAuth required');
+        console.log('🔐 JIRA OAuth required');
         return null;
       }
-
-      if (forTools) {
-        console.warn('⚠️  Jira ensureConnection (for tools) failed:', error.message);
-        return null;
-      }
-
+      
       throw error;
     }
   }
 
-  async connectRemote(connection) {
-    connection._connecting = true;
-    connection.pendingAuthUrl = null;
+  /**
+   * Connect to Atlassian Remote MCP Server
+   */
+  async connectMCPRemote(connection) {
+    console.log(`🔌 Connecting to Atlassian Remote MCP (${this.serverUrl})...`);
 
-    const serverUrl = connection.serverUrl || this.serverUrl;
-    const env = this.prepareRemoteEnv(connection);
-
-    console.log(`🔌 Connecting to Atlassian remote MCP (${serverUrl})...`);
-    console.log(`   Command: ${this.remoteCommand} ${[...this.remoteArgs, serverUrl].join(' ')}`);
-    console.log(`   Environment: ATLASSIAN_ACCESS_TOKEN=${connection.token ? '***' : 'missing'}, ATLASSIAN_CLOUD_ID=${connection.cloudId || 'missing'}`);
-    
-    // Log backend URL for debugging (important for OAuth redirects on EC2)
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:3000';
-    console.log(`   Backend URL: ${backendUrl} (used for OAuth redirects)`);
+    const env = {
+      ...process.env,
+      ATLASSIAN_ACCESS_TOKEN: connection.token,
+      ATLASSIAN_CLOUD_ID: connection.cloudId,
+      ATLASSIAN_SITE_URL: connection.siteUrl,
+      // Prevent browser OAuth (for server environments)
+      BROWSER: 'none',
+      NO_BROWSER: '1',
+      CI: 'true',
+    };
 
     const transport = new StdioClientTransport({
-      command: this.remoteCommand,
-      args: [...this.remoteArgs, serverUrl],
+      command: 'npx',
+      args: ['-y', 'mcp-remote', this.serverUrl],
       env,
     });
 
@@ -331,184 +637,117 @@ class JiraIntegration {
       }
     );
 
-    let authPromiseReject = null;
-
-    const authLinkListener = chunk => {
-      const text = chunk.toString();
-      
-      // Log mcp-remote output for debugging (especially important on EC2)
-      if (text.includes('wait-for-auth') || text.includes('127.0.0.1')) {
-        console.warn('⚠️  mcp-remote is trying to do OAuth on localhost (this won\'t work on EC2)');
-        console.warn('   Ensure ATLASSIAN_ACCESS_TOKEN is set and valid');
-        console.warn('   Output:', text.substring(0, 200));
-      }
-      
-      const match = text.match(/https:\/\/mcp\.atlassian\.com\/[^\s]+/);
-
-      if (match) {
-        connection.pendingAuthUrl = match[0];
-        console.log(`🔐 Jira OAuth link captured: ${connection.pendingAuthUrl}`);
-        console.warn('⚠️  mcp-remote is requesting OAuth - this should not happen if token is valid');
-        authPromiseReject?.(new Error(`${OAUTH_ERROR}: ${connection.pendingAuthUrl}`));
-      }
-    };
-
+    // Handle OAuth redirects
     const authPromise = new Promise((_, reject) => {
-      authPromiseReject = reject;
+      const handleOutput = (chunk) => {
+        const text = chunk.toString();
+        const match = text.match(/https:\/\/mcp\.atlassian\.com\/[^\s]+/);
+        if (match) {
+          reject(new Error(`${this.OAUTH_ERROR}: ${match[0]}`));
+        }
+      };
+
+      transport.process?.stdout?.on('data', handleOutput);
+      transport.process?.stderr?.on('data', handleOutput);
     });
 
-    transport.process?.stdout?.on('data', authLinkListener);
-    transport.process?.stderr?.on('data', authLinkListener);
-
     try {
-      // On EC2, mcp-remote may take longer to initialize, especially if it's trying to do OAuth
-      // Increase timeout to 30 seconds to allow time for token validation
-      const connectionTimeout = 30000;
-      
       await Promise.race([
         client.connect(transport),
         authPromise,
         new Promise((_, reject) =>
-          setTimeout(() => {
-            // Check if mcp-remote is stuck in "wait-for-auth" (common on EC2)
-            console.error('❌ Connection timeout after 30s');
-            console.error('   This usually means mcp-remote is waiting for OAuth on localhost');
-            console.error('   On EC2, ensure ATLASSIAN_ACCESS_TOKEN is valid and not expired');
-            reject(new Error('Connection timeout - mcp-remote may be waiting for OAuth. On EC2, ensure token is valid.'));
-          }, connectionTimeout)
+          setTimeout(() => reject(new Error('Connection timeout after 30 seconds')), 30000)
         ),
       ]);
 
-      console.log('✅ Jira MCP connected');
+      console.log('✅ JIRA MCP connected');
       connection.client = client;
       connection.transport = transport;
-      connection._connecting = false;
-      connection.pendingAuthUrl = null;
     } catch (error) {
-      await this.safeCloseTransport(transport, authLinkListener);
-      connection.client = null;
-      connection.transport = null;
-      connection._connecting = false;
-
-      if (this.isOAuthError(error) || connection.pendingAuthUrl) {
-        const url =
-          connection.pendingAuthUrl ||
-          oauthHandler.getAuthUrl('jira', connection.userId || 'default-user');
-        throw new Error(`${OAUTH_ERROR}: ${url}`);
-      }
-
-      // Enhanced error logging for EC2 debugging
-      const errorMessage = error.message || String(error);
-      console.error('❌ JIRA MCP connection failed:', errorMessage);
-      
-      // Check for common EC2 issues
-      if (errorMessage.includes('ENOENT') || errorMessage.includes('not found')) {
-        console.error('   💡 This usually means npx/node is not in PATH. On EC2, ensure Node.js is installed and in PATH.');
-        console.error('   💡 You can set ATLASSIAN_MCP_COMMAND to the full path of npx if needed.');
-      }
-      if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND')) {
-        console.error('   💡 Network connectivity issue. Check EC2 security groups and outbound internet access.');
-        console.error('   💡 Ensure the EC2 instance can reach mcp.atlassian.com');
-      }
-      if (errorMessage.includes('timeout')) {
-        console.error('   💡 Connection timeout. This may indicate network issues or firewall blocking.');
+      // Clean up on error
+      try {
+        await transport.close();
+      } catch (e) {
+        // Ignore
       }
 
       throw error;
-    } finally {
-      transport.process?.stdout?.off('data', authLinkListener);
-      transport.process?.stderr?.off('data', authLinkListener);
     }
   }
 
-  async safeCloseTransport(transport, listener) {
-    transport.process?.stdout?.off('data', listener);
-    transport.process?.stderr?.off('data', listener);
+  /**
+   * Get resources (for MCP mode)
+   */
+  async getResources(connection) {
+    if (!connection || connection.mode !== 'mcp') {
+      return [];
+    }
+
+    const client = await this.ensureMCPConnection(connection);
+    if (!client) return [];
+
     try {
-      await transport.close();
-    } catch {
-      // ignore
+      const response = await client.listResources();
+      return response.resources || [];
+    } catch (error) {
+      console.error('Error listing JIRA resources:', error.message);
+      return [];
     }
   }
 
-  prepareRemoteEnv(connection) {
-    const env = {
-      ...process.env,
-      ATLASSIAN_ACCESS_TOKEN: connection.token || '',
-      ATLASSIAN_CLOUD_ID: connection.cloudId || '',
-      ATLASSIAN_SITE_URL: connection.siteUrl || '',
-      // Prevent mcp-remote from opening browser (critical for EC2)
-      BROWSER: 'none',
-      NO_BROWSER: '1',
-      // Additional flags to prevent interactive OAuth on EC2
-      CI: 'true',
-      // Tell mcp-remote to use provided token instead of doing OAuth
-      // (mcp-remote should detect ATLASSIAN_ACCESS_TOKEN and skip OAuth)
-    };
-    
-    // Log what we're passing (without exposing token)
-    console.log(`   Environment variables for mcp-remote:`, {
-      ATLASSIAN_ACCESS_TOKEN: connection.token ? '***set***' : 'missing',
-      ATLASSIAN_CLOUD_ID: connection.cloudId || 'missing',
-      ATLASSIAN_SITE_URL: connection.siteUrl || 'missing',
-      BROWSER: env.BROWSER,
-      NO_BROWSER: env.NO_BROWSER,
-      CI: env.CI,
-    });
-    
-    return env;
+  /**
+   * Read resource (for MCP mode)
+   */
+  async readResource(connection, resourceUri) {
+    if (!connection || connection.mode !== 'mcp') {
+      throw new Error('Resource reading only available in MCP mode');
+    }
+
+    const client = await this.ensureMCPConnection(connection);
+    if (!client) {
+      throw new Error('JIRA authentication required');
+    }
+
+    return await client.readResource({ uri: resourceUri });
   }
 
+  /**
+   * Check if error is OAuth-related
+   */
   isOAuthError(error) {
-    return (
-      !error
-      ? false
-      : error.message?.includes(OAUTH_ERROR) ||
-        error.message?.includes('OAuth') ||
-        error.message?.includes('authorize') ||
-        error.message?.includes('Authentication required')
-    );
+    const message = error?.message || '';
+    return message.includes(this.OAUTH_ERROR) ||
+           message.includes('OAuth') ||
+           message.includes('authorize') ||
+           message.includes('Authentication required');
   }
 
+  /**
+   * Check if session is expired
+   */
   isSessionExpired(text = '') {
-    return (
-      text.includes('Unauthorized') ||
-      text.includes('invalid token') ||
-      text.includes('expired') ||
-      text.includes('OAuth')
-    );
+    return text.includes('Unauthorized') ||
+           text.includes('invalid token') ||
+           text.includes('expired') ||
+           text.includes('401');
   }
 
-  getOAuthToolList() {
-    return [
-      {
-        name: 'jira_authenticate',
-        description: 'Complete Jira OAuth to unlock MCP tools.',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-    ];
-  }
-
+  /**
+   * Build OAuth response
+   */
   buildOAuthResponse(connection) {
-    const url =
-      connection?.pendingAuthUrl ||
-      oauthHandler.getAuthUrl('jira', connection?.userId || 'default-user');
+    const oauthHandler = require('../../oauth/handler');
+    const url = oauthHandler.getAuthUrl('jira', connection?.userId || 'default-user');
 
     return {
       isError: false,
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            message:
-              'Authenticate with Jira by opening the link below, completing login, then ask your question again.',
-            oauthUrl: url,
-          }),
-        },
-      ],
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          message: 'Please authenticate with JIRA by opening the link below, then try again.',
+          oauthUrl: url,
+        })
+      }]
     };
   }
 }
