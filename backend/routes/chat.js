@@ -20,7 +20,36 @@ const appConfig = require('../config/app');
 const router = express.Router();
 
 // Configure multer for file uploads
-const upload = multer({ dest: appConfig.uploads.dest });
+// Supports both web (File/Blob) and mobile (React Native FormData) uploads
+const upload = multer({ 
+  dest: appConfig.uploads.dest,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept audio files - be permissive for both web and mobile
+    const isAudioMimeType = file.mimetype && (
+      file.mimetype.startsWith('audio/') ||
+      file.mimetype === 'application/octet-stream' ||
+      file.mimetype === 'video/mp4' || // m4a files might be sent as mp4
+      file.mimetype === 'video/quicktime' // iOS sometimes uses this
+    );
+    
+    const hasAudioExtension = file.originalname && 
+      file.originalname.match(/\.(m4a|mp3|wav|ogg|flac|aac|mp4|mov)$/i);
+    
+    // Accept if it's an audio mimetype, has audio extension, or no mimetype (React Native might not send it)
+    if (isAudioMimeType || hasAudioExtension || !file.mimetype) {
+      cb(null, true);
+    } else {
+      console.warn('⚠️ File rejected by filter:', {
+        mimetype: file.mimetype,
+        originalname: file.originalname,
+      });
+      cb(new Error('Only audio files are allowed'), false);
+    }
+  }
+});
 
 /**
  * Format tool context generically (works for any integration)
@@ -491,13 +520,69 @@ router.post('/', checkQuota, async (req, res) => {
  * Speech-to-text endpoint using Amazon Transcribe (BATCH - NOT REAL-TIME)
  * For real-time transcription, use /api/transcribe/stream WebSocket endpoint
  */
-router.post('/transcribe', upload.single('audio'), async (req, res) => {
+// Error handler for multer
+const handleMulterError = (err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ 
+        error: 'File too large',
+        details: 'Maximum file size is 10MB'
+      });
+    }
+    return res.status(400).json({ 
+      error: 'File upload error',
+      details: err.message 
+    });
+  }
+  if (err) {
+    return res.status(400).json({ 
+      error: 'File validation error',
+      details: err.message 
+    });
+  }
+  next();
+};
+
+router.post('/transcribe', upload.single('audio'), handleMulterError, async (req, res) => {
+  const startTime = Date.now();
+  const TIMEOUT_MS = 65000; // 65 seconds - slightly longer than max transcription time
+  
+  // Set up timeout
+  const timeoutId = setTimeout(() => {
+    if (!res.headersSent) {
+      console.error('⏱️ Request timeout after 65 seconds');
+      res.status(504).json({ 
+        error: 'Request timeout',
+        details: 'Transcription took too long. Please try again with a shorter audio file.'
+      });
+    }
+  }, TIMEOUT_MS);
+  
+  // Clear timeout when response is sent
+  const originalEnd = res.end;
+  res.end = function(...args) {
+    clearTimeout(timeoutId);
+    originalEnd.apply(this, args);
+  };
+  
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'No audio file provided' });
+      return res.status(400).json({ 
+        error: 'No audio file provided',
+        hint: 'Ensure the file is sent as multipart/form-data with field name "audio"'
+      });
     }
 
-    console.log('Transcribing audio file with Amazon Transcribe:', req.file.filename);
+    console.log('🎤 Transcribing audio file:', {
+      filename: req.file.originalname || req.file.filename,
+      size: req.file.size,
+      mimetype: req.file.mimetype,
+      filename: req.file.filename,
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      path: req.file.path
+    });
 
     // Import AWS Transcribe SDK
     const { TranscribeClient, StartTranscriptionJobCommand, GetTranscriptionJobCommand } = require('@aws-sdk/client-transcribe');
@@ -685,8 +770,12 @@ router.post('/transcribe', upload.single('audio'), async (req, res) => {
         // Delete local file
         fs.unlinkSync(req.file.path);
 
-        console.log('✅ Transcription result:', transcribedText);
-        res.json({ text: transcribedText });
+        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.log(`✅ Transcription completed in ${duration}s:`, transcribedText);
+        
+        if (!res.headersSent) {
+          res.json({ text: transcribedText });
+        }
         return;
       } else if (jobStatus === 'FAILED') {
         throw new Error(jobResult.TranscriptionJob?.FailureReason || 'Transcription job failed');
@@ -697,19 +786,43 @@ router.post('/transcribe', upload.single('audio'), async (req, res) => {
       throw new Error('Transcription job timed out');
     }
   } catch (error) {
-    console.error('❌ Transcription error:', error.message);
+    // Clear timeout on error
+    clearTimeout(timeoutId);
+    
+    console.error('❌ Transcription error:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      duration: ((Date.now() - startTime) / 1000).toFixed(1) + 's',
+    });
     
     // Clean up file on error
     if (req.file) {
       try {
         fs.unlinkSync(req.file.path);
-      } catch (e) {}
+      } catch (e) {
+        console.warn('⚠️ Failed to cleanup file:', e.message);
+      }
     }
     
-    res.status(500).json({ 
-      error: 'Failed to transcribe audio',
-      details: error.message 
-    });
+    // Determine appropriate status code
+    let statusCode = 500;
+    if (error.message.includes('required') || error.message.includes('not configured')) {
+      statusCode = 400;
+    } else if (error.message.includes('timeout')) {
+      statusCode = 504;
+    } else if (error.message.includes('credentials') || error.message.includes('permission')) {
+      statusCode = 403;
+    }
+    
+    // Ensure response hasn't been sent
+    if (!res.headersSent) {
+      res.status(statusCode).json({ 
+        error: 'Failed to transcribe audio',
+        details: error.message,
+        ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+      });
+    }
   }
 });
 
