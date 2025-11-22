@@ -307,19 +307,37 @@ export default function HomeScreen() {
       
       // userId is already in state from loadUserId()
 
-      // Create form data
+      // Create form data - handle web and mobile differently
       const formData = new FormData();
-      formData.append('audio', {
-        uri: audioUri,
-        type: 'audio/m4a',
-        name: 'recording.m4a',
-      } as any);
+      
+      if (Platform.OS === 'web') {
+        // For web: fetch the audio file and create a File object
+        try {
+          const response = await fetch(audioUri);
+          const blob = await response.blob();
+          const file = new File([blob], 'recording.m4a', { type: 'audio/m4a' });
+          formData.append('audio', file);
+        } catch (fetchError) {
+          console.error('Failed to fetch audio file:', fetchError);
+          // Fallback: try to use the URI directly (might work for some cases)
+          formData.append('audio', audioUri as any);
+        }
+      } else {
+        // For mobile (React Native): use the object format
+        formData.append('audio', {
+          uri: audioUri,
+          type: 'audio/m4a',
+          name: 'recording.m4a',
+        } as any);
+      }
+      
       formData.append('userId', userId);
 
       const startTime = Date.now();
       const response = await fetch(`${API_ENDPOINTS.CHAT}/transcribe`, {
         method: 'POST',
         body: formData,
+        // Don't set Content-Type header - let FormData set it automatically with boundary
       });
 
       const data = await response.json();
@@ -335,7 +353,7 @@ export default function HomeScreen() {
         }, 100);
       } else {
         setInputText('');
-        Alert.alert('Error', 'Failed to transcribe audio');
+        Alert.alert('Error', data.error || 'Failed to transcribe audio');
       }
     } catch (error) {
       console.error('Transcription error:', error);
