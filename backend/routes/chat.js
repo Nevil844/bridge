@@ -90,11 +90,358 @@ function formatToolContextInfo(activeToolContexts) {
 const { ensureUserIntegrationsLoaded } = require('../utils/integrationLoader');
 
 /**
+ * Handle streaming chat response
+ */
+async function handleStreamingResponse(req, res, provider, messages, selectedModel, tools, conversation, user, message, systemPrompt, memoryContext, mcpConnected) {
+  try {
+    // Set up Server-Sent Events (SSE) headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+
+    // Send initial connection message
+    res.write(`data: ${JSON.stringify({ type: 'start', conversationId: conversation.id })}\n\n`);
+
+    // Get streaming response from provider
+    console.log('📡 Requesting stream from provider...');
+    const streamResult = provider.chat(messages, selectedModel, tools, true);
+    
+    // Check if provider returned a stream (async iterable) or a Promise
+    const hasAsyncIterator = streamResult && typeof streamResult[Symbol.asyncIterator] === 'function';
+    const isPromise = streamResult && typeof streamResult.then === 'function';
+    console.log(`🔍 Stream check: hasAsyncIterator=${hasAsyncIterator}, isPromise=${isPromise}, type=${typeof streamResult}, constructor=${streamResult?.constructor?.name}`);
+    
+    // If it's a promise, await it first to see if it resolves to a generator
+    let stream = streamResult;
+    if (isPromise) {
+      console.log('⏳ Result is a Promise, awaiting...');
+      const resolved = await streamResult;
+      console.log(`✅ Promise resolved, type=${typeof resolved}, hasAsyncIterator=${resolved && typeof resolved[Symbol.asyncIterator] === 'function'}`);
+      stream = resolved;
+    }
+    
+    // Check again after awaiting Promise (if it was one)
+    const finalHasAsyncIterator = stream && typeof stream[Symbol.asyncIterator] === 'function';
+    if (!finalHasAsyncIterator) {
+      // Provider doesn't support streaming, fall back to non-streaming
+      console.log('⚠️  Provider does not support streaming, falling back to non-streaming');
+      const aiResponse = stream; // stream is already the response (not a generator)
+      
+      // Ensure we have content before saving
+      const content = aiResponse?.content || '';
+      if (!content) {
+        console.error('❌ No content in response:', aiResponse);
+        res.write(`data: ${JSON.stringify({ type: 'error', error: 'No content received from AI' })}\n\n`);
+        res.end();
+        return;
+      }
+      
+      // Handle as regular response
+      const parsed = parseAIResponse(content);
+      if (!parsed.isInternal) {
+        await conversationService.addMessage(
+          conversation.id,
+          'assistant',
+          parsed.response || content,
+          createMessagePayload(parsed, selectedModel, aiResponse.usage, [])
+        );
+        
+        if (aiResponse.usage) {
+          await tokenUsageService.trackUsage(
+            user,
+            selectedModel,
+            aiResponse.usage.input_tokens || 0,
+            aiResponse.usage.output_tokens || 0
+          );
+        }
+      }
+      
+      const formatted = formatAIResponse(aiResponse, [], []);
+      res.write(`data: ${JSON.stringify({ 
+        type: 'done', 
+        message: formatted.message,
+        thinking: formatted.thinking,
+        conversationId: conversation.id,
+        mcpEnabled: mcpConnected,
+        toolsUsed: []
+      })}\n\n`);
+      res.end();
+      return;
+    }
+    
+    let fullContent = '';
+    let extractedResponse = ''; // Track extracted response text separately
+    let isJsonResponse = false; // Track if we're receiving JSON
+    let toolCalls = null;
+    let usage = null;
+    let hasError = false;
+
+    // Process streaming chunks
+    console.log('🌊 Starting to process stream chunks...');
+    try {
+      // Try to iterate the stream - this will fail if it's not an async iterable
+      const iterator = stream[Symbol.asyncIterator]();
+      console.log('✅ Got iterator, starting iteration...');
+      
+      while (true) {
+        const { done, value: chunk } = await iterator.next();
+        if (done) {
+          console.log('✅ Iterator done');
+          break;
+        }
+        
+        console.log(`📦 Received chunk type: ${chunk?.type}`);
+        if (chunk?.type === 'error') {
+          hasError = true;
+          res.write(`data: ${JSON.stringify({ type: 'error', error: chunk.error })}\n\n`);
+          break;
+        } else if (chunk.type === 'content') {
+          // Send content chunk to client
+          fullContent += chunk.content;
+          
+          // Detect if this is a JSON response
+          if (!isJsonResponse) {
+            const trimmed = fullContent.trim();
+            isJsonResponse = trimmed.startsWith('{') || trimmed.startsWith('```json');
+            if (isJsonResponse) {
+              console.log('🔍 Detected JSON response, will extract response field');
+            }
+          }
+          
+          // If it's JSON, try to extract response value incrementally
+          if (isJsonResponse) {
+            // Try to find and extract the response value as it streams
+            const responseFieldMatch = fullContent.match(/"response"\s*:\s*"/);
+            if (responseFieldMatch) {
+              // Found response field - extract the value
+              const responseStart = responseFieldMatch.index + responseFieldMatch[0].length;
+              const afterResponse = fullContent.slice(responseStart);
+              
+              // Extract the JSON string value (handling escaped quotes)
+              let responseValue = '';
+              let inEscape = false;
+              
+              for (let i = 0; i < afterResponse.length; i++) {
+                const char = afterResponse[i];
+                if (inEscape) {
+                  responseValue += char;
+                  inEscape = false;
+                } else if (char === '\\') {
+                  responseValue += char;
+                  inEscape = true;
+                } else if (char === '"') {
+                  // End of string value
+                  break;
+                } else {
+                  responseValue += char;
+                }
+              }
+              
+              // Extract only the new part
+              const newPart = responseValue.slice(extractedResponse.length);
+              if (newPart) {
+                extractedResponse = responseValue;
+                console.log(`📝 Extracted response chunk: ${newPart.substring(0, 50)}...`);
+                res.write(`data: ${JSON.stringify({ type: 'chunk', content: newPart })}\n\n`);
+              }
+              // If no new part, skip (waiting for more)
+            } else {
+              // Response field not found yet, skip this chunk
+              console.log('⏳ Skipping chunk - waiting for response field');
+            }
+            continue;
+          }
+          
+          // Not JSON - send chunks normally
+          console.log(`📝 Sending chunk: ${chunk.content.substring(0, 50)}...`);
+          res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk.content })}\n\n`);
+        } else if (chunk.type === 'done') {
+          // Final chunk with complete data
+          fullContent = chunk.content || fullContent;
+          toolCalls = chunk.tool_calls;
+          usage = chunk.usage;
+
+          // Parse the full content to extract clean response (handles JSON format)
+          const parsedContent = parseAIResponse(fullContent);
+          const cleanContent = parsedContent.response || fullContent;
+          
+          // If this was a JSON response that we buffered, send it all at once now
+          if (isJsonResponse && cleanContent !== fullContent) {
+            // We have clean content from JSON - send it as a single chunk
+            console.log(`📝 Sending complete response from JSON (${cleanContent.length} chars)`);
+            res.write(`data: ${JSON.stringify({ type: 'chunk', content: cleanContent })}\n\n`);
+          }
+          
+          // Update fullContent with clean version
+          fullContent = cleanContent;
+
+          // If tool calls are present, we need to handle them (but for now, just send the content)
+          // Note: Full tool call handling in streaming mode would require more complex logic
+          if (toolCalls && toolCalls.length > 0) {
+          console.log(`⚠️  Tool calls detected in streaming response - switching to non-streaming for tool execution`);
+          
+          // For now, send the content we have and indicate tool calls
+          res.write(`data: ${JSON.stringify({ 
+            type: 'done', 
+            content: fullContent,
+            toolCalls: toolCalls.map(tc => tc.function.name),
+            hasTools: true
+          })}\n\n`);
+          res.end();
+          
+          // Execute tools and get final response (non-streaming)
+          const { results: toolResults } = await executeToolCalls(user, toolCalls, null, conversation.id);
+          
+          const finalMessages = [
+            { role: 'system', content: systemPrompt + memoryContext },
+            { role: 'user', content: message },
+            { role: 'assistant', content: fullContent, tool_calls: toolCalls },
+            ...toolResults,
+          ];
+          
+          const finalResponse = await provider.chat(finalMessages, selectedModel, tools, false);
+          const parsed = parseAIResponse(finalResponse.content);
+          
+          if (!parsed.isInternal) {
+            await conversationService.addMessage(
+              conversation.id,
+              'assistant',
+              parsed.response || finalResponse.content,
+              createMessagePayload(parsed, selectedModel, finalResponse.usage, toolCalls.map(tc => tc.function.name))
+            );
+            
+            if (finalResponse.usage) {
+              await tokenUsageService.trackUsage(
+                user,
+                selectedModel,
+                finalResponse.usage.input_tokens || 0,
+                finalResponse.usage.output_tokens || 0
+              );
+            }
+          }
+          
+          // Send final response via new request or WebSocket would be better
+          // For now, the client will need to handle this
+          return;
+        }
+
+        // Parse and save final response
+        const parsedFinal = parseAIResponse(fullContent);
+        
+        // Extract clean response (removes JSON structure if present)
+        const cleanFinalContent = parsedFinal.response || fullContent;
+        
+        if (!parsedFinal.isInternal) {
+          await conversationService.addMessage(
+            conversation.id,
+            'assistant',
+            cleanFinalContent,
+            createMessagePayload(parsedFinal, selectedModel, usage, [])
+          );
+          
+          if (usage) {
+            await tokenUsageService.trackUsage(
+              user,
+              selectedModel,
+              usage.input_tokens || 0,
+              usage.output_tokens || 0
+            );
+          }
+        }
+
+        // Send final message - use the clean parsed content
+        const finalMessage = cleanFinalContent;
+        
+        res.write(`data: ${JSON.stringify({ 
+          type: 'done', 
+          message: finalMessage, // Use the clean content, not formatted.message
+          thinking: parsedFinal.isInternal ? {
+            isInternal: parsedFinal.isInternal,
+            thinking: parsedFinal.thinking || '',
+            action: parsedFinal.action || '',
+            toolCalls: [],
+            data: parsedFinal.data
+          } : undefined,
+          conversationId: conversation.id,
+          mcpEnabled: mcpConnected,
+          toolsUsed: []
+        })}\n\n`);
+        res.end();
+        return;
+      }
+      }
+    } catch (streamError) {
+      console.error('❌ Error processing stream:', streamError);
+      hasError = true;
+      res.write(`data: ${JSON.stringify({ type: 'error', error: streamError.message })}\n\n`);
+    }
+
+    // If we get here without a 'done' event, send what we have
+    if (!hasError && fullContent) {
+      const parsedFallback = parseAIResponse(fullContent);
+      
+      if (!parsedFallback.isInternal) {
+        await conversationService.addMessage(
+          conversation.id,
+          'assistant',
+          parsedFallback.response || fullContent,
+          createMessagePayload(parsedFallback, selectedModel, usage, [])
+        );
+        
+        if (usage) {
+          await tokenUsageService.trackUsage(
+            user,
+            selectedModel,
+            usage.input_tokens || 0,
+            usage.output_tokens || 0
+          );
+        }
+      }
+
+      // Use the clean content, not formatted (which might have JSON)
+      const finalMessage = parsedFallback.response || fullContent;
+      res.write(`data: ${JSON.stringify({ 
+        type: 'done', 
+        message: finalMessage,
+        thinking: parsedFallback.isInternal ? {
+          isInternal: parsedFallback.isInternal,
+          thinking: parsedFallback.thinking || '',
+          action: parsedFallback.action || '',
+          toolCalls: [],
+          data: parsedFallback.data
+        } : undefined,
+        conversationId: conversation.id,
+        mcpEnabled: mcpConnected,
+        toolsUsed: []
+      })}\n\n`);
+    }
+    
+    res.end();
+  } catch (error) {
+    console.error('❌ Streaming error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Streaming failed', details: error.message });
+    } else {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+      res.end();
+    }
+  }
+}
+
+/**
  * Chat completion endpoint with per-user MCP integration
  */
 router.post('/', checkQuota, async (req, res) => {
   try {
     const { message, model, userId, conversationId, stream } = req.body;
+    console.log('📥 Chat request received:', { 
+      hasMessage: !!message, 
+      model, 
+      userId, 
+      conversationId, 
+      stream: stream !== undefined ? stream : 'undefined (defaults to false)' 
+    });
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -219,8 +566,14 @@ router.post('/', checkQuota, async (req, res) => {
     
     console.log(`📜 Including ${historyMessages.length} historical messages + current message`);
 
-    // Use provider to handle the chat request
-    const aiResponse = await provider.chat(messages, selectedModel, tools, stream || false);
+    // Handle streaming responses
+    if (stream) {
+      console.log('🔄 Streaming enabled, calling handleStreamingResponse');
+      return handleStreamingResponse(req, res, provider, messages, selectedModel, tools, conversation, user, message, systemPrompt, memoryContext, mcpConnected);
+    }
+
+    // Use provider to handle the chat request (non-streaming)
+    const aiResponse = await provider.chat(messages, selectedModel, tools, false);
 
     // Check if AI wants to call tools
     if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
