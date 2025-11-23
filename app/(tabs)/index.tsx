@@ -479,7 +479,7 @@ export default function HomeScreen() {
             model: selectedModel,
             userId,
             conversationId: currentChatId, // Pass conversationId to continue existing or create new
-            stream: false, // Use non-streaming for reliability
+            stream: true, // Enable streaming for better UX
           }),
         });
 
@@ -525,29 +525,223 @@ export default function HomeScreen() {
           throw new Error(`Server error: ${response.status}`);
         }
 
-        const data = await response.json();
+        // Check if response is streaming (SSE)
+        const contentType = response.headers.get('content-type');
+        const isStreaming = contentType?.includes('text/event-stream');
+        console.log('📡 Response type check:', { contentType, isStreaming, hasBody: !!response.body });
 
-        const aiMessage = data.message || data.content;
-        
-        if (!aiMessage) {
-          console.error('No message in response:', data);
-          throw new Error('No response received from AI');
-        }
+        if (isStreaming) {
+          console.log('🌊 Starting to read streaming response...');
+          // Handle streaming response (Server-Sent Events)
+          // React Native compatibility: check if getReader exists, otherwise use text() stream
+          let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+          
+          try {
+            // Try to get reader (works in browsers and some React Native versions)
+            if (response.body && typeof response.body.getReader === 'function') {
+              reader = response.body.getReader();
+            } else {
+              // Fallback: React Native might not support getReader, use text() instead
+              console.log('⚠️  getReader not available, using text() fallback');
+              const text = await response.text();
+              // Parse SSE manually
+              const lines = text.split('\n');
+              let accumulatedContent = '';
+              
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  try {
+                    const data = JSON.parse(line.slice(6));
+                    
+                    if (data.type === 'start') {
+                      if (data.conversationId && !currentChatId) {
+                        setCurrentChatId(data.conversationId);
+                        await loadConversations();
+                      }
+                    } else if (data.type === 'chunk') {
+                      accumulatedContent += data.content;
+                      setMessages(prev =>
+                        prev.map(msg =>
+                          msg.id === aiMessageId
+                            ? { ...msg, text: accumulatedContent }
+                            : msg
+                        )
+                      );
+                    } else if (data.type === 'done') {
+                      const finalContent = data.message || accumulatedContent;
+                      setMessages(prev =>
+                        prev.map(msg =>
+                          msg.id === aiMessageId
+                            ? { 
+                                ...msg, 
+                                text: finalContent,
+                                thinking: data.thinking || undefined
+                              }
+                            : msg
+                        )
+                      );
+                      
+                      if (data.conversationId && !currentChatId) {
+                        setCurrentChatId(data.conversationId);
+                        await loadConversations();
+                      }
+                    }
+                  } catch (e) {
+                    console.error('Error parsing SSE data:', e, line);
+                  }
+                }
+              }
+              
+              setIsLoading(false);
+              return;
+            }
+          } catch (readerError) {
+            console.error('Error getting reader:', readerError);
+            // Fall back to non-streaming
+            const data = await response.json();
+            const aiMessage = data.message || data.content;
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === aiMessageId
+                  ? { ...msg, text: aiMessage, thinking: data.thinking || undefined }
+                  : msg
+              )
+            );
+            setIsLoading(false);
+            return;
+          }
 
-        // Update AI message with actual response (including thinking data)
-        setMessages(prev =>
-          prev.map(msg =>
-            msg.id === aiMessageId
-              ? { ...msg, text: aiMessage, thinking: data.thinking || undefined }
-              : msg
-          )
-        );
-        
-        // Update conversationId if this was a new conversation
-        if (data.conversationId && !currentChatId) {
-          setCurrentChatId(data.conversationId);
-          // Reload conversations list to show the new one
-          await loadConversations();
+          if (!reader) {
+            throw new Error('No response body reader available');
+          }
+
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let accumulatedContent = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            
+            if (done) {
+              console.log('✅ Stream complete');
+              break;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6)); // Remove 'data: ' prefix
+                  
+                  if (data.type === 'start') {
+                    // Stream started
+                    console.log('🚀 Stream started');
+                    if (data.conversationId && !currentChatId) {
+                      setCurrentChatId(data.conversationId);
+                      await loadConversations();
+                    }
+                  } else if (data.type === 'chunk') {
+                    // Content chunk - update message incrementally
+                    accumulatedContent += data.content;
+                    console.log('📝 Received chunk, total length:', accumulatedContent.length);
+                    
+                    // Try to parse JSON and extract response field if it's complete JSON
+                    // This handles cases where AI streams JSON structure
+                    let displayContent = accumulatedContent;
+                    try {
+                      // Try to parse as JSON (might fail if incomplete)
+                      const parsed = JSON.parse(accumulatedContent);
+                      if (parsed.response && typeof parsed.response === 'string') {
+                        // We have complete JSON with response field - use it
+                        displayContent = parsed.response;
+                        console.log('✅ Extracted response from JSON');
+                      }
+                    } catch (e) {
+                      // Not valid JSON yet or not JSON at all - use raw content
+                      // Also try to extract from markdown code blocks
+                      const jsonMatch = accumulatedContent.match(/```json\s*\n([\s\S]*?)\n```/);
+                      if (jsonMatch) {
+                        try {
+                          const parsed = JSON.parse(jsonMatch[1]);
+                          if (parsed.response && typeof parsed.response === 'string') {
+                            displayContent = parsed.response;
+                            console.log('✅ Extracted response from JSON code block');
+                          }
+                        } catch (e2) {
+                          // Ignore parse errors
+                        }
+                      }
+                    }
+                    
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === aiMessageId
+                          ? { ...msg, text: displayContent }
+                          : msg
+                      )
+                    );
+                  } else if (data.type === 'done') {
+                    // Stream complete - use accumulated content (which was built from chunks) or fallback to message
+                    // Prefer accumulatedContent since it's the clean streamed text
+                    console.log('✅ Stream done');
+                    const finalContent = accumulatedContent || data.message || '';
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === aiMessageId
+                          ? { 
+                              ...msg, 
+                              text: finalContent, // Use accumulated content from chunks
+                              thinking: data.thinking || undefined
+                            }
+                          : msg
+                      )
+                    );
+                    
+                    if (data.conversationId && !currentChatId) {
+                      setCurrentChatId(data.conversationId);
+                      await loadConversations();
+                    }
+                  } else if (data.type === 'error') {
+                    throw new Error(data.error || 'Streaming error');
+                  }
+                } catch (e) {
+                  console.error('Error parsing SSE data:', e, line);
+                }
+              }
+            }
+          }
+          
+          setIsLoading(false);
+          return;
+        } else {
+          // Handle non-streaming response (fallback)
+          const data = await response.json();
+
+          const aiMessage = data.message || data.content;
+          
+          if (!aiMessage) {
+            console.error('No message in response:', data);
+            throw new Error('No response received from AI');
+          }
+
+          // Update AI message with actual response (including thinking data)
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === aiMessageId
+                ? { ...msg, text: aiMessage, thinking: data.thinking || undefined }
+                : msg
+            )
+          );
+          
+          // Update conversationId if this was a new conversation
+          if (data.conversationId && !currentChatId) {
+            setCurrentChatId(data.conversationId);
+            // Reload conversations list to show the new one
+            await loadConversations();
+          }
         }
 
       } catch (error) {

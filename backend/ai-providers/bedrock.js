@@ -1,4 +1,4 @@
-const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
+const { BedrockRuntimeClient, InvokeModelCommand, InvokeModelWithResponseStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
 
 /**
  * AWS Bedrock AI Provider
@@ -182,8 +182,9 @@ class BedrockProvider {
 
   /**
    * Send chat completion request to Bedrock
+   * Returns async generator for streaming, or Promise for non-streaming
    */
-  async chat(messages, model, tools = [], stream = false) {
+  chat(messages, model, tools = [], stream = false) {
     if (!this.client) {
       throw new Error('AWS Bedrock is not configured. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env');
     }
@@ -222,6 +223,27 @@ class BedrockProvider {
         requestBody.tools = convertedTools;
       }
 
+      // Handle streaming for Claude models - return generator directly (not wrapped in Promise)
+      if (stream) {
+        console.log('🔄 Bedrock: Creating stream generator...');
+        const generator = this.streamClaudeResponse(effectiveModelId, requestBody);
+        console.log('✅ Bedrock: Generator created, type:', typeof generator, 'has asyncIterator:', typeof generator[Symbol.asyncIterator] === 'function');
+        return generator;
+      }
+
+      // Non-streaming: return Promise
+      return this.chatNonStreaming(effectiveModelId, requestBody, bedrockMessages, systemPrompt, modelId, isLlama, isMistral, isTitan);
+    }
+    
+    // For non-Claude models, always return Promise (no streaming support yet)
+    return this.chatNonStreaming(effectiveModelId, null, bedrockMessages, systemPrompt, modelId, isLlama, isMistral, isTitan);
+  }
+
+  /**
+   * Non-streaming chat completion (internal method)
+   */
+  async chatNonStreaming(effectiveModelId, requestBody, bedrockMessages, systemPrompt, modelId, isLlama, isMistral, isTitan) {
+    if (modelId.includes('claude') || modelId.includes('anthropic')) {
       const response = await this.client.send(new InvokeModelCommand({
         modelId: effectiveModelId,
         contentType: 'application/json',
@@ -327,6 +349,127 @@ class BedrockProvider {
         tool_calls: null,
         usage: usage,
       };
+    }
+  }
+
+  /**
+   * Stream Claude response from Bedrock
+   * Returns an async generator that yields chunks
+   */
+  async *streamClaudeResponse(modelId, requestBody) {
+    console.log('🌊 streamClaudeResponse called, creating async generator');
+    try {
+      const command = new InvokeModelWithResponseStreamCommand({
+        modelId: modelId,
+        contentType: 'application/json',
+        accept: 'application/json',
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await this.client.send(command);
+      
+      if (!response.body) {
+        throw new Error('No response body from Bedrock streaming');
+      }
+
+      let fullContent = '';
+      let toolCalls = [];
+      let currentToolCall = null;
+      let usage = null;
+
+      // Process the stream
+      for await (const event of response.body) {
+        if (event.chunk && event.chunk.bytes) {
+          const chunkData = JSON.parse(new TextDecoder().decode(event.chunk.bytes));
+          
+          // Handle different event types from Anthropic Messages API
+          if (chunkData.type === 'content_block_start') {
+            // Content block started (text or tool_use)
+            if (chunkData.content_block?.type === 'tool_use') {
+              const toolUse = chunkData.content_block;
+              currentToolCall = {
+                id: toolUse.id || `call_${toolCalls.length}`,
+                type: 'function',
+                function: {
+                  name: toolUse.name,
+                  arguments: '{}',
+                },
+                input: {},
+              };
+              toolCalls.push(currentToolCall);
+            }
+          } else if (chunkData.type === 'content_block_delta') {
+            if (chunkData.delta?.text) {
+              // Text content delta
+              fullContent += chunkData.delta.text;
+              yield {
+                type: 'content',
+                content: chunkData.delta.text,
+                done: false,
+              };
+            } else if (chunkData.delta?.input_json && currentToolCall) {
+              // Tool use input delta (partial JSON)
+              try {
+                const deltaInput = JSON.parse(chunkData.delta.input_json);
+                currentToolCall.input = { ...currentToolCall.input, ...deltaInput };
+                currentToolCall.function.arguments = JSON.stringify(currentToolCall.input);
+              } catch (e) {
+                // Ignore JSON parse errors for partial chunks
+                console.warn('⚠️  Failed to parse tool input delta:', e.message);
+              }
+            }
+          } else if (chunkData.type === 'content_block_stop') {
+            // Content block finished
+            currentToolCall = null;
+          } else if (chunkData.type === 'message_delta') {
+            // Message delta (usage info)
+            if (chunkData.usage) {
+              usage = {
+                input_tokens: chunkData.usage.input_tokens || 0,
+                output_tokens: chunkData.usage.output_tokens || 0,
+              };
+            }
+          } else if (chunkData.type === 'message_stop') {
+            // Message complete - final yield
+            yield {
+              type: 'done',
+              content: fullContent,
+              tool_calls: toolCalls.length > 0 ? toolCalls.map(tc => ({
+                id: tc.id,
+                type: tc.type,
+                function: {
+                  name: tc.function.name,
+                  arguments: tc.function.arguments,
+                },
+              })) : null,
+              usage: usage,
+            };
+            return;
+          }
+        }
+      }
+
+      // Final yield with complete data (fallback if message_stop not received)
+      yield {
+        type: 'done',
+        content: fullContent,
+        tool_calls: toolCalls.length > 0 ? toolCalls.map(tc => ({
+          id: tc.id,
+          type: tc.type,
+          function: {
+            name: tc.function.name,
+            arguments: tc.function.arguments,
+          },
+        })) : null,
+        usage: usage,
+      };
+    } catch (error) {
+      console.error('❌ Bedrock streaming error:', error);
+      yield {
+        type: 'error',
+        error: error.message,
+      };
+      throw error;
     }
   }
 
