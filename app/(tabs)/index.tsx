@@ -1,5 +1,6 @@
 import { GlowingOrb } from '@/components/glowing-orb';
 import { MarkdownText } from '@/components/markdown-text';
+import { SampleQuestions } from '@/components/sample-questions';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ThinkingProcess } from '@/components/thinking-process';
@@ -70,7 +71,7 @@ export default function HomeScreen() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string>('default-user');
   const [availableModels, setAvailableModels] = useState<Model[]>([]);
-  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set(['gemini', 'bedrock'])); // Default expand Gemini and Bedrock
+  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set(['bedrock'])); // Default expand Bedrock (default model provider)
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -456,6 +457,14 @@ export default function HomeScreen() {
     handleSendWithText(previousUserMessage.text);
   };
 
+  const handleQuestionSelect = (question: string) => {
+    setInputText(question);
+    // Auto-send the question
+    setTimeout(() => {
+      handleSendWithText(question);
+    }, 100);
+  };
+
   const handleSend = async () => {
     if (inputText.trim() && !isLoading) {
       const userMessage: Message = {
@@ -832,7 +841,10 @@ export default function HomeScreen() {
             <TouchableOpacity
               style={[
                 styles.modelSelector,
-                { backgroundColor: isDark ? '#1C1C1E' : '#F2F2F7' },
+                {
+                  backgroundColor: isDark ? '#151718' : '#FFFFFF',
+                  borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                },
               ]}
               onPress={() => setShowModelPicker(true)}>
               <ThemedText style={styles.modelSelectorText}>
@@ -1075,7 +1087,7 @@ export default function HomeScreen() {
               ]}>
               <ThemedText style={styles.modalTitle}>Select AI Model</ThemedText>
               <ScrollView style={styles.modalScroll}>
-                {['gemini', 'openrouter', 'bedrock'].map((provider) => {
+                {['bedrock', 'gemini', 'openrouter'].map((provider) => {
                   const providerModels = availableModels.filter(m => m.provider === provider);
                   if (providerModels.length === 0) return null;
                   
@@ -1255,11 +1267,16 @@ export default function HomeScreen() {
           )}
         </TouchableWithoutFeedback>
 
+        {/* Sample Questions Button - Only shown when chat is new */}
+        {messages.length === 0 && (
+          <SampleQuestions userId={userId} onQuestionSelect={handleQuestionSelect} />
+        )}
+
         {/* Input Area */}
         <View
           style={[
             styles.inputContainer,
-            { 
+            {
               borderTopColor: isDark ? '#2C2C2E' : '#E5E5EA',
               backgroundColor: isDark ? '#000000' : '#FFFFFF',
             },
@@ -1381,8 +1398,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingVertical: 12,
+    borderRadius: 24,
+    borderWidth: 1,
     gap: 8,
   },
   modelSelectorText: {

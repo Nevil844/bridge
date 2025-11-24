@@ -14,6 +14,7 @@ const chatRouter = require('./routes/chat');
 const modelsRouter = require('./routes/models');
 const oauthRouter = require('./routes/oauth');
 const waitlistRouter = require('./routes/waitlist');
+const sampleQuestionsRouter = require('./routes/sampleQuestions');
 const { router: transcribeRouter, setupTranscribeWebSocket } = require('./routes/transcribe');
 
 // Services
@@ -50,6 +51,7 @@ app.use('/api/models', modelsRouter);
 app.use('/api/oauth', oauthRouter);
 app.use('/api/integrations', oauthRouter); // OAuth routes also handle /api/integrations/:type/oauth-url
 app.use('/api/waitlist', waitlistRouter);
+app.use('/api/sample-questions', sampleQuestionsRouter);
 app.use('/api/transcribe', transcribeRouter);
 
 // Setup WebSocket route for real-time transcription (must be after expressWs)
