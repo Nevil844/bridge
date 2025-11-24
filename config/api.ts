@@ -12,10 +12,10 @@ const NETWORK_IP = '192.168.1.88'; // Replace with your actual IP!
 
 export const API_CONFIG = {
   // BASE_URL: `http://${NETWORK_IP}:3000`,  // For physical iOS device
-  BASE_URL: 'https://api.bridge.neviljobanputra.com',  // For production
+  // BASE_URL: 'https://api.bridge.neviljobanputra.com',  // For production
   
   // Alternatives (uncomment if needed):
-  // BASE_URL: 'http://localhost:3000',      // For web browser
+  BASE_URL: 'http://localhost:3000',      // For web browser
   // BASE_URL: 'http://127.0.0.1:3000',      // For iOS Simulator
   // BASE_URL: 'http://10.0.2.2:3000',       // For Android Emulator
 };
@@ -35,5 +35,6 @@ export const API_ENDPOINTS = {
     ME: `${API_CONFIG.BASE_URL}/api/auth/me`,
   },
   WAITLIST: `${API_CONFIG.BASE_URL}/api/waitlist`,
+  SAMPLE_QUESTIONS: `${API_CONFIG.BASE_URL}/api/sample-questions`,
 };
 
