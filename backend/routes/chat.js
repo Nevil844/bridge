@@ -357,11 +357,31 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
               return;
             }
             
+            // Summarize list_tools results to keep context size manageable
+            const summarizedInitialResults = toolResults.map(result => {
+              if (result.name === 'list_tools') {
+                try {
+                  const parsed = JSON.parse(result.content);
+                  return {
+                    ...result,
+                    content: JSON.stringify({
+                      integration: parsed.integration,
+                      count: parsed.count,
+                      message: `${parsed.count} tools loaded for ${parsed.integration}`
+                    })
+                  };
+                } catch (e) {
+                  return result;
+                }
+              }
+              return result;
+            });
+            
             let conversationMessages = [
               { role: 'system', content: systemPrompt + memoryContext + toolContextInfo },
               { role: 'user', content: message },
               { role: 'assistant', content: fullContent, tool_calls: toolCalls },
-              ...toolResults,
+              ...summarizedInitialResults,
             ];
             
             let currentResponse = await provider.chat(conversationMessages, selectedModel, tools, false);
@@ -400,10 +420,31 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
                   content: systemPrompt + memoryContext + additionalToolContextInfo 
                 };
                 
+                // Filter/summarize tool results to keep context size manageable
+                const summarizedResults = additionalResults.map(result => {
+                  if (result.name === 'list_tools') {
+                    // list_tools returns massive tool definitions - summarize it
+                    try {
+                      const parsed = JSON.parse(result.content);
+                      return {
+                        ...result,
+                        content: JSON.stringify({
+                          integration: parsed.integration,
+                          count: parsed.count,
+                          message: `${parsed.count} tools loaded for ${parsed.integration}`
+                        })
+                      };
+                    } catch (e) {
+                      return result;
+                    }
+                  }
+                  return result;
+                });
+                
                 // Add to conversation history
                 conversationMessages.push(
                   { role: 'assistant', content: currentResponse.content || '', tool_calls: currentResponse.tool_calls || [] },
-                  ...additionalResults
+                  ...summarizedResults
                 );
                 
                 allToolCalls.push(...currentResponse.tool_calls.map(tc => tc.function.name));
