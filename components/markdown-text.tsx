@@ -69,7 +69,41 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
       } else {
         // Process text for inline markdown
         const lines = part.content.split('\n');
+        let pendingListItems: string[] = [];
+
+        const flushList = () => {
+          if (pendingListItems.length === 0) return;
+          result.push(
+            <View key={`list-${key++}`} style={styles.listContainer}>
+              {pendingListItems.map((item, idx) => {
+                const parsedItem = parseInlineFormatting(item, key + idx, textColor, codeBg, codeText);
+                return (
+                  <View key={`list-item-${key + idx}`} style={styles.listItemRow}>
+                    <Text style={[styles.bullet, { color: textColor }]}>•</Text>
+                    <Text style={[styles.listItemText, { color: textColor }]}>
+                      {parsedItem.length > 0 ? parsedItem : item}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          );
+          key += pendingListItems.length;
+          pendingListItems = [];
+        };
+
         lines.forEach((line, lineIndex) => {
+          const bulletMatch = line.match(/^\s*[-*]\s+(.+)$/);
+          if (bulletMatch) {
+            pendingListItems.push(bulletMatch[1]);
+            if (lineIndex === lines.length - 1) {
+              flushList();
+            }
+            return;
+          } else {
+            flushList();
+          }
+
           // Check for headers
           const headerMatch = line.match(/^(#{1,3})\s+(.+)$/);
           if (headerMatch) {
@@ -100,6 +134,9 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
             result.push(<Text key={`break-${key++}`}>{'\n'}</Text>);
           }
         });
+
+        // Flush any remaining list after processing all lines
+        flushList();
       }
     });
 
@@ -302,6 +339,22 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     fontSize: 14,
     lineHeight: 20,
+  },
+  listContainer: {
+    marginVertical: 4,
+  },
+  listItemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+  },
+  bullet: {
+    width: 12,
+    lineHeight: 18,
+  },
+  listItemText: {
+    flex: 1,
+    lineHeight: 18,
   },
   h1: {
     fontSize: 24,

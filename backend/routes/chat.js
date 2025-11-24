@@ -92,7 +92,7 @@ const { ensureUserIntegrationsLoaded } = require('../utils/integrationLoader');
 /**
  * Handle streaming chat response
  */
-async function handleStreamingResponse(req, res, provider, messages, selectedModel, tools, conversation, user, message, systemPrompt, memoryContext, mcpConnected) {
+async function handleStreamingResponse(req, res, provider, messages, selectedModel, tools, conversation, user, message, systemPrompt, memoryContext, toolContextInfo, mcpConnected) {
   try {
     // Set up Server-Sent Events (SSE) headers
     res.setHeader('Content-Type', 'text/event-stream');
@@ -171,11 +171,14 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
     }
     
     let fullContent = '';
-    let extractedResponse = ''; // Track extracted response text separately
     let isJsonResponse = false; // Track if we're receiving JSON
     let toolCalls = null;
     let usage = null;
     let hasError = false;
+    let lastParsedIndex = 0; // Track where we last successfully parsed JSON
+    let processedThinkingObjects = new Set(); // Track which thinking objects we've already sent
+    let hasShownThinking = false; // Track if we've shown any thinking already
+    const { parseAIResponse } = require('../utils/responseParser');
 
     // Process streaming chunks
     console.log('🌊 Starting to process stream chunks...');
@@ -202,60 +205,82 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
           
           // Detect if this is a JSON response
           if (!isJsonResponse) {
-            const trimmed = fullContent.trim();
-            isJsonResponse = trimmed.startsWith('{') || trimmed.startsWith('```json');
+            const trimmedStart = fullContent.trimStart();
+            isJsonResponse = trimmedStart.startsWith('{') || trimmedStart.startsWith('```json');
             if (isJsonResponse) {
               console.log('🔍 Detected JSON response, will extract response field');
             }
           }
           
-          // If it's JSON, try to extract response value incrementally
+          // If it's JSON, try to detect and send thinking events in real-time
           if (isJsonResponse) {
-            // Try to find and extract the response value as it streams
-            const responseFieldMatch = fullContent.match(/"response"\s*:\s*"/);
-            if (responseFieldMatch) {
-              // Found response field - extract the value
-              const responseStart = responseFieldMatch.index + responseFieldMatch[0].length;
-              const afterResponse = fullContent.slice(responseStart);
+            // Try to find complete JSON objects in the buffered content
+            // Look for JSON objects that end with } or are in markdown code blocks
+            let searchStart = lastParsedIndex;
+            
+            while (true) {
+              // Try to find a complete JSON object from searchStart
+              // First, try to find JSON in markdown code blocks
+              const codeBlockMatch = fullContent.slice(searchStart).match(/```json\s*\n([\s\S]*?)\n```/);
+              if (codeBlockMatch) {
+                const jsonStr = codeBlockMatch[1];
+                const objectStart = searchStart + fullContent.slice(searchStart).indexOf('```json');
+                const objectEnd = objectStart + codeBlockMatch[0].length;
+                const objectKey = `${objectStart}-${objectEnd}`;
+                
+                if (!processedThinkingObjects.has(objectKey)) {
+                  // Just mark as processed, don't send thinking yet
+                  // We'll send it properly after 'done' chunk with full tool call info
+                  processedThinkingObjects.add(objectKey);
+                  lastParsedIndex = Math.max(lastParsedIndex, objectEnd);
+                }
+                
+                searchStart = objectEnd;
+                continue;
+              }
               
-              // Extract the JSON string value (handling escaped quotes)
-              let responseValue = '';
-              let inEscape = false;
+              // Try to find standalone JSON objects (starting with { and ending with })
+              // We need to find balanced braces
+              let braceCount = 0;
+              let jsonStart = -1;
               
-              for (let i = 0; i < afterResponse.length; i++) {
-                const char = afterResponse[i];
-                if (inEscape) {
-                  responseValue += char;
-                  inEscape = false;
-                } else if (char === '\\') {
-                  responseValue += char;
-                  inEscape = true;
-                } else if (char === '"') {
-                  // End of string value
-                  break;
-                } else {
-                  responseValue += char;
+              for (let i = searchStart; i < fullContent.length; i++) {
+                if (fullContent[i] === '{') {
+                  if (braceCount === 0) {
+                    jsonStart = i;
+                  }
+                  braceCount++;
+                } else if (fullContent[i] === '}') {
+                  braceCount--;
+                  if (braceCount === 0 && jsonStart >= 0) {
+                    // Found a complete JSON object
+                    const jsonStr = fullContent.slice(jsonStart, i + 1);
+                    const objectKey = `${jsonStart}-${i + 1}`;
+                    
+                    if (!processedThinkingObjects.has(objectKey)) {
+                      // Just mark as processed, don't send thinking yet
+                      // We'll send it properly after 'done' chunk with full tool call info
+                      processedThinkingObjects.add(objectKey);
+                      lastParsedIndex = Math.max(lastParsedIndex, i + 1);
+                    }
+                    
+                    searchStart = i + 1;
+                    break;
+                  }
                 }
               }
               
-              // Extract only the new part
-              const newPart = responseValue.slice(extractedResponse.length);
-              if (newPart) {
-                extractedResponse = responseValue;
-                console.log(`📝 Extracted response chunk: ${newPart.substring(0, 50)}...`);
-                res.write(`data: ${JSON.stringify({ type: 'chunk', content: newPart })}\n\n`);
+              // If we didn't find a complete object, break and wait for more content
+              if (braceCount !== 0 || jsonStart === -1) {
+                break;
               }
-              // If no new part, skip (waiting for more)
-            } else {
-              // Response field not found yet, skip this chunk
-              console.log('⏳ Skipping chunk - waiting for response field');
             }
+            
             continue;
           }
           
-          // Not JSON - send chunks normally
-          console.log(`📝 Sending chunk: ${chunk.content.substring(0, 50)}...`);
-          res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk.content })}\n\n`);
+          // Not JSON - just accumulate for final response (no chat streaming until final)
+          console.log(`📝 Accumulating chunk (${chunk.content.length} chars)...`);
         } else if (chunk.type === 'done') {
           // Final chunk with complete data
           fullContent = chunk.content || fullContent;
@@ -266,9 +291,10 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
           const parsedContent = parseAIResponse(fullContent);
           const cleanContent = parsedContent.response || fullContent;
           
-          // If this was a JSON response that we buffered, send it all at once now
-          if (isJsonResponse && cleanContent !== fullContent) {
-            // We have clean content from JSON - send it as a single chunk
+          // DON'T send chat chunks if this is internal reasoning (internal: 0)
+          // Only send if internal: 1 (final response to user)
+          if (isJsonResponse && cleanContent !== fullContent && !parsedContent.isInternal) {
+            // We have clean content from JSON and it's a final response - send it
             console.log(`📝 Sending complete response from JSON (${cleanContent.length} chars)`);
             res.write(`data: ${JSON.stringify({ type: 'chunk', content: cleanContent })}\n\n`);
           }
@@ -276,100 +302,190 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
           // Update fullContent with clean version
           fullContent = cleanContent;
 
-          // If tool calls are present, we need to handle them (but for now, just send the content)
-          // Note: Full tool call handling in streaming mode would require more complex logic
           if (toolCalls && toolCalls.length > 0) {
-          console.log(`⚠️  Tool calls detected in streaming response - switching to non-streaming for tool execution`);
-          
-          // For now, send the content we have and indicate tool calls
-          res.write(`data: ${JSON.stringify({ 
-            type: 'done', 
-            content: fullContent,
-            toolCalls: toolCalls.map(tc => tc.function.name),
-            hasTools: true
-          })}\n\n`);
-          res.end();
-          
-          // Execute tools and get final response (non-streaming)
-          const { results: toolResults } = await executeToolCalls(user, toolCalls, null, conversation.id);
-          
-          const finalMessages = [
-            { role: 'system', content: systemPrompt + memoryContext },
-            { role: 'user', content: message },
-            { role: 'assistant', content: fullContent, tool_calls: toolCalls },
-            ...toolResults,
-          ];
-          
-          const finalResponse = await provider.chat(finalMessages, selectedModel, tools, false);
-          const parsed = parseAIResponse(finalResponse.content);
-          
-          if (!parsed.isInternal) {
+            console.log(`⚠️  Tool calls detected in streaming response - executing before finalizing response`);
+            
+            // Send thinking event with full context (thinking, action, tools)
+            if (!hasShownThinking) {
+              res.write(`data: ${JSON.stringify({ 
+                type: 'thinking',
+                thinking: {
+                  thinking: parsedContent.thinking || '',
+                  action: parsedContent.action || '',
+                  toolCalls: toolCalls.map(tc => tc.function.name)
+                }
+              })}\n\n`);
+              hasShownThinking = true;
+            }
+            
+            const { results: toolResults } = await executeToolCalls(user, toolCalls, null, conversation.id);
+            
+            // Reset for next round of tool calls
+            hasShownThinking = false;
+
+            const noActiveDeviceError = toolResults.some(result => {
+              if (!result || !result.content) return false;
+              try {
+                const parsed = typeof result.content === 'string' ? JSON.parse(result.content) : result.content;
+                if (parsed?.isError && Array.isArray(parsed.content)) {
+                  return parsed.content.some(item => typeof item.text === 'string' && item.text.includes('NO_ACTIVE_DEVICE'));
+                }
+                if (parsed?.error && typeof parsed.error === 'string' && parsed.error.includes('NO_ACTIVE_DEVICE')) {
+                  return true;
+                }
+                const textContent = parsed?.content;
+                if (Array.isArray(textContent)) {
+                  return textContent.some(item => typeof item.text === 'string' && item.text.includes('NO_ACTIVE_DEVICE'));
+                }
+              } catch (e) {
+                return false;
+              }
+              return false;
+            });
+
+            if (noActiveDeviceError) {
+              const deviceMessage = 'Spotify could not play because no active device was found. Please open Spotify on one of your devices and try again, then ask me once more.';
+              
+              res.write(`data: ${JSON.stringify({ 
+                type: 'done', 
+                message: deviceMessage,
+                conversationId: conversation.id,
+                mcpEnabled: mcpConnected,
+                toolsUsed: toolCalls.map(tc => tc.function.name)
+              })}\n\n`);
+              res.end();
+              return;
+            }
+            
+            let conversationMessages = [
+              { role: 'system', content: systemPrompt + memoryContext + toolContextInfo },
+              { role: 'user', content: message },
+              { role: 'assistant', content: fullContent, tool_calls: toolCalls },
+              ...toolResults,
+            ];
+            
+            let currentResponse = await provider.chat(conversationMessages, selectedModel, tools, false);
+            let allToolCalls = [...toolCalls.map(tc => tc.function.name)];
+            let roundNumber = 2;
+            const maxRounds = 10;
+            
+            // Loop to handle multiple rounds of tool calls
+            while (roundNumber <= maxRounds) {
+              const parsedResponse = parseAIResponse(currentResponse.content);
+              
+              // Check if AI wants to call more tools
+              if (currentResponse.tool_calls && currentResponse.tool_calls.length > 0) {
+                console.log(`🔧 Round ${roundNumber}: ${currentResponse.tool_calls.map(tc => tc.function.name).join(', ')}`);
+                
+                // Send thinking event for this round
+                res.write(`data: ${JSON.stringify({ 
+                  type: 'thinking',
+                  thinking: {
+                    thinking: parsedResponse.thinking || '',
+                    action: parsedResponse.action || '',
+                    toolCalls: currentResponse.tool_calls.map(tc => tc.function.name)
+                  }
+                })}\n\n`);
+                
+                // Execute the additional tool calls
+                const { results: additionalResults } = await executeToolCalls(user, currentResponse.tool_calls, null, conversation.id);
+                
+                // Reload tool context
+                const additionalToolContexts = await toolContextService.getActiveContexts(conversation.id);
+                const additionalToolContextInfo = formatToolContextInfo(additionalToolContexts);
+                
+                // Update system prompt with latest tool context
+                conversationMessages[0] = { 
+                  role: 'system', 
+                  content: systemPrompt + memoryContext + additionalToolContextInfo 
+                };
+                
+                // Add to conversation history
+                conversationMessages.push(
+                  { role: 'assistant', content: currentResponse.content || '', tool_calls: currentResponse.tool_calls || [] },
+                  ...additionalResults
+                );
+                
+                allToolCalls.push(...currentResponse.tool_calls.map(tc => tc.function.name));
+                
+                // Get next response
+                currentResponse = await provider.chat(conversationMessages, selectedModel, tools, false);
+                roundNumber++;
+              } else {
+                // No more tool calls, this is the final response
+                break;
+              }
+            }
+            
+            // Send final response
+            const parsedFinal = parseAIResponse(currentResponse.content);
+            const finalCleanContent = parsedFinal.response || currentResponse.content;
+
+            if (!parsedFinal.isInternal) {
+              await conversationService.addMessage(
+                conversation.id,
+                'assistant',
+                finalCleanContent,
+                createMessagePayload(parsedFinal, selectedModel, currentResponse.usage, allToolCalls)
+              );
+              
+              if (currentResponse.usage) {
+                await tokenUsageService.trackUsage(
+                  user,
+                  selectedModel,
+                  currentResponse.usage.input_tokens || 0,
+                  currentResponse.usage.output_tokens || 0
+                );
+              }
+            }
+
+            res.write(`data: ${JSON.stringify({ 
+              type: 'done', 
+              message: finalCleanContent,
+              conversationId: conversation.id,
+              mcpEnabled: mcpConnected,
+              toolsUsed: allToolCalls
+            })}\n\n`);
+            res.end();
+            return;
+          }
+
+          // No tool calls - send final response if not internal
+          if (!parsedContent.isInternal) {
             await conversationService.addMessage(
               conversation.id,
               'assistant',
-              parsed.response || finalResponse.content,
-              createMessagePayload(parsed, selectedModel, finalResponse.usage, toolCalls.map(tc => tc.function.name))
+              fullContent,
+              createMessagePayload(parsedContent, selectedModel, usage, [])
             );
             
-            if (finalResponse.usage) {
+            if (usage) {
               await tokenUsageService.trackUsage(
                 user,
                 selectedModel,
-                finalResponse.usage.input_tokens || 0,
-                finalResponse.usage.output_tokens || 0
+                usage.input_tokens || 0,
+                usage.output_tokens || 0
               );
             }
           }
-          
-          // Send final response via new request or WebSocket would be better
-          // For now, the client will need to handle this
+
+          res.write(`data: ${JSON.stringify({ 
+            type: 'done', 
+            message: parsedContent.isInternal ? '' : fullContent,
+            thinking: parsedContent.isInternal ? {
+              isInternal: parsedContent.isInternal,
+              thinking: parsedContent.thinking || '',
+              action: parsedContent.action || '',
+              toolCalls: parsedContent.toolCalls || [],
+              data: parsedContent.data || null
+            } : undefined,
+            conversationId: conversation.id,
+            mcpEnabled: mcpConnected,
+            toolsUsed: []
+          })}\n\n`);
+          res.end();
           return;
         }
-
-        // Parse and save final response
-        const parsedFinal = parseAIResponse(fullContent);
-        
-        // Extract clean response (removes JSON structure if present)
-        const cleanFinalContent = parsedFinal.response || fullContent;
-        
-        if (!parsedFinal.isInternal) {
-          await conversationService.addMessage(
-            conversation.id,
-            'assistant',
-            cleanFinalContent,
-            createMessagePayload(parsedFinal, selectedModel, usage, [])
-          );
-          
-          if (usage) {
-            await tokenUsageService.trackUsage(
-              user,
-              selectedModel,
-              usage.input_tokens || 0,
-              usage.output_tokens || 0
-            );
-          }
-        }
-
-        // Send final message - use the clean parsed content
-        const finalMessage = cleanFinalContent;
-        
-        res.write(`data: ${JSON.stringify({ 
-          type: 'done', 
-          message: finalMessage, // Use the clean content, not formatted.message
-          thinking: parsedFinal.isInternal ? {
-            isInternal: parsedFinal.isInternal,
-            thinking: parsedFinal.thinking || '',
-            action: parsedFinal.action || '',
-            toolCalls: [],
-            data: parsedFinal.data
-          } : undefined,
-          conversationId: conversation.id,
-          mcpEnabled: mcpConnected,
-          toolsUsed: []
-        })}\n\n`);
-        res.end();
-        return;
-      }
       }
     } catch (streamError) {
       console.error('❌ Error processing stream:', streamError);
@@ -494,9 +610,7 @@ router.post('/', checkQuota, async (req, res) => {
     if (mcpConnected) {
       const integrations = await mcpManager.getUserIntegrations(user);
       
-      console.log(`\n📊 Chat request for user: ${user}`);
-      console.log(`   Connected integrations: ${integrations.map(i => i.name).join(', ')}`);
-      console.log(`   Memory context: ${hasMemory ? 'Yes' : 'No'}`);
+      console.log(`📊 User: ${user}, Integrations: ${integrations.map(i => i.name).join(', ')}, Memory: ${hasMemory ? 'Yes' : 'No'}`);
       
       // Create a special "list_tools" meta-tool that the AI can call
       // to discover which tools are available for each integration
@@ -521,7 +635,6 @@ router.post('/', checkQuota, async (req, res) => {
       
       // Start with only the list_tools meta-tool
       tools = [listToolsTool];
-      console.log(`   Starting with list_tools meta-tool only`);
       
       systemPrompt = generateSystemPrompt(integrations, { 
         enableMemory: hasMemory, 
@@ -541,11 +654,6 @@ router.post('/', checkQuota, async (req, res) => {
       appConfig.conversation.historyLimit
     );
     
-    console.log(`📜 Got ${history.length} messages from history`);
-    if (history.length > 0) {
-      console.log(`   Latest history message: [${history[history.length - 1].role}] ${history[history.length - 1].content.substring(0, 50)}...`);
-    }
-    
     // Initial request to AI (with conversation history and memory context)
     // Filter out the current message since we'll add it separately
     const historyMessages = history
@@ -563,13 +671,11 @@ router.post('/', checkQuota, async (req, res) => {
       // Add current user message
       { role: 'user', content: message },
     ];
-    
-    console.log(`📜 Including ${historyMessages.length} historical messages + current message`);
 
     // Handle streaming responses
     if (stream) {
       console.log('🔄 Streaming enabled, calling handleStreamingResponse');
-      return handleStreamingResponse(req, res, provider, messages, selectedModel, tools, conversation, user, message, systemPrompt, memoryContext, mcpConnected);
+      return handleStreamingResponse(req, res, provider, messages, selectedModel, tools, conversation, user, message, systemPrompt, memoryContext, toolContextInfo, mcpConnected);
     }
 
     // Use provider to handle the chat request (non-streaming)
@@ -585,10 +691,6 @@ router.post('/', checkQuota, async (req, res) => {
         tools.push(...newTools);
       }
       
-      // Send tool results back to AI for final response
-      console.log(`\n🔄 Sending tool results back to AI...`);
-      console.log(`   Available tools now: ${tools.length}`);
-      
       // Reload tool context after tool execution (may have new context)
       const updatedToolContexts = await toolContextService.getActiveContexts(conversation.id);
       const updatedToolContextInfo = formatToolContextInfo(updatedToolContexts);
@@ -600,39 +702,7 @@ router.post('/', checkQuota, async (req, res) => {
         ...toolResults,
       ];
       
-      // Debug: Log the full conversation being sent
-      console.log('\n📤 MESSAGES BEING SENT TO AI:');
-      finalMessages.forEach((msg, i) => {
-        if (msg.role === 'system') {
-          console.log(`   ${i}. [SYSTEM] (${msg.content.length} chars)`);
-        } else if (msg.role === 'user') {
-          console.log(`   ${i}. [USER] ${msg.content}`);
-        } else if (msg.role === 'assistant') {
-          console.log(`   ${i}. [ASSISTANT] ${msg.content || '(no content)'}`);
-          if (msg.tool_calls && msg.tool_calls.length > 0) {
-            console.log(`      Tool calls: ${msg.tool_calls.map(tc => tc.function.name).join(', ')}`);
-          }
-        } else if (msg.role === 'tool') {
-          const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-          console.log(`   ${i}. [TOOL: ${msg.name}] ${content.substring(0, 200)}${content.length > 200 ? '...' : ''}`);
-        }
-      });
-      
       const finalResponse = await provider.chat(finalMessages, selectedModel, tools, false);
-      
-      // Debug: Log the AI's response
-      console.log('\n📥 AI RESPONSE RECEIVED:');
-      console.log(`   Content: ${finalResponse.content?.substring(0, 300)}${finalResponse.content?.length > 300 ? '...' : ''}`);
-      if (finalResponse.tool_calls && finalResponse.tool_calls.length > 0) {
-        console.log(`   Tool calls requested: ${finalResponse.tool_calls.map(tc => tc.function.name).join(', ')}`);
-      }
-      
-      console.log(`📨 AI final response received`);
-      console.log(`   Has tool calls: ${!!finalResponse.tool_calls}`);
-      console.log(`   Has usage data: ${!!finalResponse.usage}`);
-      if (finalResponse.usage) {
-        console.log(`   Usage:`, JSON.stringify(finalResponse.usage));
-      }
       
       // Loop until AI sends internal: 1 with actual data or no more tool calls
       let currentResponse = finalResponse;
@@ -654,7 +724,7 @@ router.post('/', checkQuota, async (req, res) => {
       while (roundNumber <= maxRounds) {
         // Check if AI wants to call more tools
         if (currentResponse.tool_calls && currentResponse.tool_calls.length > 0) {
-          console.log(`🔧 ROUND ${roundNumber} - AI making additional tool calls: ${currentResponse.tool_calls.map(tc => tc.function.name).join(', ')}`);
+          console.log(`🔧 Round ${roundNumber}: ${currentResponse.tool_calls.map(tc => tc.function.name).join(', ')}`);
           
           // Execute the additional tool calls (pass conversationId for working memory)
           const { results: additionalResults } = await executeToolCalls(user, currentResponse.tool_calls, null, conversation.id);
@@ -677,52 +747,15 @@ router.post('/', checkQuota, async (req, res) => {
           
           allToolCalls.push(...currentResponse.tool_calls.map(tc => tc.function.name));
           
-          // Debug: Log the full conversation being sent
-          console.log(`\n📤 ROUND ${roundNumber + 1} - MESSAGES BEING SENT TO AI:`);
-          conversationMessages.forEach((msg, i) => {
-            if (msg.role === 'system') {
-              console.log(`   ${i}. [SYSTEM] (${msg.content.length} chars)`);
-            } else if (msg.role === 'user') {
-              console.log(`   ${i}. [USER] ${msg.content}`);
-            } else if (msg.role === 'assistant') {
-              console.log(`   ${i}. [ASSISTANT] ${msg.content || '(no content)'}`);
-              if (msg.tool_calls && msg.tool_calls.length > 0) {
-                console.log(`      Tool calls: ${msg.tool_calls.map(tc => tc.function.name).join(', ')}`);
-              }
-            } else if (msg.role === 'tool') {
-              const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-              console.log(`   ${i}. [TOOL: ${msg.name}] ${content.substring(0, 200)}${content.length > 200 ? '...' : ''}`);
-            }
-          });
-          
           // Get next response
           currentResponse = await provider.chat(conversationMessages, selectedModel, tools, false);
-          
-          // Debug: Log the AI's response
-          console.log(`\n📥 ROUND ${roundNumber + 1} - AI FINAL RESPONSE:`);
-          console.log(`   Content: ${currentResponse.content?.substring(0, 300)}${currentResponse.content?.length > 300 ? '...' : ''}`);
-          if (currentResponse.tool_calls && currentResponse.tool_calls.length > 0) {
-            console.log(`   Tool calls requested: ${currentResponse.tool_calls.map(tc => tc.function.name).join(', ')}`);
-          }
-          console.log(`   Has usage data: ${!!currentResponse.usage}`);
-          if (currentResponse.usage) {
-            console.log(`   Usage:`, JSON.stringify(currentResponse.usage));
-          }
           
           // Parse response for internal reasoning
           const parsed = parseAIResponse(currentResponse.content);
           
           // If AI sent internal: 1 with actual data, or no more tool calls, break
           if (!parsed.isInternal || (!currentResponse.tool_calls || currentResponse.tool_calls.length === 0)) {
-            console.log(`✅ AI sent final response (internal: ${parsed.isInternal ? 0 : 1})`);
             break;
-          }
-          
-          // Log if AI sent internal reasoning but still wants more tools
-          if (parsed.isInternal && currentResponse.tool_calls && currentResponse.tool_calls.length > 0) {
-            console.log(`⚠️ AI sent internal reasoning (internal=0), continuing to round ${roundNumber + 2}`);
-            console.log(`   Thinking: ${parsed.thinking}`);
-            console.log(`   Action: ${parsed.action}`);
           }
           
           roundNumber++;
@@ -734,13 +767,6 @@ router.post('/', checkQuota, async (req, res) => {
       
       // Parse final response
       const parsed = parseAIResponse(currentResponse.content);
-      
-      // Log if AI sent internal reasoning
-      if (parsed.isInternal) {
-        console.log('⚠️ AI sent internal reasoning (internal=0), but no final response');
-        console.log('   Thinking:', parsed.thinking);
-        console.log('   Action:', parsed.action);
-      }
       
       // Only save to database if this is a final response (internal=1)
       if (!parsed.isInternal) {
@@ -755,14 +781,6 @@ router.post('/', checkQuota, async (req, res) => {
         
         // Track token usage
         if (currentResponse.usage) {
-          console.log('📊 Tracking token usage:', {
-            user,
-            model: selectedModel,
-            input: currentResponse.usage.input_tokens,
-            output: currentResponse.usage.output_tokens,
-            total: (currentResponse.usage.input_tokens || 0) + (currentResponse.usage.output_tokens || 0)
-          });
-          
           try {
             await tokenUsageService.trackUsage(
               user,
@@ -770,15 +788,9 @@ router.post('/', checkQuota, async (req, res) => {
               currentResponse.usage.input_tokens || 0,
               currentResponse.usage.output_tokens || 0
             );
-            
-            console.log('✅ Token usage tracked successfully');
           } catch (error) {
             console.error('❌ Error tracking token usage:', error);
           }
-        } else {
-          console.log('⚠️ No usage data in AI response');
-          console.log('   Response keys:', Object.keys(currentResponse));
-          console.log('   Full response structure:', JSON.stringify(currentResponse, null, 2).substring(0, 500));
         }
       }
       
@@ -796,13 +808,6 @@ router.post('/', checkQuota, async (req, res) => {
       // No tools called, parse response for internal reasoning
       const parsed = parseAIResponse(aiResponse.content);
       
-      // Log if AI sent internal reasoning
-      if (parsed.isInternal) {
-        console.log('⚠️ AI sent internal reasoning (internal=0), but no final response');
-        console.log('   Thinking:', parsed.thinking);
-        console.log('   Action:', parsed.action);
-      }
-      
       // Only save to database if this is a final response (internal=1)
       if (!parsed.isInternal) {
         const contentToSave = parsed.response || aiResponse.content;
@@ -816,14 +821,6 @@ router.post('/', checkQuota, async (req, res) => {
         
         // Track token usage
         if (aiResponse.usage) {
-          console.log('📊 Tracking token usage (no tools):', {
-            user,
-            model: selectedModel,
-            input: aiResponse.usage.input_tokens,
-            output: aiResponse.usage.output_tokens,
-            total: (aiResponse.usage.input_tokens || 0) + (aiResponse.usage.output_tokens || 0)
-          });
-          
           try {
             await tokenUsageService.trackUsage(
               user,
@@ -831,15 +828,9 @@ router.post('/', checkQuota, async (req, res) => {
               aiResponse.usage.input_tokens || 0,
               aiResponse.usage.output_tokens || 0
             );
-            
-            console.log('✅ Token usage tracked successfully');
           } catch (error) {
             console.error('❌ Error tracking token usage:', error);
           }
-        } else {
-          console.log('⚠️ No usage data in AI response (no tools)');
-          console.log('   aiResponse keys:', Object.keys(aiResponse));
-          console.log('   aiResponse.usage:', aiResponse.usage);
         }
       }
       

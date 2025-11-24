@@ -48,68 +48,46 @@ When the user talks about an integration, use list_tools to discover available a
 
 ## Response Format
 
-Use this JSON format for responses:
+Use this JSON format for ALL responses:
 
 \`\`\`json
 {
   "internal": 0 or 1,
-  "thinking": "Your reasoning process",
-  "action": "What you did",
-  "response": "Your answer to the user",
-  "data": {}
+  "thinking": "Your reasoning (what you're doing and why)",
+  "action": "Brief description of the action",
+  "response": "Your message to the user"
 }
 \`\`\`
 
-## Internal Flag Usage
+## Internal Flag - CRITICAL
 
-**Use internal: 0 (HIDDEN) when:**
-- You're still thinking or planning
-- You're calling tools but don't have results yet
-- You're waiting for tool responses
+**internal: 0** = THINKING (shown in thinking dropdown, NOT in chat)
+- Use when calling tools
+- Use when you're still processing
+- This shows in the "Thinking" expandable section
 
-**Use internal: 1 (VISIBLE) ONLY when:**
-- You have the ACTUAL DATA the user asked for
-- You've verified the tool results
-- You can provide a complete answer with real information
+**internal: 1** = FINAL RESPONSE (shown in chat bubble)
+- Use when you have the final answer for the user
+- Use after tools have executed and you have results
+- This shows in the main chat
 
-**NEVER use internal: 1 with placeholder text.**
-**ALWAYS use internal: 1 with actual data from tool results.**
+## Rules
 
-## Guidelines
+1. **When calling tools** - Set internal: 0
+   - Fill "thinking" with what you're doing
+   - Fill "action" with the specific action
+   - Tools will execute, then you get called again
 
-**When you have all the information needed:**
-- Set internal: 1
-- Provide a complete answer with ACTUAL DATA from tool results
-- Use "thinking" field to explain your reasoning process
-- Format the data nicely for the user
+2. **After getting tool results** - Set internal: 1
+   - Fill "response" with your answer to the user
+   - Include the actual data from tool results
+   - This appears in the chat
 
-**When you need more information:**
-- Set internal: 1 (it's a final response, just asking for clarification)
-- Ask the user a clarifying question
-- Explain what information you need and why
+3. **Be efficient** - Discover tools and use them in one turn when possible
 
-**When using tools:**
-- Step 1: Set internal: 0, call the tool, wait for results
-- Step 2: Extract ALL data from tool results
-- Step 3: Verify the data is what the user asked for
-- Step 4: Set internal: 1, provide the ACTUAL DATA in the response field
-- Extract ALL information from tool results before responding
-- Use information from tool results in subsequent operations - don't ask the user for what you already have
-- If tool results contain the information you need, use it immediately
-
-**Data Verification:**
-- Always check tool results contain the requested information
-- If data is missing or incomplete, either ask for clarification OR try another tool
-- Never send empty or placeholder responses with internal: 1
-
-**Conversation continuity:**
-- You have access to conversation history, memory, and working memory (tool context)
-- Reference previous context when relevant
-- Build on earlier interactions naturally
-- Check conversation history and working memory BEFORE asking the user for any information
-- Use information you've already obtained - don't ask again
-
-The user can see your "thinking" process in an expandable section, so use it to show your reasoning transparently.`;
+The user sees:
+- internal: 0 responses in the **Thinking dropdown** (collapsible)
+- internal: 1 responses in the **Chat bubble** (main conversation)`;
   }
 
   if (enableMemory) {
@@ -212,6 +190,10 @@ TOOLS:
 The MCP server maintains its own OAuth session via mcp-remote`,
   };
 
+  if (!integrationType) {
+    return 'INTEGRATION USAGE:\n- User is authenticated and ready to use';
+  }
+  
   return instructions[integrationType] || `${integrationType.toUpperCase()} USAGE:\n- User is authenticated and ready to use`;
 }
 
