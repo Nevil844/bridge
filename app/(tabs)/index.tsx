@@ -43,7 +43,7 @@ interface Message {
   id: string;
   text: string;
   isUser: boolean;
-  thinking?: ThinkingData; // Add thinking data for AI messages
+  thinking?: ThinkingData[]; // Array of thinking data for AI messages (all internal calls)
 }
 
 interface Model {
@@ -558,28 +558,42 @@ export default function HomeScreen() {
                         setCurrentChatId(data.conversationId);
                         await loadConversations();
                       }
-                    } else if (data.type === 'chunk') {
-                      accumulatedContent += data.content;
-                      setMessages(prev =>
-                        prev.map(msg =>
-                          msg.id === aiMessageId
-                            ? { ...msg, text: accumulatedContent }
-                            : msg
-                        )
-                      );
-                    } else if (data.type === 'done') {
-                      const finalContent = data.message || accumulatedContent;
-                      setMessages(prev =>
-                        prev.map(msg =>
-                          msg.id === aiMessageId
-                            ? { 
-                                ...msg, 
-                                text: finalContent,
-                                thinking: data.thinking || undefined
-                              }
-                            : msg
-                        )
-                      );
+                  } else if (data.type === 'chunk') {
+                    accumulatedContent += data.content;
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === aiMessageId
+                          ? { ...msg, text: accumulatedContent }
+                          : msg
+                      )
+                    );
+                  } else if (data.type === 'thinking') {
+                    // Add thinking event to the array
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === aiMessageId
+                          ? { 
+                              ...msg, 
+                              thinking: [...(msg.thinking || []), data.thinking]
+                            }
+                          : msg
+                      )
+                    );
+                  } else if (data.type === 'done') {
+                    const finalContent = data.message !== undefined ? data.message : accumulatedContent;
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === aiMessageId
+                          ? { 
+                              ...msg, 
+                              text: finalContent,
+                              thinking: data.thinking 
+                                ? [...(msg.thinking || []), data.thinking]
+                                : msg.thinking
+                            }
+                          : msg
+                      )
+                    );
                       
                       if (data.conversationId && !currentChatId) {
                         setCurrentChatId(data.conversationId);
@@ -683,18 +697,33 @@ export default function HomeScreen() {
                           : msg
                       )
                     );
+                  } else if (data.type === 'thinking') {
+                    // Add thinking event to the array in real-time
+                    console.log('🧠 Received thinking event');
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === aiMessageId
+                          ? { 
+                              ...msg, 
+                              thinking: [...(msg.thinking || []), data.thinking]
+                            }
+                          : msg
+                      )
+                    );
                   } else if (data.type === 'done') {
                     // Stream complete - use accumulated content (which was built from chunks) or fallback to message
                     // Prefer accumulatedContent since it's the clean streamed text
                     console.log('✅ Stream done');
-                    const finalContent = accumulatedContent || data.message || '';
+                    const finalContent = data.message !== undefined ? data.message : accumulatedContent || '';
                     setMessages(prev =>
                       prev.map(msg =>
                         msg.id === aiMessageId
                           ? { 
                               ...msg, 
                               text: finalContent, // Use accumulated content from chunks
-                              thinking: data.thinking || undefined
+                              thinking: data.thinking 
+                                ? [...(msg.thinking || []), data.thinking]
+                                : msg.thinking
                             }
                           : msg
                       )
@@ -731,7 +760,11 @@ export default function HomeScreen() {
           setMessages(prev =>
             prev.map(msg =>
               msg.id === aiMessageId
-                ? { ...msg, text: aiMessage, thinking: data.thinking || undefined }
+                ? { 
+                    ...msg, 
+                    text: aiMessage, 
+                    thinking: data.thinking ? [data.thinking] : undefined 
+                  }
                 : msg
             )
           );
@@ -1117,7 +1150,7 @@ export default function HomeScreen() {
               }}>
               {messages.map((message) => (
                 <View key={message.id} style={{ marginBottom: 12 }}>
-                  {!message.isUser && message.thinking && (
+                  {!message.isUser && message.thinking && message.thinking.length > 0 && (
                     <ThinkingProcess thinking={message.thinking} />
                   )}
                   <View

@@ -105,14 +105,48 @@ async function executeToolCall(userId, toolCall, integrationType = null, convers
     
     // Handle special list_tools meta-tool
     if (toolCall.function.name === 'list_tools') {
-      const integrationType = args.integration;
-      console.log(`🔍 AI requested tools for: ${integrationType}`);
-      
+      const userIntegrations = await mcpManager.getUserIntegrations(userId);
+      const availableIntegrations = userIntegrations.map(i => i.type);
+      let integrationType = args.integration;
+
+      if (!integrationType) {
+        if (availableIntegrations.length === 1) {
+          integrationType = availableIntegrations[0];
+          console.log(`⚠️  list_tools called without integration; defaulting to ${integrationType}`);
+        } else if (availableIntegrations.includes('spotify')) {
+          integrationType = 'spotify';
+          console.log('⚠️  list_tools missing integration; auto-selecting spotify (integration available)');
+        } else {
+          console.log('⚠️  list_tools called without integration and multiple integrations available');
+          return {
+            tool_call_id: toolCall.id,
+            role: 'tool',
+            name: toolCall.function.name,
+            content: JSON.stringify({
+              error: 'Integration parameter is required. Please specify which integration to list tools for.',
+              availableIntegrations,
+            }),
+          };
+        }
+      }
+
+      if (!availableIntegrations.includes(integrationType)) {
+        return {
+          tool_call_id: toolCall.id,
+          role: 'tool',
+          name: toolCall.function.name,
+          content: JSON.stringify({
+            error: `Integration "${integrationType}" is not connected for this user.`,
+            availableIntegrations,
+          }),
+        };
+      }
+
       const mcpTools = await mcpManager.getToolsForIntegrations(userId, [integrationType]);
       const newTools = convertMCPToolsToOpenAI(mcpTools);
-      
-      // Get integration-specific instructions
       const integrationInstructions = getIntegrationInstructions(integrationType);
+      
+      console.log(`🔧 Loaded ${mcpTools.length} tools for ${integrationType}`);
       
       return {
         tool_call_id: toolCall.id,
@@ -131,7 +165,6 @@ async function executeToolCall(userId, toolCall, integrationType = null, convers
       };
     } else {
       // Regular MCP tool call
-      console.log(`🔧 Calling tool "${toolCall.function.name}" on ${integrationType || 'integration'}`);
       const result = await mcpManager.callUserTool(
         userId, 
         toolCall.function.name, 
@@ -145,7 +178,7 @@ async function executeToolCall(userId, toolCall, integrationType = null, convers
           try {
             await toolContextService.storeContext(
               conversationId,
-              toolCall.function.name, // Use actual tool name (generic)
+              toolCall.function.name,
               {
                 tool: toolCall.function.name,
                 args,
@@ -153,7 +186,6 @@ async function executeToolCall(userId, toolCall, integrationType = null, convers
                 timestamp: new Date().toISOString(),
               }
             );
-            console.log(`💾 Stored tool context for ${toolCall.function.name}:`, context);
           } catch (error) {
             console.error('Error storing tool context:', error);
             // Don't fail tool execution if context storage fails
