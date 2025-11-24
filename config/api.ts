@@ -11,7 +11,8 @@
 const NETWORK_IP = '192.168.1.88'; // Replace with your actual IP!
 
 export const API_CONFIG = {
-  BASE_URL: `http://${NETWORK_IP}:3000`,  // For physical iOS device
+  // BASE_URL: `http://${NETWORK_IP}:3000`,  // For physical iOS device
+  BASE_URL: 'https://api.bridge.neviljobanputra.com',  // For production
   
   // Alternatives (uncomment if needed):
   // BASE_URL: 'http://localhost:3000',      // For web browser
