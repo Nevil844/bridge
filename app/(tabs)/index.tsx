@@ -195,10 +195,20 @@ export default function HomeScreen() {
         if (chatId === currentChatId) {
           startNewChat();
         }
+      } else {
+        if (Platform.OS === 'web') {
+          alert('Failed to delete conversation');
+        } else {
+          Alert.alert('Error', 'Failed to delete conversation');
+        }
       }
     } catch (error) {
       console.error('Error deleting conversation:', error);
-      Alert.alert('Error', 'Failed to delete conversation');
+      if (Platform.OS === 'web') {
+        alert('Failed to delete conversation');
+      } else {
+        Alert.alert('Error', 'Failed to delete conversation');
+      }
     }
   };
 
@@ -889,41 +899,50 @@ export default function HomeScreen() {
                   </View>
                 ) : (
                   chatHistory.map((chat) => (
-                    <TouchableOpacity
+                    <View
                       key={chat.id}
                       style={[
                         styles.chatItem,
                         chat.id === currentChatId && {
                           backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
                         },
-                      ]}
-                      onPress={() => loadChat(chat.id)}>
+                      ]}>
                       <View style={styles.chatItemContainer}>
-                        <View style={styles.chatItemContent}>
+                        <TouchableOpacity 
+                          style={styles.chatItemContent}
+                          onPress={() => loadChat(chat.id)}
+                          activeOpacity={0.7}>
                           <ThemedText style={styles.chatItemTitle} numberOfLines={1}>
                             {chat.title}
                           </ThemedText>
                           <ThemedText style={styles.chatItemDate}>
                             {new Date(chat.lastActive).toLocaleDateString()}
                           </ThemedText>
-                        </View>
+                        </TouchableOpacity>
                         <TouchableOpacity
                           style={styles.deleteButton}
                           onPress={(e) => {
                             e.stopPropagation();
-                            Alert.alert(
-                              'Delete Chat',
-                              'Are you sure you want to delete this chat?',
-                              [
-                                { text: 'Cancel', style: 'cancel' },
-                                { text: 'Delete', style: 'destructive', onPress: () => deleteChat(chat.id) }
-                              ]
-                            );
+                            if (Platform.OS === 'web') {
+                              const confirmed = window.confirm('Are you sure you want to delete this chat?');
+                              if (confirmed) {
+                                deleteChat(chat.id);
+                              }
+                            } else {
+                              Alert.alert(
+                                'Delete Chat',
+                                'Are you sure you want to delete this chat?',
+                                [
+                                  { text: 'Cancel', style: 'cancel' },
+                                  { text: 'Delete', style: 'destructive', onPress: () => deleteChat(chat.id) }
+                                ]
+                              );
+                            }
                           }}>
                           <IconSymbol name="trash" size={16} color="#FF3B30" />
                         </TouchableOpacity>
                       </View>
-                    </TouchableOpacity>
+                    </View>
                   ))
                 )}
               </ScrollView>
@@ -994,23 +1013,33 @@ export default function HomeScreen() {
                           backgroundColor: isDark ? 'rgba(255, 59, 48, 0.1)' : 'rgba(255, 59, 48, 0.05)',
                         }
                       ]}
+                      activeOpacity={0.7}
                       onPress={async () => {
-                        Alert.alert(
-                          'Logout',
-                          'Are you sure you want to logout?',
-                          [
-                            { text: 'Cancel', style: 'cancel' },
-                            {
-                              text: 'Logout',
-                              style: 'destructive',
-                              onPress: async () => {
-                                await logout();
-                                setShowSidebar(false);
-                                setShowProfileMenu(false);
+                        if (Platform.OS === 'web') {
+                          const confirmed = window.confirm('Are you sure you want to logout?');
+                          if (confirmed) {
+                            await logout();
+                            setShowSidebar(false);
+                            setShowProfileMenu(false);
+                          }
+                        } else {
+                          Alert.alert(
+                            'Logout',
+                            'Are you sure you want to logout?',
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              {
+                                text: 'Logout',
+                                style: 'destructive',
+                                onPress: async () => {
+                                  await logout();
+                                  setShowSidebar(false);
+                                  setShowProfileMenu(false);
+                                }
                               }
-                            }
-                          ]
-                        );
+                            ]
+                          );
+                        }
                       }}>
                       <IconSymbol name="arrow.right.square" size={16} color="#FF3B30" />
                       <ThemedText style={[styles.logoutButtonText, { color: '#FF3B30' }]}>
@@ -1669,6 +1698,8 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     padding: 8,
+    zIndex: 10,
+    ...(Platform.OS === 'web' && { cursor: 'pointer' as any }),
   },
   profileSection: {
     paddingHorizontal: 16,
@@ -1740,6 +1771,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 10,
     marginTop: 6,
+    zIndex: 10,
+    ...(Platform.OS === 'web' && { cursor: 'pointer' as any }),
   },
   logoutButtonText: {
     fontSize: 14,
