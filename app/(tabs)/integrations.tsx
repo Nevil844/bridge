@@ -75,14 +75,10 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
     description: 'Control playback, manage playlists, and search music.',
   },
-  {
-    id: 'zomato',
-    name: 'Zomato',
-    type: 'zomato',
-    connected: false,
-    logo: 'https://logo.clearbit.com/zomato.com',
-    description: 'Discover restaurants, browse menus, create carts, and place food orders.',
-  },
+];
+
+const UPCOMING_INTEGRATIONS: Integration[] = [
+  // Moved from Available - works locally but not in production
   {
     id: 'jira',
     name: 'Jira',
@@ -91,9 +87,14 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Jira_Logo.svg/150px-Jira_Logo.svg.png',
     description: 'Create and manage issues, projects, workflows, and more.',
   },
-];
-
-const UPCOMING_INTEGRATIONS: Integration[] = [
+  {
+    id: 'zomato',
+    name: 'Zomato',
+    type: 'zomato',
+    connected: false,
+    logo: 'https://logo.clearbit.com/zomato.com',
+    description: 'Discover restaurants, browse menus, create carts, and place food orders.',
+  },
   // Existing integrations that were there before
   {
     id: 'whatsapp',
@@ -256,6 +257,7 @@ export default function IntegrationsScreen() {
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
   const [integrations, setIntegrations] = useState<Integration[]>(AVAILABLE_INTEGRATIONS);
+  const [upcomingIntegrations, setUpcomingIntegrations] = useState<Integration[]>(UPCOMING_INTEGRATIONS);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -304,8 +306,17 @@ export default function IntegrationsScreen() {
         ),
       }));
       
+      // Also update upcoming integrations (for JIRA and Zomato)
+      const updatedUpcoming = UPCOMING_INTEGRATIONS.map(int => ({
+        ...int,
+        connected: data.integrations.some((ui: any) => 
+          ui.type === int.type && (ui.configured || ui.isActive)
+        ),
+      }));
+      
       console.log('✅ Updated integrations state:', updated);
       setIntegrations(updated);
+      setUpcomingIntegrations(updatedUpcoming);
     } catch (error) {
       console.error('Error loading integrations:', error);
     }
@@ -562,46 +573,76 @@ export default function IntegrationsScreen() {
             These integrations are under development
           </ThemedText>
 
-          {UPCOMING_INTEGRATIONS.map((integration) => (
-            <View
-              key={integration.id}
-              style={[
-                styles.integrationCard,
-                styles.upcomingCard,
-                { 
-                  backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
-                  opacity: 0.6,
-                },
-              ]}>
-              <View style={styles.integrationHeader}>
-                <View style={styles.integrationInfo}>
-                  {integration.logo ? (
-                    <Image
-                      source={{ uri: integration.logo }}
-                      style={styles.integrationLogo}
-                      resizeMode="contain"
-                    />
-                  ) : (
-                    <ThemedText style={styles.integrationIcon}>🔗</ThemedText>
-                  )}
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <ThemedText style={styles.integrationName}>
-                        {integration.name}
+          {upcomingIntegrations.map((integration) => {
+            // JIRA and Zomato work locally - show connect button
+            const isFunctional = integration.type === 'jira' || integration.type === 'zomato';
+            
+            return (
+              <View
+                key={integration.id}
+                style={[
+                  styles.integrationCard,
+                  styles.upcomingCard,
+                  { 
+                    backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                    opacity: isFunctional ? 1 : 0.6,
+                  },
+                ]}>
+                <View style={styles.integrationHeader}>
+                  <View style={styles.integrationInfo}>
+                    {integration.logo ? (
+                      <Image
+                        source={{ uri: integration.logo }}
+                        style={styles.integrationLogo}
+                        resizeMode="contain"
+                      />
+                    ) : (
+                      <ThemedText style={styles.integrationIcon}>🔗</ThemedText>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <ThemedText style={styles.integrationName}>
+                          {integration.name}
+                        </ThemedText>
+                      </View>
+                      <ThemedText style={styles.integrationStatus}>
+                        {integration.connected 
+                          ? '✓ Connected' 
+                          : isFunctional 
+                            ? 'Works locally (not in production)' 
+                            : 'In development'}
                       </ThemedText>
                     </View>
-                    <ThemedText style={styles.integrationStatus}>
-                      In development
-                    </ThemedText>
                   </View>
-                </View>
-              </View>
 
-              <ThemedText style={styles.integrationDescription}>
-                {integration.description}
-              </ThemedText>
-            </View>
-          ))}
+                  {/* Show connect/disconnect button for functional integrations (JIRA, Zomato) */}
+                  {isFunctional && (
+                    integration.connected ? (
+                      <TouchableOpacity
+                        style={[styles.button, styles.disconnectButton]}
+                        onPress={() => handleDisconnect(integration)}>
+                        <ThemedText style={styles.disconnectButtonText}>
+                          Disconnect
+                        </ThemedText>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        style={[styles.button, styles.connectButton]}
+                        onPress={() => handleAddIntegration(integration)}>
+                        <ThemedText style={styles.connectButtonText}>
+                          Connect
+                        </ThemedText>
+                      </TouchableOpacity>
+                    )
+                  )}
+                </View>
+
+                <ThemedText style={styles.integrationDescription}>
+                  {integration.description}
+                </ThemedText>
+              </View>
+            );
+          })}
         </View>
 
         <View style={styles.infoSection}>
