@@ -4,7 +4,7 @@ import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -478,6 +478,16 @@ export default function IntegrationsScreen() {
     }
   };
 
+  const sortedIntegrations = useMemo(() => {
+    // Connected integrations go first, fall back to name sorting within groups
+    return [...integrations].sort((a, b) => {
+      if (a.connected === b.connected) {
+        return a.name.localeCompare(b.name);
+      }
+      return a.connected ? -1 : 1;
+    });
+  }, [integrations]);
+
   return (
     <ThemedView style={styles.container}>
       <ScrollView style={styles.scrollView}>
@@ -491,7 +501,7 @@ export default function IntegrationsScreen() {
         <View style={styles.section}>
           <ThemedText style={styles.sectionTitle}>Available Integrations</ThemedText>
 
-          {integrations.map((integration) => (
+          {sortedIntegrations.map((integration) => (
             <View
               key={integration.id}
               style={[
