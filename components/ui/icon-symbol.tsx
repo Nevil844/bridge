@@ -1,7 +1,7 @@
 // Fallback for using MaterialIcons on Android and web.
 
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { SymbolWeight, SymbolViewProps } from 'expo-symbols';
+import { SymbolViewProps, SymbolWeight } from 'expo-symbols';
 import { ComponentProps } from 'react';
 import { OpaqueColorValue, type StyleProp, type TextStyle } from 'react-native';
 
@@ -18,6 +18,39 @@ const MAPPING = {
   'paperplane.fill': 'send',
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
+  // Tab bar icons
+  'message.fill': 'message',
+  'link': 'link',
+  'gearshape.fill': 'settings',
+  // Chat screen icons
+  'line.3.horizontal': 'menu',
+  'square.and.pencil': 'edit',
+  'chevron.left': 'chevron-left',
+  'trash': 'delete',
+  'envelope': 'mail',
+  'arrow.right.square': 'send',
+  // Settings icons
+  'arrow.clockwise': 'refresh',
+  // Pricing icons
+  'checkmark.circle.fill': 'check-circle',
+  // Alert icons
+  'exclamationmark.triangle.fill': 'warning',
+  'info.circle.fill': 'info',
+  // Thinking process icons
+  'brain': 'psychology',
+  'chevron.up': 'keyboard-arrow-up',
+  'chevron.down': 'keyboard-arrow-down',
+  // Additional icons
+  'mic.fill': 'mic',
+  'arrow.up': 'arrow-upward',
+  'stop.circle.fill': 'stop-circle',
+  'doc.on.doc': 'content-copy',
+  // Landing page icons
+  'shield.fill': 'shield',
+  'bolt.fill': 'bolt',
+  'sparkles': 'auto-awesome',
+  'lock.fill': 'lock',
+  'arrow.right': 'arrow-forward',
 } as IconMapping;
 
 /**
@@ -37,5 +70,12 @@ export function IconSymbol({
   style?: StyleProp<TextStyle>;
   weight?: SymbolWeight;
 }) {
-  return <MaterialIcons color={color} size={size} name={MAPPING[name]} style={style} />;
+  const iconName = MAPPING[name];
+  
+  if (!iconName) {
+    console.warn(`IconSymbol: No mapping found for "${name}". Using "help" as fallback.`);
+    return <MaterialIcons color={color} size={size} name="help" style={style} />;
+  }
+  
+  return <MaterialIcons color={color} size={size} name={iconName} style={style} />;
 }

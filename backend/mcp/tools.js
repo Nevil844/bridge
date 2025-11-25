@@ -24,36 +24,181 @@ function convertMCPToolsToOpenAI(mcpTools) {
 }
 
 /**
- * Generate a generic system prompt for MCP integrations
+ * Generate enhanced system prompt with structured response format
  * @param {Array} integrations - List of connected integrations
- * @param {number} toolCount - Total number of available tools
+ * @param {Object} options - Additional options (enableMemory, enableThinking)
  * @returns {string} - System prompt
  */
-function generateSystemPrompt(integrations = [], toolCount = 0) {
+function generateSystemPrompt(integrations = [], options = {}) {
+  const { enableMemory = false, enableThinking = true } = options;
+  
+  let prompt = '';
+  
   if (integrations.length === 0) {
-    return 'You are a helpful AI assistant.';
+    prompt = 'You are a helpful AI assistant.';
+  } else {
+  const integrationList = integrations.map(i => i.type).join(', ');
+    prompt = `You are a helpful AI assistant with access to: ${integrationList}.
+
+When the user talks about an integration, use list_tools to discover available actions.`;
   }
 
-  const integrationNames = integrations.map(i => i.name).join(', ');
+  if (enableThinking) {
+    prompt += `
 
-  return `You are a helpful AI assistant with access to external integrations through MCP (Model Context Protocol).
+## Response Format
 
-CONNECTED INTEGRATIONS: ${integrationNames}
+Use this JSON format for ALL responses:
 
-You have ${toolCount} tool${toolCount !== 1 ? 's' : ''} available to fetch real-time data and perform actions.
+\`\`\`json
+{
+  "internal": 0 or 1,
+  "thinking": "Your reasoning (what you're doing and why)",
+  "action": "Brief description of the action",
+  "response": "Your message to the user"
+}
+\`\`\`
 
-IMPORTANT GUIDELINES:
-- You are ALREADY AUTHENTICATED with all connected integrations
-- ALWAYS use the available tools to fetch real, live data when users ask questions
-- DO NOT ask users for authentication tokens or credentials
-- DO NOT make up or guess data - ALWAYS call the appropriate tool first
-- Be proactive in using tools to provide accurate, up-to-date information
+## Internal Flag - CRITICAL
 
-When users ask questions related to your connected integrations, immediately use the relevant tools to fetch the information they need.`;
+**internal: 0** = THINKING (shown in thinking dropdown, NOT in chat)
+- Use when calling tools
+- Use when you're still processing
+- This shows in the "Thinking" expandable section
+
+**internal: 1** = FINAL RESPONSE (shown in chat bubble)
+- Use when you have the final answer for the user
+- Use after tools have executed and you have results
+- This shows in the main chat
+
+## Rules
+
+1. **When calling tools** - Set internal: 0
+   - Fill "thinking" with what you're doing
+   - Fill "action" with the specific action
+   - Tools will execute, then you get called again
+
+2. **After getting tool results** - Set internal: 1
+   - Fill "response" with your answer to the user
+   - Include the actual data from tool results
+   - This appears in the chat
+
+3. **Be efficient** - Discover tools and use them in one turn when possible
+
+The user sees:
+- internal: 0 responses in the **Thinking dropdown** (collapsible)
+- internal: 1 responses in the **Chat bubble** (main conversation)`;
+  }
+
+  if (enableMemory) {
+    prompt += `
+
+## Memory Context
+
+Relevant context from past conversations has been included above.
+Use this to provide personalized, context-aware responses.
+Reference previous interactions when relevant.`;
+  }
+
+  return prompt;
+}
+
+/**
+ * Get integration-specific instructions
+ * These are added to the context only when tools for that integration are loaded
+ * @param {string} integrationType - Integration type (e.g., 'zerodha', 'github')
+ * @returns {string} - Integration-specific instructions
+ */
+function getIntegrationInstructions(integrationType) {
+  const instructions = {
+    zerodha: `ZERODHA USAGE:
+- User is authenticated via OAuth
+- If any tool fails with "Please log in first" or "Failed to execute":
+  1. Call the login tool (no arguments)
+  2. Show the user the warning and authorization link from the response
+  3. Tell them to click the link and ask again after authorizing
+- Try calling data tools directly first (get_profile, get_holdings, etc.)
+- Only call login if a tool fails with a login error`,
+
+    github: `GITHUB USAGE:
+- User is authenticated via OAuth - you have access to their account
+- When user says "my repo", "my commits", "my issues" - they mean items they own
+- Use information from tool results in subsequent operations
+- Check conversation history and working memory before asking for information`,
+
+    gmail: `GMAIL USAGE:
+- User is authenticated via OAuth
+- You can read, search, send emails, and manage labels
+- Use list_emails to see recent emails, search_emails for specific queries`,
+
+    'google-drive': `GOOGLE DRIVE USAGE:
+- User is authenticated via OAuth
+- You can list files, read content, and search
+- Use list_files to browse, get_file to read content`,
+
+    spotify: `SPOTIFY USAGE:
+- User is authenticated via OAuth with Spotify Premium
+- Control playback, manage playlists, search music, get currently playing
+
+- PLAYBACK COMMANDS:
+  CRITICAL: When user explicitly mentions a song name (e.g., "play senorita", "play night we met"):
+  - ALWAYS play THAT specific song they mentioned
+  - Use SpotifySearchAndPlay with { query: '<the song name they said>' }
+  - NEVER play a different song from history when user specifies a song name
+  
+  When user says "play the last song" or "play last song" or "play it again" (WITHOUT mentioning a specific song name):
+  - Check conversation history to find the last song that was played
+  - Use SpotifySearchAndPlay with that song's name and artist
+  - If you can't find it in conversation history, use SpotifyGetInfo to check recently played tracks
+  
+  IMPORTANT: If user says a song name, play THAT song. Only use history when user says "last song" or "it again" without a song name.
+  
+  This is the ONLY tool you should use for playing songs.
+  It will automatically search and play the song in one step.`,
+
+    jira: `JIRA USAGE:
+    - User is authenticated with JIRA
+    - Common tasks: search or view issues, update fields, add comments, transition workflow states
+    - Use working memory to remember issue keys, project keys, and account IDs you have already retrieved
+    - JQL queries MUST include a restriction (e.g., "project = KAN" or "assignee = currentUser()") - unbounded queries are not allowed
+    - Use the appropriate tools when performing tasks`,
+
+    zomato: `ZOMATO USAGE:
+- User is authenticated via OAuth (handled internally by mcp-remote)
+- Search restaurants, browse menus, manage cart, and place orders
+
+CRITICAL: LOCATION PARAMETERS MUST BE OBJECTS, NOT STRINGS
+- ALL location parameters (user_location, location) MUST be objects with latitude and longitude
+- Format: { "latitude": "23.056624", "longitude": "72.552949" }
+- Use get_saved_addresses_for_user to get the correct format - it returns address objects with latitude/longitude
+- NEVER use strings like "23.056624,72.552949" or address strings like "A-008 Corner house..."
+- This applies to ALL tools: get_restaurants_for_keyword (user_location), get_menu_items_listing (location), get_restaurant_menu_by_category (location), and every other tool that takes location
+- If a tool requires location, ALWAYS use the object format from get_saved_addresses_for_user response
+
+TOOLS:
+- Use get_restaurants_for_keyword with proper location object format
+- Use menu tools to browse restaurant menus (location must be object)
+- Use create_cart to create a cart (requires cell_id)
+- cell_id comes from get_saved_addresses_for_user response (addresses[0].cell_id) or working memory
+- Check working memory for cell_id - it's stored after calling get_saved_addresses_for_user
+- Use add_to_cart to add items to cart (requires cart_id from create_cart)
+- Use place_order ONLY when user explicitly says "place order", "order now", "confirm order", "proceed with payment", or similar explicit confirmation
+- NEVER use place_order if user only asks to "add to cart", "show cart", "find deals", "get payment link", or "show options"
+- If user asks for "payment link" or "show me the order", use get_cart_details or similar - DO NOT place the order
+- Check conversation history and working memory for restaurant IDs, cell_id, and cart_id when adding items to cart
+
+The MCP server maintains its own OAuth session via mcp-remote`,
+  };
+
+  if (!integrationType) {
+    return 'INTEGRATION USAGE:\n- User is authenticated and ready to use';
+  }
+  
+  return instructions[integrationType] || `${integrationType.toUpperCase()} USAGE:\n- User is authenticated and ready to use`;
 }
 
 module.exports = {
   convertMCPToolsToOpenAI,
   generateSystemPrompt,
+  getIntegrationInstructions,
 };
-

@@ -13,7 +13,7 @@ class OAuthHandler {
    * Generate OAuth authorization URL for any integration
    * @param {string} integrationType - Type of integration (e.g., 'github', 'slack')
    * @param {string} userId - User ID initiating the OAuth flow
-   * @returns {string} - Authorization URL
+   * @returns {Promise<string>} - Authorization URL
    */
   getAuthUrl(integrationType, userId) {
     const IntegrationClass = oauthIntegrations[integrationType];

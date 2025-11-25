@@ -3,6 +3,7 @@
 # dependencies
 node_modules/
 
+.spotify-mcp-cache/
 # Expo
 .expo/
 dist/
@@ -41,3 +42,6 @@ app-example
 # generated native folders
 /ios
 /android
+
+# cache files
+backend/.cache

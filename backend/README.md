@@ -1,4 +1,4 @@
-# AI MCP Backend - Dynamic Per-User Integrations
+# Bridge AI Backend - Dynamic Per-User Integrations
 
 Express backend with **dynamic per-user MCP (Model Context Protocol) integrations**. Users connect their own integrations from the mobile app!
 
@@ -216,7 +216,7 @@ async connectSlackMCP(userId, token) {
   });
 
   const client = new Client({
-    name: 'ai-mcp-app',
+    name: 'bridge-ai',
     version: '1.0.0',
   }, {
     capabilities: { tools: {} },

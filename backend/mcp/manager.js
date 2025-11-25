@@ -5,12 +5,15 @@
  */
 
 const integrationRegistry = require('./integrations/index.js');
+const integrationService = require('../db/services/integration');
 
-// Store for user integrations
-const userIntegrations = new Map();
-
-// Store for user MCP connections (client + transport)
+// Store for user MCP connections (client + transport) - these are in-memory only
 const userConnections = new Map();
+
+// Cache for tools to avoid repeated listTools calls
+// Cache expires after 5 minutes
+const toolsCache = new Map();
+const TOOLS_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 class MCPManager {
   /**
@@ -19,10 +22,32 @@ class MCPManager {
    * @returns {Promise<Array>} - List of user integrations
    */
   async getUserIntegrations(userId) {
-    if (!userIntegrations.has(userId)) {
+    try {
+      const dbIntegrations = await integrationService.getUserIntegrations(userId);
+      // Convert database format to manager format
+      // Filter out non-MCP integrations (like "google-auth" which is just OAuth, not an MCP tool)
+      // Only include integrations that are registered in the integration registry
+      return dbIntegrations
+        .filter(int => int.isActive)
+        .filter(int => {
+          // Exclude "google-auth" - it's just OAuth, not an MCP integration
+          if (int.provider === 'google-auth') {
+            return false;
+          }
+          // Only include integrations that are registered in the integration registry
+          return integrationRegistry[int.provider] !== undefined;
+        })
+        .map(int => ({
+          id: int.id,
+          type: int.provider,
+          name: int.provider.charAt(0).toUpperCase() + int.provider.slice(1),
+          config: int.credentials,
+          configured: true,
+        }));
+    } catch (error) {
+      console.error(`Error loading integrations for user ${userId}:`, error);
       return [];
     }
-    return userIntegrations.get(userId);
   }
 
   /**
@@ -37,31 +62,21 @@ class MCPManager {
       throw new Error(`Unknown integration type: ${type}`);
     }
 
-    if (!userIntegrations.has(userId)) {
-      userIntegrations.set(userId, []);
-    }
-
-    const integrations = userIntegrations.get(userId);
-    
-    // Remove existing integration of same type
-    const filtered = integrations.filter(i => i.type !== type);
-    
     // Get integration metadata from registry
     const integrationMeta = integrationRegistry[type];
     
-    // Add new integration
-    filtered.push({
-      id: `${userId}-${type}-${Date.now()}`,
-      type,
-      name: integrationMeta.name,
-      config,
-      configured: true,
-    });
-
-    userIntegrations.set(userId, filtered);
+    // Persistence is handled by database (integrationService)
+    // The database service should be called before this method
+    // This method only handles in-memory MCP connections
 
     // Connect to MCP server
-    await this.connectIntegration(userId, type, config);
+    const connected = await this.connectIntegration(userId, type, config);
+
+    // Invalidate tools cache since we added a new integration
+    // Only invalidate if the integration was successfully connected
+    if (connected) {
+      this.invalidateToolsCache(userId);
+    }
 
     return true;
   }
@@ -73,16 +88,19 @@ class MCPManager {
    * @returns {Promise<boolean>} - Success status
    */
   async removeIntegration(userId, type) {
-    if (!userIntegrations.has(userId)) {
-      return false;
-    }
-
-    const integrations = userIntegrations.get(userId);
-    const filtered = integrations.filter(i => i.type !== type);
-    userIntegrations.set(userId, filtered);
+    console.log(`  → Removing ${type} integration for user ${userId}`);
+    
+    // Persistence is handled by database (integrationService)
+    // The database service should be called before this method
+    // This method only handles in-memory MCP connections
 
     // Disconnect MCP client
+    console.log(`  → Disconnecting MCP client...`);
     await this.disconnectIntegration(userId, type);
+    console.log(`  ✅ MCP client disconnected`);
+
+    // Invalidate tools cache since we removed an integration
+    this.invalidateToolsCache(userId);
 
     return true;
   }
@@ -112,21 +130,21 @@ class MCPManager {
       const IntegrationClass = integrationMeta.class;
       const integration = new IntegrationClass();
       
-      console.log(`🔗 Connecting ${integration.name} for user: ${userId}`);
-      
-      const connection = await integration.connect(config);
+      // Pass userId in config (needed for Spotify cache file)
+      const connectionConfig = { ...config, userId };
+      const connection = await integration.connect(connectionConfig);
       
       // Store connection with integration instance
       userConnections.set(connectionKey, {
         integration,
         connection,
         type,
+        userId,
       });
 
-      console.log(`✅ ${integration.name} connected for user: ${userId}`);
       return true;
     } catch (error) {
-      console.error(`❌ Failed to connect ${type} for user ${userId}:`, error.message);
+      console.error(`Failed to connect ${type}:`, error.message);
       return false;
     }
   }
@@ -146,16 +164,69 @@ class MCPManager {
         console.error(`Error disconnecting ${type}:`, error);
       }
       userConnections.delete(connectionKey);
-      console.log(`Disconnected ${type} for user: ${userId}`);
     }
+  }
+
+  /**
+   * Get tools for specific integrations only
+   * @param {string} userId - User ID
+   * @param {Array<string>} integrationTypes - Array of integration types (e.g., ['github', 'zerodha'])
+   * @returns {Promise<Array>} - List of tools from specified integrations
+   */
+  async getToolsForIntegrations(userId, integrationTypes) {
+    console.log(`  🔍 Fetching tools for integrations: ${integrationTypes.join(', ')}...`);
+    const integrations = await this.getUserIntegrations(userId);
+    const tools = [];
+
+    for (const integrationType of integrationTypes) {
+      const integrationData = integrations.find(i => i.type === integrationType);
+      if (!integrationData) continue;
+
+      const connectionKey = `${userId}-${integrationType}`;
+      const connectionData = userConnections.get(connectionKey);
+      
+      if (connectionData) {
+        try {
+          const { integration, connection } = connectionData;
+          const integrationTools = await integration.getTools(connection);
+          console.log(`  ✅ ${integrationData.name}: ${integrationTools.length} tools`);
+          tools.push(...integrationTools);
+        } catch (error) {
+          // Handle OAuth errors gracefully - integration exists but needs OAuth
+          if (error.message && error.message.includes('OAuth_AUTHENTICATION_REQUIRED')) {
+            console.log(`  ⚠️  ${integrationData.name}: OAuth authentication required`);
+            // Don't add tools, but don't treat as fatal error
+          } else {
+            console.error(`  ❌ ${integrationData.name}: Failed to get tools - ${error.message}`);
+          }
+        }
+      } else {
+        console.log(`  ⚠️  ${integrationData.name}: No active connection`);
+      }
+    }
+
+    console.log(`  ✅ Total: ${tools.length} tools from ${integrationTypes.length} integration(s)`);
+    return tools;
   }
 
   /**
    * Get all tools available to a user from all connected integrations
    * @param {string} userId - User ID
+   * @param {boolean} useCache - Whether to use cached tools (default: true)
    * @returns {Promise<Array>} - List of all available tools
    */
-  async getUserMCPTools(userId) {
+  async getUserMCPTools(userId, useCache = true) {
+    const cacheKey = `tools-${userId}`;
+    
+    // Check cache first (silent to reduce log spam)
+    if (useCache && toolsCache.has(cacheKey)) {
+      const cached = toolsCache.get(cacheKey);
+      if (Date.now() - cached.timestamp < TOOLS_CACHE_TTL) {
+        return cached.tools;
+      }
+    }
+
+    console.log(`  🔍 Fetching fresh tools for user ${userId}...`);
     const integrations = await this.getUserIntegrations(userId);
     const allTools = [];
 
@@ -167,14 +238,40 @@ class MCPManager {
         try {
           const { integration, connection } = connectionData;
           const tools = await integration.getTools(connection);
+          console.log(`  ✅ ${integrationData.name}: ${tools.length} tools`);
           allTools.push(...tools);
         } catch (error) {
-          console.error(`Error listing tools for ${integrationData.type}:`, error);
+          // Handle OAuth errors gracefully - integration exists but needs OAuth
+          if (error.message && error.message.includes('OAuth_AUTHENTICATION_REQUIRED')) {
+            console.log(`  ⚠️  ${integrationData.name}: OAuth authentication required`);
+            // Don't add tools, but don't treat as fatal error
+          } else {
+            console.error(`  ❌ Error listing tools for ${integrationData.type}:`, error.message);
+          }
         }
+      } else {
+        console.warn(`  ⚠️  ${integrationData.name}: No active connection`);
       }
     }
 
+    // Cache the results
+    toolsCache.set(cacheKey, {
+      tools: allTools,
+      timestamp: Date.now(),
+    });
+
+    console.log(`  ✅ Total tools available: ${allTools.length}`);
     return allTools;
+  }
+
+  /**
+   * Invalidate tools cache for a user
+   * Call this when integrations are added/removed
+   * @param {string} userId - User ID
+   */
+  invalidateToolsCache(userId) {
+    const cacheKey = `tools-${userId}`;
+    toolsCache.delete(cacheKey);
   }
 
   /**
@@ -197,6 +294,10 @@ class MCPManager {
   async callUserTool(userId, toolName, args) {
     const integrations = await this.getUserIntegrations(userId);
     
+    // First, find which integration has this tool
+    let targetIntegration = null;
+    let targetConnectionData = null;
+    
     for (const integrationData of integrations) {
       const connectionKey = `${userId}-${integrationData.type}`;
       const connectionData = userConnections.get(connectionKey);
@@ -204,24 +305,85 @@ class MCPManager {
       if (connectionData) {
         try {
           const { integration, connection } = connectionData;
-          console.log(`Calling tool ${toolName} with args:`, args);
-          const result = await integration.callTool(connection, toolName, args);
-          console.log(`Tool ${toolName} result:`, result);
-          return result;
+          const tools = await integration.getTools(connection);
+          
+          // Check if this integration has the requested tool
+          if (tools.some(tool => tool.name === toolName)) {
+            targetIntegration = integrationData;
+            targetConnectionData = connectionData;
+            break;
+          }
         } catch (error) {
-          console.error(`Error calling tool ${toolName}:`, error);
-          // Continue to next integration instead of throwing
+          // Handle OAuth errors - these are expected for lazy connections
+          if (error.message && error.message.includes('OAuth_AUTHENTICATION_REQUIRED')) {
+            // OAuth required - skip this integration for now
+            continue;
+          }
+          // Silently skip integrations that can't list tools for other reasons
           continue;
         }
       }
     }
     
-    throw new Error(`No MCP client found for user ${userId} or tool ${toolName} not available`);
+    // If no integration has this tool, throw error
+    if (!targetIntegration || !targetConnectionData) {
+      const availableTools = await this.getUserMCPTools(userId);
+      const availableToolNames = availableTools.map(t => t.name).join(', ');
+      throw new Error(`Tool "${toolName}" not found. Available tools: ${availableToolNames || 'none'}`);
+    }
+    
+    // Call the tool on the correct integration
+    try {
+      const { integration, connection } = targetConnectionData;
+      console.log(`🔧 Calling tool "${toolName}" on ${targetIntegration.name}`);
+      
+      // Add timeout for tool calls (30 seconds)
+      const result = await Promise.race([
+        integration.callTool(connection, toolName, args),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Tool call timeout after 30 seconds')), 30000)
+        )
+      ]);
+      
+      // If Zerodha login was successful, invalidate cache to get fresh tools
+      if (targetIntegration.type === 'zerodha' && toolName === 'login' && !result.isError) {
+        this.invalidateToolsCache(userId);
+        console.log(`   🔄 Tools cache invalidated - fresh tools will be fetched on next request`);
+      }
+      
+      return result;
+    } catch (error) {
+      console.error(`❌ Error calling ${targetIntegration.name} tool ${toolName}:`, error.message);
+      throw error;
+    }
   }
 }
 
 // Create singleton instance
 const mcpManager = new MCPManager();
+
+/**
+ * Auto-reconnect all saved integrations on server startup
+ * Loads integrations from database and reconnects them
+ */
+async function reconnectSavedIntegrations() {
+  console.log('🔄 Reconnecting saved integrations from database...');
+  
+  try {
+    // Get all users with integrations from database
+    // Note: This requires a method to get all users with integrations
+    // For now, we'll skip auto-reconnect on startup and let integrations load on-demand
+    // This is more efficient for multi-tenant systems
+    console.log('✅ Integrations will be loaded on-demand per user (multi-tenant mode)');
+  } catch (error) {
+    console.error('Error during auto-reconnection:', error);
+  }
+}
+
+// Auto-reconnect on import (when server starts)
+reconnectSavedIntegrations().catch(error => {
+  console.error('Error during auto-reconnection:', error);
+});
 
 module.exports = mcpManager;
 

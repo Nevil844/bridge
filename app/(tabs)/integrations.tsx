@@ -3,16 +3,18 @@ import { ThemedView } from '@/components/themed-view';
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Linking,
-    ScrollView,
-    StyleSheet,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Image,
+  Linking,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -41,32 +43,65 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     logo: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png',
     description: 'Access repositories, read code, search projects, and more.',
   },
-];
-
-const UPCOMING_INTEGRATIONS: Integration[] = [
   {
     id: 'google-drive',
     name: 'Google Drive',
     type: 'google-drive',
     connected: false,
     logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/da/Google_Drive_logo.png/240px-Google_Drive_logo.png',
-    description: 'Access and manage your Google Drive files and folders.',
+    description: 'Search files, list documents, and access your Google Drive.',
   },
   {
     id: 'gmail',
     name: 'Gmail',
     type: 'gmail',
     connected: false,
-    logo: 'https://cdn-icons-png.flaticon.com/512/5968/5968534.png',
-    description: 'Read, send, and manage your emails with AI assistance.',
+    logo: 'https://www.gstatic.com/images/branding/product/1x/gmail_2020q4_48dp.png',
+    description: 'Read, send, search, and manage your Gmail emails.',
   },
+  {
+    id: 'zerodha',
+    name: 'Zerodha',
+    type: 'zerodha',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/Zerodha_logo.svg/150px-Zerodha_logo.svg.png',
+    description: 'Access your portfolio, market data, and trading insights.',
+  },
+  {
+    id: 'spotify',
+    name: 'Spotify',
+    type: 'spotify',
+    connected: false,
+    logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+    description: 'Control playback, manage playlists, and search music.',
+  },
+  {
+    id: 'zomato',
+    name: 'Zomato',
+    type: 'zomato',
+    connected: false,
+    logo: 'https://logo.clearbit.com/zomato.com',
+    description: 'Discover restaurants, browse menus, create carts, and place food orders.',
+  },
+  {
+    id: 'jira',
+    name: 'Jira',
+    type: 'jira',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Jira_Logo.svg/150px-Jira_Logo.svg.png',
+    description: 'Create and manage issues, projects, workflows, and more.',
+  },
+];
+
+const UPCOMING_INTEGRATIONS: Integration[] = [
+  // Existing integrations that were there before
   {
     id: 'whatsapp',
     name: 'WhatsApp',
     type: 'whatsapp',
     connected: false,
-    logo: 'https://cdn-icons-png.flaticon.com/512/733/733585.png',
-    description: 'Send messages, manage contacts, and automate conversations.',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/WhatsApp.svg/150px-WhatsApp.svg.png',
+    description: 'Send messages, manage groups, and automate conversations.',
   },
   {
     id: 'aws',
@@ -84,14 +119,137 @@ const UPCOMING_INTEGRATIONS: Integration[] = [
     logo: 'https://cdn-icons-png.flaticon.com/512/5968/5968756.png',
     description: 'Manage servers, channels, and send messages on Discord.',
   },
+  // New D2C integrations
   {
-    id: 'zerodha',
-    name: 'Zerodha',
-    type: 'zerodha',
+    id: 'instagram',
+    name: 'Instagram',
+    type: 'instagram',
     connected: false,
-    logo: 'https://console.zerodha.com/static/images/kite-logo.png',
-    description: 'Access your portfolio, track stocks, and manage trades.',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/Instagram_logo_2016.svg/150px-Instagram_logo_2016.svg.png',
+    description: 'Post photos, manage stories, and grow your social presence.',
   },
+  {
+    id: 'youtube',
+    name: 'YouTube',
+    type: 'youtube',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/150px-YouTube_full-color_icon_%282017%29.svg.png',
+    description: 'Upload videos, manage playlists, and track your channel analytics.',
+  },
+  {
+    id: 'twitter',
+    name: 'X (Twitter)',
+    type: 'twitter',
+    connected: false,
+    logo: 'https://cdn-icons-png.flaticon.com/512/3256/3256013.png',
+    description: 'Post tweets, manage timeline, and grow your social influence.',
+  },
+  {
+    id: 'telegram',
+    name: 'Telegram',
+    type: 'telegram',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Telegram_logo.svg/150px-Telegram_logo.svg.png',
+    description: 'Send messages, manage channels, and interact with bots.',
+  },
+  {
+    id: 'reddit',
+    name: 'Reddit',
+    type: 'reddit',
+    connected: false,
+    logo: 'https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png',
+    description: 'Post content, manage subreddits, and engage with communities.',
+  },
+  {
+    id: 'pinterest',
+    name: 'Pinterest',
+    type: 'pinterest',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/08/Pinterest-logo.png/150px-Pinterest-logo.png',
+    description: 'Pin content, manage boards, and discover visual inspiration.',
+  },
+  // B2B integrations
+  {
+    id: 'slack',
+    name: 'Slack',
+    type: 'slack',
+    connected: false,
+    logo: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
+    description: 'Send messages, manage channels, and automate team workflows.',
+  },
+  {
+    id: 'notion',
+    name: 'Notion',
+    type: 'notion',
+    connected: false,
+    logo: 'https://www.notion.so/images/logo-ios.png',
+    description: 'Create pages, manage databases, and collaborate on documents.',
+  },
+  {
+    id: 'teams',
+    name: 'Microsoft Teams',
+    type: 'teams',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Microsoft_Office_Teams_%282018%E2%80%93present%29.svg/150px-Microsoft_Office_Teams_%282018%E2%80%93present%29.svg.png',
+    description: 'Video calls, chat, file sharing, and enterprise collaboration.',
+  },
+  {
+    id: 'salesforce',
+    name: 'Salesforce',
+    type: 'salesforce',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f9/Salesforce.com_logo.svg/150px-Salesforce.com_logo.svg.png',
+    description: 'Manage leads, opportunities, and customer relationships.',
+  },
+  // Food Delivery & Transportation
+  {
+    id: 'swiggy',
+    name: 'Swiggy',
+    type: 'swiggy',
+    connected: false,
+    logo: 'https://logo.clearbit.com/swiggy.com',
+    description: 'Order food, track deliveries, and manage your Swiggy account.',
+  },
+  {
+    id: 'uber',
+    name: 'Uber',
+    type: 'uber',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cc/Uber_logo_2018.png/150px-Uber_logo_2018.png',
+    description: 'Book rides, track trips, and manage your Uber account.',
+  },
+  {
+    id: 'ola',
+    name: 'Ola',
+    type: 'ola',
+    connected: false,
+    logo: 'https://logo.clearbit.com/olacabs.com',
+    description: 'Book cabs, track rides, and manage your Ola account.',
+  },
+  {
+    id: 'zepto',
+    name: 'Zepto',
+    type: 'zepto',
+    connected: false,
+    logo: 'https://logo.clearbit.com/zeptonow.com',
+    description: 'Order groceries and essentials with 10-minute delivery.',
+  },
+  {
+    id: 'blinkit',
+    name: 'Blinkit',
+    type: 'blinkit',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Blinkit-yellow-app-icon.svg/150px-Blinkit-yellow-app-icon.svg.png',
+    description: 'Quick grocery delivery and daily essentials in minutes.',
+  },
+  {
+    id: 'linkedin',
+    name: 'LinkedIn',
+    type: 'linkedin',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/LinkedIn_logo_initials.png/150px-LinkedIn_logo_initials.png',
+    description: 'Manage your professional network, share content, and grow your career.',
+  }
 ];
 
 export default function IntegrationsScreen() {
@@ -108,17 +266,45 @@ export default function IntegrationsScreen() {
     loadUserIntegrations();
   }, []);
 
+  // Reload integrations when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      loadUserIntegrations();
+    }, [])
+  );
+
   const loadUserIntegrations = async () => {
     try {
       const userId = await AsyncStorage.getItem('userId') || 'default-user';
       const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}?userId=${userId}`);
+      
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('❌ Integrations API error:', response.status, text.substring(0, 200));
+        throw new Error(`API error: ${response.status}`);
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('❌ Non-JSON response:', text.substring(0, 200));
+        throw new Error('Server returned non-JSON response');
+      }
+      
       const data = await response.json();
       
+      console.log('📡 User integrations from API:', data.integrations);
+      
       // Update integrations with user's connected status
+      // Check both 'configured' and 'isActive' for backwards compatibility
       const updated = AVAILABLE_INTEGRATIONS.map(int => ({
         ...int,
-        connected: data.integrations.some((ui: UserIntegration) => ui.type === int.type && ui.configured),
+        connected: data.integrations.some((ui: any) => 
+          ui.type === int.type && (ui.configured || ui.isActive)
+        ),
       }));
+      
+      console.log('✅ Updated integrations state:', updated);
       setIntegrations(updated);
     } catch (error) {
       console.error('Error loading integrations:', error);
@@ -139,6 +325,20 @@ export default function IntegrationsScreen() {
       
       // Get OAuth URL from backend (generic endpoint)
       const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}/oauth-url?userId=${userId}`);
+      
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('❌ OAuth URL API error:', response.status, text.substring(0, 200));
+        throw new Error(`Failed to get OAuth URL: ${response.status}`);
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('❌ Non-JSON response from OAuth URL:', text.substring(0, 200));
+        throw new Error('Server returned non-JSON response');
+      }
+      
       const data = await response.json();
       
       if (data.authUrl) {
@@ -147,54 +347,146 @@ export default function IntegrationsScreen() {
         if (supported) {
           await Linking.openURL(data.authUrl);
           
-          // Show instructions
-          Alert.alert(
-            `Authorize ${integration.name}`,
-            'Complete the authorization in your browser, then come back to the app.',
-            [
-              {
-                text: 'Done',
-                onPress: () => {
-                  // Refresh integrations after user completes OAuth
-                  setTimeout(() => loadUserIntegrations(), 1000);
+          // Start polling for connection status
+          const pollInterval = setInterval(async () => {
+            try {
+              const integrations = await fetch(`${API_ENDPOINTS.INTEGRATIONS}?userId=${userId}`);
+              
+              if (!integrations.ok) {
+                // Don't log errors during polling - just skip this poll
+                return;
+              }
+              
+              const contentType = integrations.headers.get('content-type');
+              if (!contentType || !contentType.includes('application/json')) {
+                // Don't log errors during polling - just skip this poll
+                return;
+              }
+              
+              const integrationsData = await integrations.json();
+              
+              // Check if this integration is now connected
+              const isConnected = integrationsData.integrations.some(
+                (int: any) => int.type === integration.type && (int.configured || int.isActive)
+              );
+              
+              if (isConnected) {
+                clearInterval(pollInterval);
+                await loadUserIntegrations();
+                setIsLoading(false);
+                
+                // Show success message
+                if (Platform.OS === 'web') {
+                  alert(`${integration.name} connected successfully!`);
+                } else {
+                  Alert.alert('Success', `${integration.name} connected successfully!`);
+                }
+              }
+            } catch (error) {
+              // Silently continue polling
+            }
+          }, 2000); // Poll every 2 seconds
+          
+          // Stop polling after 2 minutes (timeout)
+          setTimeout(() => {
+            clearInterval(pollInterval);
+            setIsLoading(false);
+          }, 120000);
+          
+          // Show instructions (web-compatible)
+          if (Platform.OS === 'web') {
+            // Browser will open in new tab
+          } else {
+            Alert.alert(
+              `Authorize ${integration.name}`,
+              'Complete the authorization in your browser, then come back to the app.',
+              [
+                {
+                  text: 'Cancel',
+                  style: 'cancel',
+                  onPress: () => {
+                    clearInterval(pollInterval);
+                    setIsLoading(false);
+                  },
                 },
-              },
-            ]
-          );
+              ]
+            );
+          }
         }
       }
     } catch (error) {
       console.error('OAuth error:', error);
-      Alert.alert('Error', 'Failed to start OAuth. Make sure the backend is running.');
-    } finally {
+      
+      if (Platform.OS === 'web') {
+        alert('Failed to start OAuth. Make sure the backend is running.');
+      } else {
+        Alert.alert('Error', 'Failed to start OAuth. Make sure the backend is running.');
+      }
+      
       setIsLoading(false);
     }
   };
 
   const handleDisconnect = async (integration: Integration) => {
-    Alert.alert(
-      'Disconnect Integration',
-      `Are you sure you want to disconnect ${integration.name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Disconnect',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const userId = await AsyncStorage.getItem('userId') || 'default-user';
-              await fetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}?userId=${userId}`, {
-                method: 'DELETE',
-              });
-              loadUserIntegrations();
-            } catch (error) {
-              Alert.alert('Error', 'Failed to disconnect integration');
-            }
-          },
-        },
-      ]
-    );
+    
+    // Use window.confirm for web compatibility (Alert.alert doesn't work on web)
+    const confirmed = Platform.OS === 'web' 
+      ? window.confirm(`Are you sure you want to disconnect ${integration.name}?`)
+      : await new Promise(resolve => {
+          Alert.alert(
+            'Disconnect Integration',
+            `Are you sure you want to disconnect ${integration.name}?`,
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Disconnect', style: 'destructive', onPress: () => resolve(true) },
+            ]
+          );
+        });
+    
+    if (!confirmed) {
+      return;
+    }
+    
+    try {
+      const userId = await AsyncStorage.getItem('userId') || 'default-user';
+      
+      const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}?userId=${userId}`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to disconnect: ${response.status}`);
+      }
+      
+      // Reload integrations to update UI
+      await loadUserIntegrations();
+      
+      // Show success message
+      if (Platform.OS === 'web') {
+        alert(`${integration.name} disconnected successfully!`);
+      } else {
+        Alert.alert('Success', `${integration.name} disconnected successfully`);
+      }
+    } catch (error) {
+      console.error('Disconnect error:', error);
+      
+      if (Platform.OS === 'web') {
+        alert(`Failed to disconnect: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      } else {
+        Alert.alert('Error', `Failed to disconnect integration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    }
   };
+
+  const sortedIntegrations = useMemo(() => {
+    // Connected integrations go first, fall back to name sorting within groups
+    return [...integrations].sort((a, b) => {
+      if (a.connected === b.connected) {
+        return a.name.localeCompare(b.name);
+      }
+      return a.connected ? -1 : 1;
+    });
+  }, [integrations]);
 
   return (
     <ThemedView style={styles.container}>
@@ -202,14 +494,14 @@ export default function IntegrationsScreen() {
         <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
           <ThemedText style={styles.title}>Integrations</ThemedText>
           <ThemedText style={styles.subtitle}>
-            Connect AI assistants to your tools and data
+            Connect your tools to Bridge AI for powerful integrations
           </ThemedText>
         </View>
 
         <View style={styles.section}>
           <ThemedText style={styles.sectionTitle}>Available Integrations</ThemedText>
 
-          {integrations.map((integration) => (
+          {sortedIntegrations.map((integration) => (
             <View
               key={integration.id}
               style={[
@@ -265,7 +557,7 @@ export default function IntegrationsScreen() {
 
         {/* Upcoming Integrations */}
         <View style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>Coming Soon</ThemedText>
+          <ThemedText style={styles.sectionTitle}>Upcoming Integrations</ThemedText>
           <ThemedText style={[styles.subtitle, { marginBottom: 16 }]}>
             These integrations are under development
           </ThemedText>
@@ -297,14 +589,6 @@ export default function IntegrationsScreen() {
                       <ThemedText style={styles.integrationName}>
                         {integration.name}
                       </ThemedText>
-                      <View style={[
-                        styles.comingSoonBadge,
-                        { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }
-                      ]}>
-                        <ThemedText style={styles.comingSoonText}>
-                          Coming Soon
-                        </ThemedText>
-                      </View>
                     </View>
                     <ThemedText style={styles.integrationStatus}>
                       In development
