@@ -29,6 +29,7 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface ThinkingData {
   isInternal: boolean;
@@ -75,6 +76,11 @@ export default function HomeScreen() {
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [showWebSearchMenu, setShowWebSearchMenu] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
+  const topInset = Platform.OS === 'web' ? 16 : Math.max(insets.top, 12);
+  const headerPaddingTop = topInset + 20;
+  const headerButtonTop = topInset + 24;
+  const inputBottomPadding = Platform.OS === 'web' ? 16 : Math.max(insets.bottom, 16);
 
   useEffect(() => {
     loadUserId();
@@ -827,13 +833,13 @@ export default function HomeScreen() {
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
-      keyboardVerticalOffset={0}>
+      keyboardVerticalOffset={topInset}>
       <ThemedView style={styles.container}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
           {/* Hamburger Menu */}
           <TouchableOpacity 
-            style={styles.hamburgerButton}
+            style={[styles.hamburgerButton, { top: headerButtonTop }]}
             onPress={() => setShowSidebar(true)}>
             <IconSymbol name="line.3.horizontal" size={24} color={isDark ? '#FFFFFF' : '#000000'} />
           </TouchableOpacity>
@@ -863,7 +869,7 @@ export default function HomeScreen() {
 
           {/* New Chat Button */}
           <TouchableOpacity 
-            style={styles.newChatHeaderButton}
+            style={[styles.newChatHeaderButton, { top: headerButtonTop }]}
             onPress={startNewChat}>
             <IconSymbol name="square.and.pencil" size={22} color={isDark ? '#FFFFFF' : '#000000'} />
           </TouchableOpacity>
@@ -1286,6 +1292,7 @@ export default function HomeScreen() {
             { 
               borderTopColor: isDark ? '#2C2C2E' : '#E5E5EA',
               backgroundColor: isDark ? '#000000' : '#FFFFFF',
+              paddingBottom: inputBottomPadding,
             },
           ]}>
           <View style={styles.webSearchWrapper}>
@@ -1632,7 +1639,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
+    paddingBottom: 16,
     borderTopWidth: 1,
   },
   input: {
