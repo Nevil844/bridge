@@ -72,6 +72,8 @@ export default function HomeScreen() {
   const [userId, setUserId] = useState<string>('default-user');
   const [availableModels, setAvailableModels] = useState<Model[]>([]);
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set(['bedrock'])); // Default expand Bedrock (default model provider)
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [showWebSearchMenu, setShowWebSearchMenu] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -208,7 +210,7 @@ export default function HomeScreen() {
       if (Platform.OS === 'web') {
         alert('Failed to delete conversation');
       } else {
-        Alert.alert('Error', 'Failed to delete conversation');
+      Alert.alert('Error', 'Failed to delete conversation');
       }
     }
   };
@@ -377,6 +379,7 @@ export default function HomeScreen() {
 
   const handleSendWithText = async (text: string) => {
     if (text.trim() && !isLoading) {
+      setShowWebSearchMenu(false);
       const userMessage: Message = {
         id: Date.now().toString(),
         text: text,
@@ -399,6 +402,7 @@ export default function HomeScreen() {
             model: selectedModel,
             userId,
             conversationId: currentChatId,
+            webSearch: webSearchEnabled,
           }),
         });
 
@@ -459,6 +463,7 @@ export default function HomeScreen() {
 
   const handleQuestionSelect = (question: string) => {
     setInputText(question);
+    setShowWebSearchMenu(false);
     // Auto-send the question
     setTimeout(() => {
       handleSendWithText(question);
@@ -467,6 +472,7 @@ export default function HomeScreen() {
 
   const handleSend = async () => {
     if (inputText.trim() && !isLoading) {
+      setShowWebSearchMenu(false);
       const userMessage: Message = {
         id: Date.now().toString(),
         text: inputText,
@@ -499,6 +505,7 @@ export default function HomeScreen() {
             userId,
             conversationId: currentChatId, // Pass conversationId to continue existing or create new
             stream: true, // Enable streaming for better UX
+            webSearch: webSearchEnabled,
           }),
         });
 
@@ -941,14 +948,14 @@ export default function HomeScreen() {
                                 deleteChat(chat.id);
                               }
                             } else {
-                              Alert.alert(
-                                'Delete Chat',
-                                'Are you sure you want to delete this chat?',
-                                [
-                                  { text: 'Cancel', style: 'cancel' },
-                                  { text: 'Delete', style: 'destructive', onPress: () => deleteChat(chat.id) }
-                                ]
-                              );
+                            Alert.alert(
+                              'Delete Chat',
+                              'Are you sure you want to delete this chat?',
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                { text: 'Delete', style: 'destructive', onPress: () => deleteChat(chat.id) }
+                              ]
+                            );
                             }
                           }}>
                           <IconSymbol name="trash" size={16} color="#FF3B30" />
@@ -1035,22 +1042,22 @@ export default function HomeScreen() {
                             setShowProfileMenu(false);
                           }
                         } else {
-                          Alert.alert(
-                            'Logout',
-                            'Are you sure you want to logout?',
-                            [
-                              { text: 'Cancel', style: 'cancel' },
-                              {
-                                text: 'Logout',
-                                style: 'destructive',
-                                onPress: async () => {
-                                  await logout();
-                                  setShowSidebar(false);
-                                  setShowProfileMenu(false);
-                                }
+                        Alert.alert(
+                          'Logout',
+                          'Are you sure you want to logout?',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Logout',
+                              style: 'destructive',
+                              onPress: async () => {
+                                await logout();
+                                setShowSidebar(false);
+                                setShowProfileMenu(false);
                               }
-                            ]
-                          );
+                            }
+                          ]
+                        );
                         }
                       }}>
                       <IconSymbol name="arrow.right.square" size={16} color="#FF3B30" />
@@ -1276,11 +1283,80 @@ export default function HomeScreen() {
         <View
           style={[
             styles.inputContainer,
-            {
+            { 
               borderTopColor: isDark ? '#2C2C2E' : '#E5E5EA',
               backgroundColor: isDark ? '#000000' : '#FFFFFF',
             },
           ]}>
+          <View style={styles.webSearchWrapper}>
+            <TouchableOpacity
+              style={[
+                styles.webSearchButton,
+                {
+                  borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                  backgroundColor: showWebSearchMenu
+                    ? (isDark ? 'rgba(0, 122, 255, 0.2)' : 'rgba(0, 122, 255, 0.1)')
+                    : 'transparent',
+                },
+                showWebSearchMenu && styles.webSearchButtonActive,
+              ]}
+              onPress={() => setShowWebSearchMenu(prev => !prev)}
+              accessibilityLabel="Toggle web search menu"
+              accessibilityRole="button"
+            >
+              <Text
+                style={[
+                  styles.webSearchPlus,
+                  { color: isDark ? '#FFFFFF' : '#000000' },
+                ]}
+              >
+                +
+              </Text>
+            </TouchableOpacity>
+
+            {showWebSearchMenu && (
+              <View
+                style={[
+                  styles.webSearchMenu,
+                  {
+                    backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                    borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                  },
+                ]}
+              >
+                <TouchableOpacity
+                  style={styles.webSearchToggleRow}
+                  onPress={() => {
+                    setWebSearchEnabled(prev => !prev);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <ThemedText style={styles.webSearchLabel}>Web Search</ThemedText>
+                  <View
+                    style={[
+                      styles.webSearchSwitch,
+                      {
+                        backgroundColor: webSearchEnabled
+                          ? '#34C759'
+                          : (isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'),
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.webSearchSwitchKnob,
+                        webSearchEnabled && styles.webSearchSwitchKnobOn,
+                      ]}
+                    />
+                  </View>
+                </TouchableOpacity>
+                <ThemedText style={styles.webSearchHint}>
+                  Coming soon
+                </ThemedText>
+              </View>
+            )}
+          </View>
+
           <TextInput
             style={[
               styles.input,
@@ -1401,7 +1477,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 24,
     borderWidth: 1,
-    gap: 8,
+    columnGap: 8,
   },
   modelSelectorText: {
     fontSize: 14,
@@ -1557,7 +1633,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 34 : 16,
-    gap: 8,
     borderTopWidth: 1,
   },
   input: {
@@ -1566,6 +1641,76 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 24,
     fontSize: 16,
+    minWidth: 0,
+  },
+  webSearchWrapper: {
+    position: 'relative',
+    marginRight: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 5,
+  },
+  webSearchButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  webSearchPlus: {
+    fontSize: 20,
+    fontWeight: '600',
+    lineHeight: 20,
+  },
+  webSearchButtonActive: {
+    borderColor: '#007AFF',
+  },
+  webSearchMenu: {
+    position: 'absolute',
+    bottom: 56,
+    left: 0,
+    width: 220,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+    zIndex: 20,
+  },
+  webSearchToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  webSearchLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  webSearchSwitch: {
+    width: 40,
+    height: 22,
+    borderRadius: 11,
+    padding: 2,
+    justifyContent: 'center',
+  },
+  webSearchSwitchKnob: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#FFFFFF',
+    transform: [{ translateX: 0 }],
+  },
+  webSearchSwitchKnobOn: {
+    transform: [{ translateX: 18 }],
+  },
+  webSearchHint: {
+    fontSize: 12,
+    opacity: 0.6,
   },
   micButton: {
     width: 44,
@@ -1575,6 +1720,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 8,
   },
   micButtonRecording: {
     borderColor: 'rgba(255, 59, 48, 0.3)',
@@ -1588,6 +1734,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 8,
   },
   sendButtonDisabled: {
     opacity: 0.3,
