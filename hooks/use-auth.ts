@@ -31,7 +31,6 @@ export function useAuth() {
       const hasExplicitlyLoggedOut = loggedOutFlag === 'true';
       
       if (hasExplicitlyLoggedOut) {
-        console.log('🚪 User has logged out, showing login screen');
         setUser(null);
         setIsAuthenticated(false);
         setIsLoading(false);
@@ -43,8 +42,6 @@ export function useAuth() {
       
       // If user ID exists and is not default-user, use it (normal flow)
       if (storedUserId && storedUserId !== 'default-user') {
-        console.log('📱 Found stored userId, loading user and token...');
-        
         // Fetch access token first
         try {
           const { setAccessToken } = require('@/utils/api');
@@ -53,11 +50,10 @@ export function useAuth() {
             const tokenData = await tokenResponse.json();
             if (tokenData.accessToken) {
               await setAccessToken(tokenData.accessToken);
-              console.log('✅ Access token stored');
             }
           }
         } catch (error) {
-          console.warn('⚠️ Could not fetch access token:', error);
+          // Ignore token fetch errors
         }
         
         // Fetch user info from backend
@@ -77,7 +73,6 @@ export function useAuth() {
           return;
         } else {
           // User not found, clear storage
-          console.warn('⚠️ Stored user not found, clearing...');
           await AsyncStorage.removeItem('userId');
           const { clearAccessToken } = require('@/utils/api');
           await clearAccessToken();
@@ -98,14 +93,11 @@ export function useAuth() {
         : null;
       
       if (TEST_MODE_EMAIL && !storedUserId && !hasExplicitlyLoggedOut) {
-        console.log(`🧪 TEST MODE (${Platform.OS}): Auto-logging in with`, TEST_MODE_EMAIL);
-        
         // Fetch user by email from backend
         const response = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${TEST_MODE_EMAIL}`);
         
         if (response.ok) {
           const userData = await response.json();
-          console.log('✅ Test user loaded:', userData);
           
           // Store user ID for future use
           await AsyncStorage.setItem('userId', userData.id);
@@ -118,11 +110,10 @@ export function useAuth() {
               const tokenData = await tokenResponse.json();
               if (tokenData.accessToken) {
                 await setAccessToken(tokenData.accessToken);
-                console.log('✅ Test user access token stored');
               }
             }
           } catch (error) {
-            console.warn('⚠️ Could not fetch test user access token:', error);
+            // Ignore token fetch errors
           }
           
           setUser({
@@ -169,7 +160,6 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     try {
-      console.log('🚪 Logging out user...');
       await AsyncStorage.removeItem('userId');
       // Clear access token
       const { clearAccessToken } = require('@/utils/api');
@@ -179,7 +169,6 @@ export function useAuth() {
       setUser(null);
       setIsAuthenticated(false);
       setHasLoggedOut(true);
-      console.log('✅ Logout complete - login screen should show');
     } catch (error) {
       console.error('Error logging out:', error);
     }

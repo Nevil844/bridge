@@ -102,20 +102,16 @@ app.delete('/api/integrations/:type', verifyUser, async (req, res) => {
   try {
     const { type } = req.params;
     
-    console.log(`\n🗑️  Disconnect request: ${type} for user ${req.userId}`);
-    
     // Remove from database first
     await integrationService.deleteIntegration(req.userId, type);
     
     // Remove from MCP manager
-    const result = await mcpManager.removeIntegration(req.userId, type);
+    await mcpManager.removeIntegration(req.userId, type);
     
     // Update cache
     if (loadedIntegrationsCache.has(req.userId)) {
       loadedIntegrationsCache.get(req.userId).delete(type);
     }
-    
-    console.log(`✅ Successfully disconnected ${type}:`, result);
     
     res.json({ success: true, message: `${type} integration removed` });
   } catch (error) {
@@ -144,6 +140,5 @@ app.get('/api/mcp/status', verifyUser, async (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 ${appConfig.appName} backend running on http://localhost:${PORT}`);
-  console.log(`📊 Multi-tenant mode: Integrations loaded on-demand per user`);
+  console.log(`${appConfig.appName} backend running on http://localhost:${PORT}`);
 });

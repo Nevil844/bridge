@@ -296,8 +296,6 @@ export default function IntegrationsScreen() {
       
       const data = await response.json();
       
-      console.log('📡 User integrations from API:', data.integrations);
-      
       // Update integrations with user's connected status
       // Check both 'configured' and 'isActive' for backwards compatibility
       const updated = AVAILABLE_INTEGRATIONS.map(int => ({
@@ -314,8 +312,6 @@ export default function IntegrationsScreen() {
           ui.type === int.type && (ui.configured || ui.isActive)
         ),
       }));
-      
-      console.log('✅ Updated integrations state:', updated);
       setIntegrations(updated);
       setUpcomingIntegrations(updatedUpcoming);
     } catch (error) {
