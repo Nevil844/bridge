@@ -517,6 +517,8 @@ export default function HomeScreen() {
           const decoder = new TextDecoder();
           let buffer = '';
           let accumulatedContent = '';
+          let accumulatedThinking = '';
+          let currentThinkingIndex = -1;
 
           while (true) {
             const { done, value } = await reader.read();
@@ -548,7 +550,58 @@ export default function HomeScreen() {
                           : msg
                       )
                     );
+                  } else if (data.type === 'thinking_chunk') {
+                    // Stream thinking text incrementally
+                    accumulatedThinking += data.content;
+                    
+                    setMessages(prev =>
+                      prev.map(msg => {
+                        if (msg.id === aiMessageId) {
+                          const thinking = msg.thinking || [];
+                          
+                          // If we don't have a current thinking item, create one
+                          if (currentThinkingIndex === -1) {
+                            currentThinkingIndex = thinking.length;
+                            return {
+                              ...msg,
+                              thinking: [...thinking, { thinking: accumulatedThinking, action: '', toolCalls: [] }]
+                            };
+                          }
+                          
+                          // Update the current thinking item
+                          const updatedThinking = [...thinking];
+                          updatedThinking[currentThinkingIndex] = {
+                            ...updatedThinking[currentThinkingIndex],
+                            thinking: accumulatedThinking
+                          };
+                          
+                          return { ...msg, thinking: updatedThinking };
+                        }
+                        return msg;
+                      })
+                    );
+                  } else if (data.type === 'thinking_done') {
+                    // Finalize the current thinking item with tool calls
+                    setMessages(prev =>
+                      prev.map(msg => {
+                        if (msg.id === aiMessageId && currentThinkingIndex !== -1) {
+                          const thinking = msg.thinking || [];
+                          const updatedThinking = [...thinking];
+                          updatedThinking[currentThinkingIndex] = {
+                            ...data.thinking,
+                            thinking: accumulatedThinking
+                          };
+                          return { ...msg, thinking: updatedThinking };
+                        }
+                        return msg;
+                      })
+                    );
+                    
+                    // Reset for next thinking round
+                    accumulatedThinking = '';
+                    currentThinkingIndex = -1;
                   } else if (data.type === 'thinking') {
+                    // Legacy: Add complete thinking event (for non-streaming rounds)
                     setMessages(prev =>
                       prev.map(msg =>
                         msg.id === aiMessageId
@@ -843,6 +896,8 @@ export default function HomeScreen() {
           const decoder = new TextDecoder();
           let buffer = '';
           let accumulatedContent = '';
+          let accumulatedThinking = '';
+          let currentThinkingIndex = -1;
 
           while (true) {
             const { done, value } = await reader.read();
@@ -873,43 +928,65 @@ export default function HomeScreen() {
                     accumulatedContent += data.content;
                     console.log('📝 Received chunk, total length:', accumulatedContent.length);
                     
-                    // Try to parse JSON and extract response field if it's complete JSON
-                    // This handles cases where AI streams JSON structure
-                    let displayContent = accumulatedContent;
-                    try {
-                      // Try to parse as JSON (might fail if incomplete)
-                      const parsed = JSON.parse(accumulatedContent);
-                      if (parsed.response && typeof parsed.response === 'string') {
-                        // We have complete JSON with response field - use it
-                        displayContent = parsed.response;
-                        console.log('✅ Extracted response from JSON');
-                      }
-                    } catch (e) {
-                      // Not valid JSON yet or not JSON at all - use raw content
-                      // Also try to extract from markdown code blocks
-                      const jsonMatch = accumulatedContent.match(/```json\s*\n([\s\S]*?)\n```/);
-                      if (jsonMatch) {
-                        try {
-                          const parsed = JSON.parse(jsonMatch[1]);
-                          if (parsed.response && typeof parsed.response === 'string') {
-                            displayContent = parsed.response;
-                            console.log('✅ Extracted response from JSON code block');
-                          }
-                        } catch (e2) {
-                          // Ignore parse errors
-                        }
-                      }
-                    }
-                    
                     setMessages(prev =>
                       prev.map(msg =>
                         msg.id === aiMessageId
-                          ? { ...msg, text: displayContent }
+                          ? { ...msg, text: accumulatedContent }
                           : msg
                       )
                     );
+                  } else if (data.type === 'thinking_chunk') {
+                    // Stream thinking text incrementally
+                    accumulatedThinking += data.content;
+                    
+                    setMessages(prev =>
+                      prev.map(msg => {
+                        if (msg.id === aiMessageId) {
+                          const thinking = msg.thinking || [];
+                          
+                          // If we don't have a current thinking item, create one
+                          if (currentThinkingIndex === -1) {
+                            currentThinkingIndex = thinking.length;
+                            return {
+                              ...msg,
+                              thinking: [...thinking, { thinking: accumulatedThinking, action: '', toolCalls: [] }]
+                            };
+                          }
+                          
+                          // Update the current thinking item
+                          const updatedThinking = [...thinking];
+                          updatedThinking[currentThinkingIndex] = {
+                            ...updatedThinking[currentThinkingIndex],
+                            thinking: accumulatedThinking
+                          };
+                          
+                          return { ...msg, thinking: updatedThinking };
+                        }
+                        return msg;
+                      })
+                    );
+                  } else if (data.type === 'thinking_done') {
+                    // Finalize the current thinking item with tool calls
+                    setMessages(prev =>
+                      prev.map(msg => {
+                        if (msg.id === aiMessageId && currentThinkingIndex !== -1) {
+                          const thinking = msg.thinking || [];
+                          const updatedThinking = [...thinking];
+                          updatedThinking[currentThinkingIndex] = {
+                            ...data.thinking,
+                            thinking: accumulatedThinking
+                          };
+                          return { ...msg, thinking: updatedThinking };
+                        }
+                        return msg;
+                      })
+                    );
+                    
+                    // Reset for next thinking round
+                    accumulatedThinking = '';
+                    currentThinkingIndex = -1;
                   } else if (data.type === 'thinking') {
-                    // Add thinking event to the array in real-time
+                    // Legacy: Add complete thinking event (for non-streaming rounds)
                     console.log('🧠 Received thinking event');
                     setMessages(prev =>
                       prev.map(msg =>
