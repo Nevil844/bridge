@@ -69,9 +69,6 @@ router.get('/google/url', (req, res) => {
       
       if (isValidRedirectUri) {
         redirectUri = requestedRedirectUri;
-        console.log('📱 Using frontend-provided redirect URI:', redirectUri);
-      } else {
-        console.warn('⚠️ Invalid redirect URI requested:', requestedRedirectUri, '- using default');
       }
     }
 
@@ -110,25 +107,8 @@ router.get('/google/callback', async (req, res) => {
   try {
     const { code, state, error, error_description, success, email, userId } = req.query;
     
-    console.log('\n🔐 OAuth Callback Received:', {
-      hasCode: !!code,
-      hasState: !!state,
-      state: state,
-      success: success,
-      userId: userId,
-      email: email,
-      error: error,
-    });
-    
     // If this is a success redirect (after OAuth completion), show success page
     if (success === 'true' && userId) {
-      console.log('✅ Success redirect - session should already be stored');
-      
-      if (state && oauthSessions.has(state)) {
-        console.log('✅ Session found for state:', state);
-      } else {
-        console.log('⚠️ Session NOT found for state:', state);
-      }
       
       // Fetch user info to display
       const user = await userService.getUserById(userId);
@@ -160,7 +140,6 @@ router.get('/google/callback', async (req, res) => {
     }
 
     if (!state) {
-      console.log('❌ Missing state parameter');
       return res.status(400).send('Missing state parameter');
     }
 
@@ -169,12 +148,10 @@ router.get('/google/callback', async (req, res) => {
     let expectedRedirectUri = null;
     if (stateData && stateData.redirectUri) {
       expectedRedirectUri = stateData.redirectUri;
-      console.log('📋 Using redirect URI from state:', expectedRedirectUri);
     }
 
     if (pendingAuthStates.has(state)) {
       pendingAuthStates.delete(state);
-      console.log('✅ State validated and removed from pending states');
     }
 
     // Exchange code for token
@@ -183,7 +160,6 @@ router.get('/google/callback', async (req, res) => {
     
     if (expectedRedirectUri && expectedRedirectUri !== googleAuth.redirectUri) {
       googleAuth.redirectUri = expectedRedirectUri;
-      console.log('🔄 Updated redirect URI for token exchange:', expectedRedirectUri);
     }
     
     const tokenData = await googleAuth.exchangeCodeForToken(code);
@@ -195,14 +171,11 @@ router.get('/google/callback', async (req, res) => {
     });
 
     if (!waitlistEntry || !waitlistEntry.isInvited) {
-      console.log(`🚫 Access denied for ${userInfo.email} - not invited`);
       return res.status(403).send(createErrorPage(
         'Access Restricted',
         'This app is currently invite-only. Please join the waitlist and wait for an invitation.'
       ));
     }
-
-    console.log(`✅ User ${userInfo.email} is invited, proceeding with login`);
 
     // Create or update user in database
     const user = await userService.getOrCreateUser(userInfo.email, userInfo.email);
@@ -232,7 +205,6 @@ router.get('/google/callback', async (req, res) => {
     );
 
     // Store session for app to poll (include access token for frontend)
-    console.log('💾 Storing OAuth session for state:', state);
     oauthSessions.set(state, {
       userId: user.id,
       email: userInfo.email,
@@ -240,7 +212,6 @@ router.get('/google/callback', async (req, res) => {
       accessToken: tokenData.accessToken, // Include token in session
       expiresAt: Date.now() + appConfig.oauth.sessionExpiry,
     });
-    console.log('✅ Session stored. Total sessions:', oauthSessions.size);
 
     // Redirect to callback URL with user info
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:3000';
@@ -261,11 +232,6 @@ router.get('/google/session', async (req, res) => {
   try {
     const { state } = req.query;
     
-    console.log('\n🔍 Session check requested:', {
-      state: state,
-      totalSessions: oauthSessions.size,
-    });
-    
     if (!state) {
       return res.status(400).json({ error: 'state parameter is required' });
     }
@@ -273,28 +239,16 @@ router.get('/google/session', async (req, res) => {
     const session = oauthSessions.get(state);
     
     if (!session) {
-      console.log('❌ Session not found for state:', state);
       return res.status(404).json({ 
-        error: 'Session not found or expired',
-        debug: {
-          requestedState: state,
-          availableStates: Array.from(oauthSessions.keys()),
-          totalSessions: oauthSessions.size,
-        }
+        error: 'Session not found or expired'
       });
     }
 
     // Check if session expired
     if (session.expiresAt < Date.now()) {
-      console.log('⏰ Session expired for state:', state);
       oauthSessions.delete(state);
       return res.status(404).json({ error: 'Session expired' });
     }
-
-    console.log('✅ Session found:', {
-      userId: session.userId,
-      email: session.email,
-    });
 
     // Get access token from user's google-auth integration
     let accessToken = null;
@@ -419,13 +373,6 @@ router.get('/me', async (req, res) => {
         picture = integration.metadata.picture || integration.metadata.pictureUrl || null;
         name = integration.metadata.name || user.username;
         
-        console.log('📸 User profile picture:', {
-          userId: user.id,
-          hasIntegration: !!integration,
-          hasMetadata: !!integration.metadata,
-          picture: picture ? 'found' : 'not found',
-          pictureUrl: picture,
-        });
       }
     } catch (e) {
       console.error('Error getting profile picture:', e);

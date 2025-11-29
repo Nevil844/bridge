@@ -51,16 +51,6 @@ router.get('/callback', async (req, res) => {
     // Zerodha uses request_token instead of code
     const authCode = code || request_token;
 
-    console.log('\n🔐 OAuth callback received:', {
-      hasCode: !!authCode,
-      hasState: !!state,
-      isZerodha: !!request_token,
-      status: status || 'none',
-      action: action || 'none',
-      error: error || 'none',
-      error_description: error_description || 'none',
-      allParams: req.query
-    });
 
     // Handle OAuth errors from provider (e.g., user denied access)
     if (error) {
@@ -81,18 +71,13 @@ router.get('/callback', async (req, res) => {
     // Verify state and get userId + integration type
     const stateData = oauthHandler.verifyState(state);
     if (!stateData) {
-      console.warn('⚠️ Invalid or expired state - checking if already connected...', state);
       return res.send(createSuccessPage('Already Connected', 'This authorization was already processed successfully.'));
     }
 
     const { userId, integrationType } = stateData;
 
-    console.log(`✅ Valid state for user ${userId}, exchanging code for token...`);
-
     // Exchange code for access token
     const tokenData = await oauthHandler.exchangeCodeForToken(integrationType, authCode);
-    
-    console.log(`✅ Got tokens, adding ${integrationType} integration...`);
     
     // Handle different token formats (some integrations return just a string, others return an object)
     let config;
@@ -129,8 +114,6 @@ router.get('/callback', async (req, res) => {
     
     // Invalidate tools cache to force refresh
     mcpManager.invalidateToolsCache(userId);
-
-    console.log(`✅ ${integrationType} integration added successfully!`);
 
     // Get integration name for display
     const integrationName = integrationType.charAt(0).toUpperCase() + integrationType.slice(1);

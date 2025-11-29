@@ -231,7 +231,6 @@ export default function HomeScreen() {
   const cleanupOldData = async () => {
     try {
       await AsyncStorage.removeItem('chatHistory');
-      console.log('✅ Cleaned up old chat history from AsyncStorage');
     } catch (error) {
       console.error('Error cleaning up old data:', error);
     }
@@ -274,7 +273,6 @@ export default function HomeScreen() {
 
   const startRecording = async () => {
     try {
-      console.log('Requesting audio permissions...');
       const permission = await Audio.requestPermissionsAsync();
       
       if (permission.status !== 'granted') {
@@ -287,7 +285,6 @@ export default function HomeScreen() {
         playsInSilentModeIOS: true,
       });
 
-      console.log('Starting recording...');
       const { recording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
@@ -304,7 +301,6 @@ export default function HomeScreen() {
     if (!recording) return;
 
     try {
-      console.log('Stopping recording...');
       setIsRecording(false);
       await recording.stopAndUnloadAsync();
       await Audio.setAudioModeAsync({
@@ -315,7 +311,6 @@ export default function HomeScreen() {
       setRecording(null);
 
       if (uri) {
-        console.log('Recording saved to', uri);
         await transcribeAudio(uri);
       }
     } catch (err) {
@@ -371,7 +366,6 @@ export default function HomeScreen() {
       if (response.ok && data.text) {
         // Set the transcribed text and send it
         setInputText(data.text);
-        console.log(`✅ Transcription completed in ${duration}s`);
         // Auto-send after transcription
         setTimeout(() => {
           handleSendWithText(data.text);
@@ -470,13 +464,11 @@ export default function HomeScreen() {
                         )
                       );
                     } else if (data.type === 'thinking') {
-                      console.log('🧠 Received thinking event (fallback path):', data.thinking);
                       setMessages(prev =>
                         prev.map(msg => {
                           if (msg.id === aiMessageId) {
                             const currentThinking = msg.thinking || [];
                             const newThinking = [...currentThinking, data.thinking];
-                            console.log(`🧠 Updated thinking array, now has ${newThinking.length} items`);
                             return { 
                               ...msg, 
                               thinking: newThinking
@@ -553,7 +545,6 @@ export default function HomeScreen() {
                     }
                   } else if (data.type === 'chunk') {
                     accumulatedContent += data.content;
-                    console.log(`📝 Chat chunk received: "${data.content}" (accumulated: ${accumulatedContent.length} chars)`);
                     setMessages(prev =>
                       prev.map(msg =>
                         msg.id === aiMessageId
@@ -564,7 +555,6 @@ export default function HomeScreen() {
                   } else if (data.type === 'thinking_chunk') {
                     // Stream thinking text incrementally
                     accumulatedThinking += data.content;
-                    console.log(`🧠 Thinking chunk received: "${data.content}" (accumulated: ${accumulatedThinking.length} chars)`);
                     
                     setMessages(prev =>
                       prev.map(msg => {
@@ -821,10 +811,8 @@ export default function HomeScreen() {
         // Check if response is streaming (SSE)
         const contentType = response.headers.get('content-type');
         const isStreaming = contentType?.includes('text/event-stream');
-        console.log('📡 Response type check:', { contentType, isStreaming, hasBody: !!response.body });
 
         if (isStreaming) {
-          console.log('🌊 Starting to read streaming response...');
           // Handle streaming response (Server-Sent Events)
           // React Native compatibility: check if getReader exists, otherwise use text() stream
           let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
@@ -835,7 +823,6 @@ export default function HomeScreen() {
               reader = response.body.getReader();
             } else {
               // Fallback: React Native might not support getReader, use text() instead
-              console.log('⚠️  getReader not available, using text() fallback');
               const text = await response.text();
               // Parse SSE manually
               const lines = text.split('\n');
@@ -862,13 +849,11 @@ export default function HomeScreen() {
                     );
                   } else if (data.type === 'thinking') {
                     // Add thinking event to the array
-                    console.log('🧠 Received thinking event (React Native fallback):', data.thinking);
                     setMessages(prev =>
                       prev.map(msg => {
                         if (msg.id === aiMessageId) {
                           const currentThinking = msg.thinking || [];
                           const newThinking = [...currentThinking, data.thinking];
-                          console.log(`🧠 Updated thinking array, now has ${newThinking.length} items`);
                           return { 
                             ...msg, 
                             thinking: newThinking
@@ -937,7 +922,6 @@ export default function HomeScreen() {
             const { done, value } = await reader.read();
             
             if (done) {
-              console.log('✅ Stream complete');
               break;
             }
 
@@ -952,7 +936,6 @@ export default function HomeScreen() {
                   
                   if (data.type === 'start') {
                     // Stream started
-                    console.log('🚀 Stream started');
                     if (data.conversationId && !currentChatId) {
                       setCurrentChatId(data.conversationId);
                       await loadConversations();
@@ -960,7 +943,6 @@ export default function HomeScreen() {
                   } else if (data.type === 'chunk') {
                     // Content chunk - update message incrementally
                     accumulatedContent += data.content;
-                    console.log('📝 Received chunk, total length:', accumulatedContent.length);
                     
                     setMessages(prev =>
                       prev.map(msg =>
@@ -1027,13 +1009,11 @@ export default function HomeScreen() {
                     currentThinkingIndex = -1;
                   } else if (data.type === 'thinking') {
                     // Legacy: Add complete thinking event (for non-streaming rounds)
-                    console.log('🧠 Received thinking event (handleSendWithText):', data.thinking);
                     setMessages(prev =>
                       prev.map(msg => {
                         if (msg.id === aiMessageId) {
                           const currentThinking = msg.thinking || [];
                           const newThinking = [...currentThinking, data.thinking];
-                          console.log(`🧠 Updated thinking array, now has ${newThinking.length} items`);
                           return { 
                             ...msg, 
                             thinking: newThinking
@@ -1045,7 +1025,6 @@ export default function HomeScreen() {
                   } else if (data.type === 'done') {
                     // Stream complete - use accumulated content (which was built from chunks) or fallback to message
                     // Prefer accumulatedContent since it's the clean streamed text
-                    console.log('✅ Stream done');
                     const finalContent = data.message !== undefined ? data.message : accumulatedContent || '';
                     setMessages(prev =>
                       prev.map(msg =>
