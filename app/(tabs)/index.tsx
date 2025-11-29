@@ -465,15 +465,20 @@ export default function HomeScreen() {
                         )
                       );
                     } else if (data.type === 'thinking') {
+                      console.log('🧠 Received thinking event (fallback path):', data.thinking);
                       setMessages(prev =>
-                        prev.map(msg =>
-                          msg.id === aiMessageId
-                            ? { 
-                                ...msg, 
-                                thinking: [...(msg.thinking || []), data.thinking]
-                              }
-                            : msg
-                        )
+                        prev.map(msg => {
+                          if (msg.id === aiMessageId) {
+                            const currentThinking = msg.thinking || [];
+                            const newThinking = [...currentThinking, data.thinking];
+                            console.log(`🧠 Updated thinking array, now has ${newThinking.length} items`);
+                            return { 
+                              ...msg, 
+                              thinking: newThinking
+                            };
+                          }
+                          return msg;
+                        })
                       );
                     } else if (data.type === 'done') {
                       const finalContent = data.message !== undefined ? data.message : accumulatedContent;
@@ -564,7 +569,13 @@ export default function HomeScreen() {
                             currentThinkingIndex = thinking.length;
                             return {
                               ...msg,
-                              thinking: [...thinking, { thinking: accumulatedThinking, action: '', toolCalls: [] }]
+                              thinking: [...thinking, { 
+                              isInternal: true,
+                              thinking: accumulatedThinking, 
+                              action: '', 
+                              toolCalls: [],
+                              data: null
+                            }]
                             };
                           }
                           
@@ -602,15 +613,27 @@ export default function HomeScreen() {
                     currentThinkingIndex = -1;
                   } else if (data.type === 'thinking') {
                     // Legacy: Add complete thinking event (for non-streaming rounds)
+                    console.log('🧠 Received thinking event (non-streaming round):', data.thinking);
                     setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { 
-                              ...msg, 
-                              thinking: [...(msg.thinking || []), data.thinking]
-                            }
-                          : msg
-                      )
+                      prev.map(msg => {
+                        if (msg.id === aiMessageId) {
+                          const currentThinking = msg.thinking || [];
+                          const thinkingItem = {
+                            isInternal: true,
+                            thinking: data.thinking.thinking || '',
+                            action: data.thinking.action || '',
+                            toolCalls: data.thinking.toolCalls || [],
+                            data: data.thinking.data || null
+                          };
+                          const newThinking = [...currentThinking, thinkingItem];
+                          console.log(`🧠 Updated thinking array, now has ${newThinking.length} items`);
+                          return { 
+                            ...msg, 
+                            thinking: newThinking
+                          };
+                        }
+                        return msg;
+                      })
                     );
                   } else if (data.type === 'done') {
                     const finalContent = data.message !== undefined ? data.message : accumulatedContent || '';
@@ -833,15 +856,20 @@ export default function HomeScreen() {
                     );
                   } else if (data.type === 'thinking') {
                     // Add thinking event to the array
+                    console.log('🧠 Received thinking event (React Native fallback):', data.thinking);
                     setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { 
-                              ...msg, 
-                              thinking: [...(msg.thinking || []), data.thinking]
-                            }
-                          : msg
-                      )
+                      prev.map(msg => {
+                        if (msg.id === aiMessageId) {
+                          const currentThinking = msg.thinking || [];
+                          const newThinking = [...currentThinking, data.thinking];
+                          console.log(`🧠 Updated thinking array, now has ${newThinking.length} items`);
+                          return { 
+                            ...msg, 
+                            thinking: newThinking
+                          };
+                        }
+                        return msg;
+                      })
                     );
                   } else if (data.type === 'done') {
                     const finalContent = data.message !== undefined ? data.message : accumulatedContent;
@@ -949,7 +977,13 @@ export default function HomeScreen() {
                             currentThinkingIndex = thinking.length;
                             return {
                               ...msg,
-                              thinking: [...thinking, { thinking: accumulatedThinking, action: '', toolCalls: [] }]
+                              thinking: [...thinking, { 
+                              isInternal: true,
+                              thinking: accumulatedThinking, 
+                              action: '', 
+                              toolCalls: [],
+                              data: null
+                            }]
                             };
                           }
                           
@@ -987,16 +1021,20 @@ export default function HomeScreen() {
                     currentThinkingIndex = -1;
                   } else if (data.type === 'thinking') {
                     // Legacy: Add complete thinking event (for non-streaming rounds)
-                    console.log('🧠 Received thinking event');
+                    console.log('🧠 Received thinking event (handleSendWithText):', data.thinking);
                     setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { 
-                              ...msg, 
-                              thinking: [...(msg.thinking || []), data.thinking]
-                            }
-                          : msg
-                      )
+                      prev.map(msg => {
+                        if (msg.id === aiMessageId) {
+                          const currentThinking = msg.thinking || [];
+                          const newThinking = [...currentThinking, data.thinking];
+                          console.log(`🧠 Updated thinking array, now has ${newThinking.length} items`);
+                          return { 
+                            ...msg, 
+                            thinking: newThinking
+                          };
+                        }
+                        return msg;
+                      })
                     );
                   } else if (data.type === 'done') {
                     // Stream complete - use accumulated content (which was built from chunks) or fallback to message
