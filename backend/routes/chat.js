@@ -11,6 +11,7 @@ const mcpManager = require('../mcp/manager');
 const { convertMCPToolsToOpenAI, generateSystemPrompt, getIntegrationInstructions } = require('../mcp/tools');
 const { getAllModels, getProviderForModel } = require('../ai-providers');
 const { checkQuota } = require('../middleware/quotaEnforcement');
+const { verifyUser } = require('../middleware/auth');
 const { executeToolCalls } = require('../utils/toolExecutor');
 const { searchRelevantMemories, formatMemoryContext, storeMessageAsMemory } = require('../utils/memoryHelper');
 const appConfig = require('../config/app');
@@ -566,13 +567,13 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
 /**
  * Chat completion endpoint with per-user MCP integration
  */
-router.post('/', checkQuota, async (req, res) => {
+router.post('/', verifyUser, checkQuota, async (req, res) => {
   try {
-    const { message, model, userId, conversationId, stream } = req.body;
+    const { message, model, conversationId, stream } = req.body;
     console.log('📥 Chat request received:', { 
       hasMessage: !!message, 
       model, 
-      userId, 
+      userId: req.userId, 
       conversationId, 
       stream: stream !== undefined ? stream : 'undefined (defaults to false)' 
     });
@@ -582,7 +583,7 @@ router.post('/', checkQuota, async (req, res) => {
     }
 
     const selectedModel = model || appConfig.defaultModel;
-    const user = userId || 'default-user';
+    const user = req.userId;
     
     // Create or get conversation
     let conversation;

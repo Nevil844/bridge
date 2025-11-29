@@ -139,7 +139,9 @@ export default function HomeScreen() {
   const loadConversations = useCallback(async () => {
     try {
       if (!userId) return; // Wait for userId to load
-      const response = await fetch(`${API_ENDPOINTS.CONVERSATIONS}?userId=${userId}`);
+      // Use authenticated fetch - token is automatically added to headers
+      const { authenticatedFetch } = require('@/utils/api');
+      const response = await authenticatedFetch(`${API_ENDPOINTS.CONVERSATIONS}`);
       if (response.ok) {
         const conversations = await response.json();
         setChatHistory(conversations.map((conv: any) => ({
@@ -164,7 +166,9 @@ export default function HomeScreen() {
   // Load messages for a conversation
   const loadConversationMessages = async (conversationId: string) => {
     try {
-      const response = await fetch(`${API_ENDPOINTS.CONVERSATIONS}/${conversationId}?userId=${userId}`);
+      // Use authenticated fetch - token is automatically added to headers
+      const { authenticatedFetch } = require('@/utils/api');
+      const response = await authenticatedFetch(`${API_ENDPOINTS.CONVERSATIONS}/${conversationId}`);
       if (response.ok) {
         const conversation = await response.json();
         const loadedMessages: Message[] = conversation.messages.map((msg: any) => ({
@@ -193,7 +197,9 @@ export default function HomeScreen() {
 
   const deleteChat = async (chatId: string) => {
     try {
-      const response = await fetch(`${API_ENDPOINTS.CONVERSATIONS}/${chatId}?userId=${userId}`, {
+      // Use authenticated fetch - token is automatically added to headers
+      const { authenticatedFetch } = require('@/utils/api');
+      const response = await authenticatedFetch(`${API_ENDPOINTS.CONVERSATIONS}/${chatId}`, {
         method: 'DELETE',
       });
       
@@ -407,11 +413,10 @@ export default function HomeScreen() {
       setMessages([...newMessages, aiMessagePlaceholder]);
 
       try {
-        const response = await fetch(API_ENDPOINTS.CHAT, {
+        // Use authenticated fetch - token is automatically added to headers
+        const { authenticatedFetch } = require('@/utils/api');
+        const response = await authenticatedFetch(API_ENDPOINTS.CHAT, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
           body: JSON.stringify({
             message: text,
             model: selectedModel,
@@ -757,11 +762,10 @@ export default function HomeScreen() {
       setMessages([...newMessages, aiMessagePlaceholder]);
 
       try {
-        const response = await fetch(API_ENDPOINTS.CHAT, {
+        // Use authenticated fetch - token is automatically added to headers
+        const { authenticatedFetch } = require('@/utils/api');
+        const response = await authenticatedFetch(API_ENDPOINTS.CHAT, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
           body: JSON.stringify({
             message: userMessage.text,
             model: selectedModel,

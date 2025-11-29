@@ -8,6 +8,7 @@ const router = express.Router();
 const conversationService = require('../db/services/conversation');
 const memoryService = require('../db/services/memory');
 const toolContextService = require('../db/services/toolContext');
+const { verifyUser } = require('../middleware/auth');
 
 // Unified embedding service (supports OpenAI and AWS Bedrock Titan)
 const embeddingService = require('../ai-providers/embeddings');
@@ -21,13 +22,12 @@ const generateEmbedding = async (text) => {
  * GET /api/conversations
  * Get user's conversations with pagination
  */
-router.get('/', async (req, res) => {
+router.get('/', verifyUser, async (req, res) => {
   try {
-    const userId = req.query.userId || 'default-user';
     const limit = parseInt(req.query.limit) || 50;
     const offset = parseInt(req.query.offset) || 0;
 
-    const conversations = await conversationService.getUserConversations(userId, limit, offset);
+    const conversations = await conversationService.getUserConversations(req.userId, limit, offset);
     res.json(conversations);
   } catch (error) {
     console.error('Error fetching conversations:', error);
@@ -39,15 +39,11 @@ router.get('/', async (req, res) => {
  * POST /api/conversations
  * Create a new conversation
  */
-router.post('/', async (req, res) => {
+router.post('/', verifyUser, async (req, res) => {
   try {
-    const { userId, title } = req.body;
-    
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
+    const { title } = req.body;
 
-    const conversation = await conversationService.createConversation(userId, title);
+    const conversation = await conversationService.createConversation(req.userId, title);
     res.json(conversation);
   } catch (error) {
     console.error('Error creating conversation:', error);
@@ -59,12 +55,11 @@ router.post('/', async (req, res) => {
  * GET /api/conversations/:id
  * Get conversation with messages
  */
-router.get('/:id', async (req, res) => {
+router.get('/:id', verifyUser, async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.query.userId || 'default-user';
 
-    const conversation = await conversationService.getConversation(id, userId);
+    const conversation = await conversationService.getConversation(id, req.userId);
     
     if (!conversation) {
       return res.status(404).json({ error: 'Conversation not found' });
@@ -81,16 +76,12 @@ router.get('/:id', async (req, res) => {
  * PATCH /api/conversations/:id
  * Update conversation title
  */
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', verifyUser, async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId, title } = req.body;
+    const { title } = req.body;
 
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
-
-    const conversation = await conversationService.updateConversationTitle(id, userId, title);
+    const conversation = await conversationService.updateConversationTitle(id, req.userId, title);
     res.json(conversation);
   } catch (error) {
     console.error('Error updating conversation:', error);
@@ -102,12 +93,11 @@ router.patch('/:id', async (req, res) => {
  * DELETE /api/conversations/:id
  * Delete conversation and all related data
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', verifyUser, async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.query.userId || 'default-user';
 
-    await conversationService.deleteConversation(id, userId);
+    await conversationService.deleteConversation(id, req.userId);
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting conversation:', error);
@@ -171,9 +161,8 @@ router.get('/:id/history', async (req, res) => {
  * GET /api/conversations/search
  * Search conversations by title or content
  */
-router.get('/search', async (req, res) => {
+router.get('/search', verifyUser, async (req, res) => {
   try {
-    const userId = req.query.userId || 'default-user';
     const query = req.query.q || '';
     const limit = parseInt(req.query.limit) || 10;
 
@@ -181,7 +170,7 @@ router.get('/search', async (req, res) => {
       return res.status(400).json({ error: 'Query parameter "q" is required' });
     }
 
-    const results = await conversationService.searchConversations(userId, query, limit);
+    const results = await conversationService.searchConversations(req.userId, query, limit);
     res.json(results);
   } catch (error) {
     console.error('Error searching conversations:', error);
@@ -293,7 +282,6 @@ router.patch('/:id/tool-context/:contextId/deactivate', async (req, res) => {
  * Get complete context combining all 3 memory types
  * 
  * Query params:
- * - userId: User ID for semantic search
  * - recentLimit: Number of recent messages (default: 20)
  * - semanticLimit: Number of semantic results (default: 5)
  * - query: Optional query for semantic search (defaults to last user message)
@@ -307,10 +295,9 @@ router.patch('/:id/tool-context/:contextId/deactivate', async (req, res) => {
  * 
  * Perfect for LangChain integration!
  */
-router.get('/:id/full-context', async (req, res) => {
+router.get('/:id/full-context', verifyUser, async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.query.userId || 'default-user';
     const recentLimit = parseInt(req.query.recentLimit) || 20;
     const semanticLimit = parseInt(req.query.semanticLimit) || 5;
     const query = req.query.query;
@@ -333,7 +320,7 @@ router.get('/:id/full-context', async (req, res) => {
           const embedding = await generateEmbedding(searchQuery);
           if (embedding) {
             semantic = await memoryService.searchSimilar(
-              userId,
+              req.userId,
               embedding,
               semanticLimit,
               id

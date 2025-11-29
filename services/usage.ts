@@ -4,6 +4,7 @@
  */
 
 import { API_ENDPOINTS } from '../config/api';
+import { authenticatedFetch } from '../utils/api';
 
 export interface TokenUsage {
   userId: string;
@@ -52,9 +53,12 @@ export interface ModelUsage {
  * Get current month's token usage for a user
  */
 export async function getUserUsage(userId: string, plan: string = 'free'): Promise<TokenUsage> {
-  const response = await fetch(`${API_ENDPOINTS.USAGE}/${userId}?plan=${plan}`);
+  // Use authenticated fetch - token is automatically added to headers
+  const response = await authenticatedFetch(`${API_ENDPOINTS.USAGE}/${userId}?plan=${plan}`);
   
   if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Usage API error:', errorText);
     throw new Error('Failed to fetch usage data');
   }
   
@@ -68,9 +72,12 @@ export async function getUserUsageHistory(
   userId: string, 
   months: number = 6
 ): Promise<UsageHistory> {
-  const response = await fetch(`${API_ENDPOINTS.USAGE}/${userId}/history?months=${months}`);
+  // Use authenticated fetch - token is automatically added to headers
+  const response = await authenticatedFetch(`${API_ENDPOINTS.USAGE}/${userId}/history?months=${months}`);
   
   if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Usage history API error:', errorText);
     throw new Error('Failed to fetch usage history');
   }
   
@@ -81,9 +88,12 @@ export async function getUserUsageHistory(
  * Get usage breakdown by model
  */
 export async function getUserUsageByModel(userId: string): Promise<ModelUsage> {
-  const response = await fetch(`${API_ENDPOINTS.USAGE}/${userId}/by-model`);
+  // Use authenticated fetch - token is automatically added to headers
+  const response = await authenticatedFetch(`${API_ENDPOINTS.USAGE}/${userId}/by-model`);
   
   if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Usage by model API error:', errorText);
     throw new Error('Failed to fetch usage by model');
   }
   

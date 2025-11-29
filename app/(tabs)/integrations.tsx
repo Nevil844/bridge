@@ -2,6 +2,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { authenticatedFetch } from '@/utils/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -277,8 +278,8 @@ export default function IntegrationsScreen() {
 
   const loadUserIntegrations = async () => {
     try {
-      const userId = await AsyncStorage.getItem('userId') || 'default-user';
-      const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}?userId=${userId}`);
+      // Use authenticated fetch - token is automatically added to headers
+      const response = await authenticatedFetch(`${API_ENDPOINTS.INTEGRATIONS}`);
       
       if (!response.ok) {
         const text = await response.text();
@@ -332,10 +333,10 @@ export default function IntegrationsScreen() {
   const handleOAuthFlow = async (integration: Integration) => {
     try {
       setIsLoading(true);
-      const userId = await AsyncStorage.getItem('userId') || 'default-user';
       
       // Get OAuth URL from backend (generic endpoint)
-      const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}/oauth-url?userId=${userId}`);
+      // Use authenticated fetch - token is automatically added to headers
+      const response = await authenticatedFetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}/oauth-url`);
       
       if (!response.ok) {
         const text = await response.text();
@@ -361,7 +362,8 @@ export default function IntegrationsScreen() {
           // Start polling for connection status
           const pollInterval = setInterval(async () => {
             try {
-              const integrations = await fetch(`${API_ENDPOINTS.INTEGRATIONS}?userId=${userId}`);
+              // Use authenticated fetch - token is automatically added to headers
+              const integrations = await authenticatedFetch(`${API_ENDPOINTS.INTEGRATIONS}`);
               
               if (!integrations.ok) {
                 // Don't log errors during polling - just skip this poll
@@ -459,9 +461,8 @@ export default function IntegrationsScreen() {
     }
     
     try {
-      const userId = await AsyncStorage.getItem('userId') || 'default-user';
-      
-      const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}?userId=${userId}`, {
+      // Use authenticated fetch - token is automatically added to headers
+      const response = await authenticatedFetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}`, {
         method: 'DELETE',
       });
       

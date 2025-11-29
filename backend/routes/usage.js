@@ -7,6 +7,7 @@ const express = require('express');
 const router = express.Router();
 const tokenUsageService = require('../db/services/tokenUsage');
 const userService = require('../db/services/user');
+const { verifyUser } = require('../middleware/auth');
 const { getPlanLimit, getRemainingTokens, getUsagePercentage, getWarningLevel } = require('../config/planLimits');
 
 /**
@@ -27,18 +28,32 @@ const { getPlanLimit, getRemainingTokens, getUsagePercentage, getWarningLevel } 
  *   "warningLevel": "none"
  * }
  */
-router.get('/:userId', async (req, res) => {
+router.get('/:userId', verifyUser, async (req, res) => {
   try {
     const { userId } = req.params;
+    
+    // SECURITY: Verify the userId in params matches the authenticated user from token
+    // req.userId is extracted from the token (secure), userId is from URL (untrusted)
+    // This prevents accessing other users' data even if URL is modified
+    if (userId !== req.userId) {
+      return res.status(403).json({ 
+        error: 'Forbidden', 
+        message: 'You can only access your own usage data' 
+      });
+    }
+    
+    // Use req.userId (from token) instead of userId from params
+    const authenticatedUserId = req.userId;
+    
     const { month } = req.query; // Optional: specific month (format: "2025-11")
 
-    // Get usage for current or specified month
+    // Get usage for current or specified month (using authenticated userId from token)
     const usage = month 
-      ? await tokenUsageService.getMonthUsage(userId, month)
-      : await tokenUsageService.getCurrentMonthTotal(userId);
+      ? await tokenUsageService.getMonthUsage(authenticatedUserId, month)
+      : await tokenUsageService.getCurrentMonthTotal(authenticatedUserId);
 
-    // Get user's plan from database
-    const user = await userService.getUserById(userId);
+    // Get user's plan from database (using authenticated userId from token)
+    const user = await userService.getUserById(authenticatedUserId);
     const userPlan = user?.plan || req.query.plan || 'free';
     const limit = getPlanLimit(userPlan);
     const remaining = getRemainingTokens(usage.totalTokens, userPlan);
@@ -48,7 +63,7 @@ router.get('/:userId', async (req, res) => {
     const currentMonth = month || new Date().toISOString().slice(0, 7);
 
     res.json({
-      userId,
+      userId: authenticatedUserId,
       month: currentMonth,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
@@ -82,12 +97,23 @@ router.get('/:userId', async (req, res) => {
  *   ]
  * }
  */
-router.get('/:userId/history', async (req, res) => {
+router.get('/:userId/history', verifyUser, async (req, res) => {
   try {
     const { userId } = req.params;
+    
+    // SECURITY: Verify the userId in params matches the authenticated user from token
+    if (userId !== req.userId) {
+      return res.status(403).json({ 
+        error: 'Forbidden', 
+        message: 'You can only access your own usage data' 
+      });
+    }
+    
+    // Use req.userId (from token) instead of userId from params
+    const authenticatedUserId = req.userId;
     const months = parseInt(req.query.months) || 6;
 
-    const history = await tokenUsageService.getUsageHistory(userId, months);
+    const history = await tokenUsageService.getUsageHistory(authenticatedUserId, months);
 
     // Group by month
     const groupedByMonth = history.reduce((acc, record) => {
@@ -119,7 +145,7 @@ router.get('/:userId/history', async (req, res) => {
     );
 
     res.json({
-      userId,
+      userId: authenticatedUserId,
       history: historyArray,
     });
   } catch (error) {
@@ -142,12 +168,23 @@ router.get('/:userId/history', async (req, res) => {
  *   ]
  * }
  */
-router.get('/:userId/by-model', async (req, res) => {
+router.get('/:userId/by-model', verifyUser, async (req, res) => {
   try {
     const { userId } = req.params;
+    
+    // SECURITY: Verify the userId in params matches the authenticated user from token
+    if (userId !== req.userId) {
+      return res.status(403).json({ 
+        error: 'Forbidden', 
+        message: 'You can only access your own usage data' 
+      });
+    }
+    
+    // Use req.userId (from token) instead of userId from params
+    const authenticatedUserId = req.userId;
     const { month } = req.query;
 
-    const usageByModel = await tokenUsageService.getUsageByModel(userId, month);
+    const usageByModel = await tokenUsageService.getUsageByModel(authenticatedUserId, month);
     const total = usageByModel.reduce((sum, record) => sum + record.totalTokens, 0);
 
     const models = usageByModel.map(record => ({
@@ -159,7 +196,7 @@ router.get('/:userId/by-model', async (req, res) => {
     }));
 
     res.json({
-      userId,
+      userId: authenticatedUserId,
       month: month || new Date().toISOString().slice(0, 7),
       models,
       totalTokens: total,

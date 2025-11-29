@@ -1,5 +1,6 @@
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { authenticatedFetch } from '@/utils/api';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -20,7 +21,8 @@ export function SampleQuestions({ userId, onQuestionSelect }: SampleQuestionsPro
     // Fetch questions from API
     const fetchQuestions = async () => {
       try {
-        const response = await fetch(`${API_ENDPOINTS.SAMPLE_QUESTIONS}?userId=${userId}`);
+        // Use authenticated fetch - token is automatically added to headers
+        const response = await authenticatedFetch(`${API_ENDPOINTS.SAMPLE_QUESTIONS}`);
         const data = await response.json();
         if (data.questions && data.questions.length > 0) {
           setQuestions(data.questions);
