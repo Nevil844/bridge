@@ -548,6 +548,7 @@ export default function HomeScreen() {
                     }
                   } else if (data.type === 'chunk') {
                     accumulatedContent += data.content;
+                    console.log(`📝 Chat chunk received: "${data.content}" (accumulated: ${accumulatedContent.length} chars)`);
                     setMessages(prev =>
                       prev.map(msg =>
                         msg.id === aiMessageId
@@ -556,6 +557,10 @@ export default function HomeScreen() {
                       )
                     );
                   } else if (data.type === 'thinking_chunk') {
+                    accumulatedThinking += data.content;
+                    console.log(`🧠 Thinking chunk received: "${data.content}" (accumulated: ${accumulatedThinking.length} chars)`);
+                    
+                    setMessages(prev =>
                     // Stream thinking text incrementally
                     accumulatedThinking += data.content;
                     

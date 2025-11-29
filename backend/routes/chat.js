@@ -232,17 +232,35 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
 
           console.log(`📊 Done event: hasToolCalls=${!!toolCalls}, contentLength=${fullContent.length}`);
           
-          // If this was a thinking response and has tool calls, send a final thinking event with tool info
-          if (isThinkingResponse && toolCalls && toolCalls.length > 0) {
-            console.log(`🧠 Sending final thinking event with tool calls`);
-            res.write(`data: ${JSON.stringify({ 
-              type: 'thinking_done',
-              thinking: {
-                thinking: fullContent,
-                action: '',
-                toolCalls: toolCalls.map(tc => tc.function.name)
-              }
-            })}\n\n`);
+          // If there are tool calls, we should show this as thinking (even if no text was provided)
+          if (toolCalls && toolCalls.length > 0) {
+            const thinkingText = fullContent.length > 0 
+              ? fullContent 
+              : `Calling ${toolCalls.map(tc => tc.function.name).join(', ')}...`;
+            
+            if (isThinkingResponse) {
+              // Was streaming as thinking chunks, send final event
+              console.log(`🧠 Sending final thinking event with tool calls`);
+              res.write(`data: ${JSON.stringify({ 
+                type: 'thinking_done',
+                thinking: {
+                  thinking: thinkingText,
+                  action: '',
+                  toolCalls: toolCalls.map(tc => tc.function.name)
+                }
+              })}\n\n`);
+            } else {
+              // No thinking text was provided, but we have tool calls - send as thinking
+              console.log(`🧠 No thinking text but has tool calls, sending thinking event`);
+              res.write(`data: ${JSON.stringify({ 
+                type: 'thinking',
+                thinking: {
+                  thinking: thinkingText,
+                  action: '',
+                  toolCalls: toolCalls.map(tc => tc.function.name)
+                }
+              })}\n\n`);
+            }
           }
 
           if (toolCalls && toolCalls.length > 0) {
