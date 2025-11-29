@@ -3,6 +3,7 @@ const oauthHandler = require('../oauth/handler');
 const integrationService = require('../db/services/integration');
 const mcpManager = require('../mcp/manager');
 const { ensureUserIntegrationsLoaded, loadedIntegrationsCache } = require('../utils/integrationLoader');
+const { verifyUser } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -11,10 +12,11 @@ const router = express.Router();
  * Mounted at /api/integrations in server.js, so route is /:type/oauth-url
  * Also works when mounted at /api/oauth as /integrations/:type/oauth-url
  */
-router.get('/:type/oauth-url', (req, res) => {
+router.get('/:type/oauth-url', verifyUser, (req, res) => {
   try {
     const { type } = req.params;
-    const userId = req.query.userId || 'default-user';
+    // Use authenticated userId from token
+    const userId = req.userId;
     
     const authUrl = oauthHandler.getAuthUrl(type, userId);
     res.json({ authUrl });
@@ -25,10 +27,11 @@ router.get('/:type/oauth-url', (req, res) => {
 });
 
 // Also support the old path for /api/oauth mount point
-router.get('/integrations/:type/oauth-url', (req, res) => {
+router.get('/integrations/:type/oauth-url', verifyUser, (req, res) => {
   try {
     const { type } = req.params;
-    const userId = req.query.userId || 'default-user';
+    // Use authenticated userId from token
+    const userId = req.userId;
     
     const authUrl = oauthHandler.getAuthUrl(type, userId);
     res.json({ authUrl });

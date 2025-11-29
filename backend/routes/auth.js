@@ -231,12 +231,13 @@ router.get('/google/callback', async (req, res) => {
       }
     );
 
-    // Store session for app to poll
+    // Store session for app to poll (include access token for frontend)
     console.log('💾 Storing OAuth session for state:', state);
     oauthSessions.set(state, {
       userId: user.id,
       email: userInfo.email,
       name: userInfo.name,
+      accessToken: tokenData.accessToken, // Include token in session
       expiresAt: Date.now() + appConfig.oauth.sessionExpiry,
     });
     console.log('✅ Session stored. Total sessions:', oauthSessions.size);
@@ -254,6 +255,7 @@ router.get('/google/callback', async (req, res) => {
 
 /**
  * Check OAuth session status (for polling after browser dismiss)
+ * Returns user info and access token for frontend to store
  */
 router.get('/google/session', async (req, res) => {
   try {
@@ -294,14 +296,68 @@ router.get('/google/session', async (req, res) => {
       email: session.email,
     });
 
+    // Get access token from user's google-auth integration
+    let accessToken = null;
+    try {
+      const integration = await integrationService.getIntegration(session.userId, 'google-auth');
+      if (integration?.credentials) {
+        const credentials = integration.credentials;
+        if (typeof credentials === 'object' && credentials.accessToken) {
+          accessToken = credentials.accessToken;
+        }
+      }
+    } catch (error) {
+      console.error('Error getting access token:', error);
+    }
+
     res.json({
       userId: session.userId,
       email: session.email,
       name: session.name,
+      accessToken: accessToken, // Include token for frontend to store
     });
   } catch (error) {
     console.error('Error checking OAuth session:', error);
     res.status(500).json({ error: 'Failed to check session' });
+  }
+});
+
+/**
+ * Get access token for authenticated user
+ * NOTE: This endpoint uses userId-based auth temporarily (before token is stored)
+ * After first use, all other endpoints require token-based auth
+ */
+router.get('/token', async (req, res) => {
+  try {
+    const userId = req.query.userId;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    // Verify user exists and has google-auth integration
+    const user = await userService.getUserById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const integration = await integrationService.getIntegration(userId, 'google-auth');
+    if (!integration || !integration.isActive) {
+      return res.status(403).json({ error: 'User has not completed Google OAuth' });
+    }
+
+    // Return access token
+    const credentials = integration.credentials;
+    if (typeof credentials === 'object' && credentials.accessToken) {
+      res.json({
+        accessToken: credentials.accessToken,
+      });
+    } else {
+      res.status(404).json({ error: 'Access token not found' });
+    }
+  } catch (error) {
+    console.error('Error getting access token:', error);
+    res.status(500).json({ error: 'Failed to get access token' });
   }
 });
 
@@ -358,21 +414,29 @@ router.get('/me', async (req, res) => {
     let name = user.username;
     try {
       const integration = await integrationService.getIntegration(user.id, 'google-auth');
-      if (integration?.metadata?.picture) {
-        picture = integration.metadata.picture;
-      }
-      if (integration?.metadata?.name) {
-        name = integration.metadata.name;
+      if (integration?.metadata) {
+        // Check both metadata.picture and direct picture field
+        picture = integration.metadata.picture || integration.metadata.pictureUrl || null;
+        name = integration.metadata.name || user.username;
+        
+        console.log('📸 User profile picture:', {
+          userId: user.id,
+          hasIntegration: !!integration,
+          hasMetadata: !!integration.metadata,
+          picture: picture ? 'found' : 'not found',
+          pictureUrl: picture,
+        });
       }
     } catch (e) {
-      // Ignore errors
+      console.error('Error getting profile picture:', e);
+      // Ignore errors but log them
     }
 
     res.json({
       id: user.id,
       username: name || user.username,
       email: user.email,
-      picture: picture,
+      picture: picture || null, // Explicitly set to null if not found
       plan: user.plan || 'free',
       createdAt: user.createdAt,
     });

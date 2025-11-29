@@ -43,7 +43,22 @@ export function useAuth() {
       
       // If user ID exists and is not default-user, use it (normal flow)
       if (storedUserId && storedUserId !== 'default-user') {
-        console.log('📱 Found stored userId, loading user...');
+        console.log('📱 Found stored userId, loading user and token...');
+        
+        // Fetch access token first
+        try {
+          const { setAccessToken } = require('@/utils/api');
+          const tokenResponse = await fetch(`${API_ENDPOINTS.AUTH.TOKEN}?userId=${storedUserId}`);
+          if (tokenResponse.ok) {
+            const tokenData = await tokenResponse.json();
+            if (tokenData.accessToken) {
+              await setAccessToken(tokenData.accessToken);
+              console.log('✅ Access token stored');
+            }
+          }
+        } catch (error) {
+          console.warn('⚠️ Could not fetch access token:', error);
+        }
         
         // Fetch user info from backend
         const response = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${storedUserId}`);
@@ -64,6 +79,8 @@ export function useAuth() {
           // User not found, clear storage
           console.warn('⚠️ Stored user not found, clearing...');
           await AsyncStorage.removeItem('userId');
+          const { clearAccessToken } = require('@/utils/api');
+          await clearAccessToken();
           setUser(null);
           setIsAuthenticated(false);
           setIsLoading(false);
@@ -92,6 +109,21 @@ export function useAuth() {
           
           // Store user ID for future use
           await AsyncStorage.setItem('userId', userData.id);
+          
+          // Fetch and store access token
+          try {
+            const { setAccessToken } = require('@/utils/api');
+            const tokenResponse = await fetch(`${API_ENDPOINTS.AUTH.TOKEN}?userId=${userData.id}`);
+            if (tokenResponse.ok) {
+              const tokenData = await tokenResponse.json();
+              if (tokenData.accessToken) {
+                await setAccessToken(tokenData.accessToken);
+                console.log('✅ Test user access token stored');
+              }
+            }
+          } catch (error) {
+            console.warn('⚠️ Could not fetch test user access token:', error);
+          }
           
           setUser({
             id: userData.id,
@@ -139,6 +171,9 @@ export function useAuth() {
     try {
       console.log('🚪 Logging out user...');
       await AsyncStorage.removeItem('userId');
+      // Clear access token
+      const { clearAccessToken } = require('@/utils/api');
+      await clearAccessToken();
       // Persist logout flag so test mode doesn't auto-login again
       await AsyncStorage.setItem('hasLoggedOut', 'true');
       setUser(null);

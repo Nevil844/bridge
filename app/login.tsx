@@ -4,6 +4,7 @@ import { ThemedView } from '@/components/themed-view';
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { secureStorage, storage, STORAGE_KEYS } from '@/utils/storage';
+import { setAccessToken } from '@/utils/api';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useState } from 'react';
 import {
@@ -137,10 +138,30 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               console.log('✅ Session found via secure storage state:', session);
               // Use session userId
               await storage.setItem(STORAGE_KEYS.USER_ID, session.userId);
+              
+              // Store access token if provided in session
+              if (session.accessToken) {
+                await setAccessToken(session.accessToken);
+                console.log('✅ Access token stored from session');
+              }
             }
           } catch (e) {
             console.log('⚠️ Could not fetch session, using secure storage userId');
           }
+        }
+        
+        // Fetch access token if not already stored
+        try {
+          const tokenResponse = await fetch(`${API_ENDPOINTS.AUTH.TOKEN}?userId=${oauthUserId}`);
+          if (tokenResponse.ok) {
+            const tokenData = await tokenResponse.json();
+            if (tokenData.accessToken) {
+              await setAccessToken(tokenData.accessToken);
+              console.log('✅ Access token stored');
+            }
+          }
+        } catch (e) {
+          console.warn('⚠️ Could not fetch access token:', e);
         }
         
         const userResponse = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${oauthUserId}`);
@@ -190,8 +211,23 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         return;
       }
       
-      // We have a stored userId, fetch user info
-      console.log('✅ Found stored userId, fetching user info...');
+      // We have a stored userId, fetch access token and user info
+      console.log('✅ Found stored userId, fetching access token and user info...');
+      
+      // Fetch access token
+      try {
+        const tokenResponse = await fetch(`${API_ENDPOINTS.AUTH.TOKEN}?userId=${storedUserId}`);
+        if (tokenResponse.ok) {
+          const tokenData = await tokenResponse.json();
+          if (tokenData.accessToken) {
+            await setAccessToken(tokenData.accessToken);
+            console.log('✅ Access token stored');
+          }
+        }
+      } catch (e) {
+        console.warn('⚠️ Could not fetch access token:', e);
+      }
+      
       const userResponse = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${storedUserId}`);
       if (userResponse.ok) {
         const userData = await userResponse.json();
@@ -280,6 +316,18 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         // We have the user ID directly from the callback
         console.log('✅ Found userId in callback:', userId);
         await storage.setItem(STORAGE_KEYS.USER_ID, userId);
+        
+        // Fetch access token and user info
+        const tokenResponse = await fetch(`${API_ENDPOINTS.AUTH.TOKEN}?userId=${userId}`);
+        if (tokenResponse.ok) {
+          const tokenData = await tokenResponse.json();
+          if (tokenData.accessToken) {
+            // Store access token securely
+            const { setAccessToken } = require('@/utils/api');
+            await setAccessToken(tokenData.accessToken);
+            console.log('✅ Access token stored');
+          }
+        }
         
         // Fetch full user info
         const userResponse = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${userId}`);

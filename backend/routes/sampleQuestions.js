@@ -1,5 +1,6 @@
 const express = require('express');
 const mcpManager = require('../mcp/manager');
+const { verifyUser } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -82,12 +83,10 @@ const INTEGRATION_QUESTIONS = {
  * GET /api/sample-questions
  * Get sample questions based on user's connected integrations
  */
-router.get('/', async (req, res) => {
+router.get('/', verifyUser, async (req, res) => {
   try {
-    const userId = req.query.userId || 'default-user';
-    
     // Get user's connected integrations
-    const userIntegrations = await mcpManager.getUserIntegrations(userId);
+    const userIntegrations = await mcpManager.getUserIntegrations(req.userId);
     const integrationTypes = userIntegrations.map(i => i.type);
     
     let questions = [];

@@ -9,7 +9,9 @@
     "db:setup": "bash scripts/setup-db.sh",
     "db:studio": "npx prisma studio",
     "db:reset": "npx prisma migrate reset",
-    "prisma:generate": "npx prisma generate"
+    "prisma:generate": "npx prisma generate",
+    "test:models": "node scripts/test-models.js",
+    "test:models:stream": "node scripts/test-models.js --stream"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.922.0",
