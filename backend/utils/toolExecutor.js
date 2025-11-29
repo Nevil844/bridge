@@ -112,10 +112,7 @@ async function executeToolCall(userId, toolCall, integrationType = null, convers
       if (!integrationType) {
         if (availableIntegrations.length === 1) {
           integrationType = availableIntegrations[0];
-          console.log(`⚠️  list_tools called without integration; defaulting to ${integrationType}`);
-        } else if (availableIntegrations.includes('spotify')) {
-          integrationType = 'spotify';
-          console.log('⚠️  list_tools missing integration; auto-selecting spotify (integration available)');
+          console.log(`⚠️  list_tools called without integration; auto-selecting the only available integration: ${integrationType}`);
         } else {
           console.log('⚠️  list_tools called without integration and multiple integrations available');
           return {

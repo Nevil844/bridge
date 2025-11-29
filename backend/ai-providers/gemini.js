@@ -293,9 +293,8 @@ class GeminiProvider {
     const currentMessage = pendingToolResponses.length > 0 ? pendingToolResponses : [{ text: '' }];
 
     if (stream) {
-      // Streaming response
-      const result = await chat.sendMessageStream(currentMessage);
-      return result.stream;
+      // Streaming response - wrap in async generator to match Bedrock format
+      return this.streamGeminiResponse(chat, currentMessage);
     } else {
       // Non-streaming response
       const result = await chat.sendMessage(currentMessage);
@@ -325,6 +324,92 @@ class GeminiProvider {
         })) : null,
         usage: usage,
       };
+    }
+  }
+
+  /**
+   * Stream Gemini response
+   * Returns an async generator that yields chunks in the same format as Bedrock
+   */
+  async *streamGeminiResponse(chat, currentMessage) {
+    console.log('🌊 streamGeminiResponse called, creating async generator for Gemini');
+    try {
+      const result = await chat.sendMessageStream(currentMessage);
+      
+      let fullContent = '';
+      let toolCalls = null;
+      let usage = null;
+
+      // Iterate through Gemini's stream chunks
+      for await (const chunk of result.stream) {
+        // Gemini returns chunks with text() method
+        const text = chunk.text();
+        
+        if (text) {
+          fullContent += text;
+          // Yield content chunk
+          yield {
+            type: 'content',
+            content: text,
+            done: false,
+          };
+        }
+        
+        // Check for function calls in the chunk
+        const functionCalls = chunk.functionCalls && chunk.functionCalls();
+        if (functionCalls && functionCalls.length > 0) {
+          toolCalls = functionCalls.map((fc, index) => ({
+            id: `call_${index}`,
+            type: 'function',
+            function: {
+              name: fc.name,
+              arguments: JSON.stringify(fc.args),
+            },
+          }));
+        }
+      }
+
+      // Get the final response to extract usage and complete tool calls
+      const response = await result.response;
+      
+      // Extract final function calls if not already captured
+      if (!toolCalls) {
+        const finalFunctionCalls = response.functionCalls();
+        if (finalFunctionCalls && finalFunctionCalls.length > 0) {
+          toolCalls = finalFunctionCalls.map((fc, index) => ({
+            id: `call_${index}`,
+            type: 'function',
+            function: {
+              name: fc.name,
+              arguments: JSON.stringify(fc.args),
+            },
+          }));
+        }
+      }
+      
+      // Extract usage metadata
+      const usageMetadata = response.usageMetadata;
+      if (usageMetadata) {
+        usage = {
+          input_tokens: usageMetadata.promptTokenCount || 0,
+          output_tokens: usageMetadata.candidatesTokenCount || 0,
+        };
+      }
+
+      // Yield final done chunk
+      yield {
+        type: 'done',
+        content: fullContent,
+        tool_calls: toolCalls,
+        usage: usage,
+      };
+    } catch (error) {
+      console.error('❌ Gemini streaming error:', error);
+      yield {
+        type: 'error',
+        error: error.message,
+      };
+      throw error;
     }
   }
 
