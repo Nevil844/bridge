@@ -64,9 +64,107 @@ class OpenRouterProvider {
     );
 
     if (stream) {
-      return response.data;
+      // Wrap axios stream in async generator to match Bedrock/Gemini format
+      return this.streamOpenRouterResponse(response.data);
     } else {
       return response.data.choices[0].message;
+    }
+  }
+
+  /**
+   * Stream OpenRouter response
+   * Returns an async generator that yields chunks in the same format as Bedrock/Gemini
+   */
+  async *streamOpenRouterResponse(axiosStream) {
+    console.log('🌊 streamOpenRouterResponse called, creating async generator for OpenRouter');
+    try {
+      let fullContent = '';
+      let toolCalls = null;
+      let buffer = '';
+
+      // Listen to the axios stream (SSE format)
+      for await (const chunk of axiosStream) {
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim();
+            
+            if (data === '[DONE]') {
+              // Stream complete
+              yield {
+                type: 'done',
+                content: fullContent,
+                tool_calls: toolCalls,
+                usage: null, // OpenRouter doesn't provide usage in stream
+              };
+              return;
+            }
+
+            try {
+              const parsed = JSON.parse(data);
+              const delta = parsed.choices?.[0]?.delta;
+              
+              if (delta?.content) {
+                fullContent += delta.content;
+                // Yield content chunk
+                yield {
+                  type: 'content',
+                  content: delta.content,
+                  done: false,
+                };
+              }
+              
+              // Check for tool calls
+              if (delta?.tool_calls) {
+                if (!toolCalls) {
+                  toolCalls = [];
+                }
+                
+                for (const tc of delta.tool_calls) {
+                  const index = tc.index || 0;
+                  if (!toolCalls[index]) {
+                    toolCalls[index] = {
+                      id: tc.id || `call_${index}`,
+                      type: 'function',
+                      function: {
+                        name: tc.function?.name || '',
+                        arguments: '',
+                      },
+                    };
+                  }
+                  
+                  if (tc.function?.arguments) {
+                    toolCalls[index].function.arguments += tc.function.arguments;
+                  }
+                  if (tc.function?.name) {
+                    toolCalls[index].function.name = tc.function.name;
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('⚠️  Failed to parse OpenRouter SSE data:', e.message);
+            }
+          }
+        }
+      }
+
+      // Final yield if we haven't received [DONE]
+      yield {
+        type: 'done',
+        content: fullContent,
+        tool_calls: toolCalls,
+        usage: null,
+      };
+    } catch (error) {
+      console.error('❌ OpenRouter streaming error:', error);
+      yield {
+        type: 'error',
+        error: error.message,
+      };
+      throw error;
     }
   }
 

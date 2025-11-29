@@ -397,6 +397,15 @@ export default function HomeScreen() {
       setInputText('');
       setIsLoading(true);
 
+      // Create placeholder for AI response
+      const aiMessageId = (Date.now() + 1).toString();
+      const aiMessagePlaceholder: Message = {
+        id: aiMessageId,
+        text: '',
+        isUser: false,
+      };
+      setMessages([...newMessages, aiMessagePlaceholder]);
+
       try {
         const response = await fetch(API_ENDPOINTS.CHAT, {
           method: 'POST',
@@ -408,40 +417,210 @@ export default function HomeScreen() {
             model: selectedModel,
             userId,
             conversationId: currentChatId,
+            stream: true, // Enable streaming
             webSearch: webSearchEnabled,
           }),
         });
 
-        const data = await response.json();
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Response error:', errorText);
+          throw new Error(`Server error: ${response.status}`);
+        }
 
-        if (response.ok) {
-          const aiMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            text: data.message,
-            isUser: false,
-          };
-          setMessages([...newMessages, aiMessage]);
+        // Check if response is streaming (SSE)
+        const contentType = response.headers.get('content-type');
+        const isStreaming = contentType?.includes('text/event-stream');
+
+        if (isStreaming) {
+          // Handle streaming response (same as handleSend)
+          let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
           
-          // Update conversationId if this was a new conversation
+          try {
+            if (response.body && typeof response.body.getReader === 'function') {
+              reader = response.body.getReader();
+            } else {
+              // Fallback for React Native
+              const text = await response.text();
+              const lines = text.split('\n');
+              let accumulatedContent = '';
+              
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  try {
+                    const data = JSON.parse(line.slice(6));
+                    
+                    if (data.type === 'start') {
+                      if (data.conversationId && !currentChatId) {
+                        setCurrentChatId(data.conversationId);
+                        await loadConversations();
+                      }
+                    } else if (data.type === 'chunk') {
+                      accumulatedContent += data.content;
+                      setMessages(prev =>
+                        prev.map(msg =>
+                          msg.id === aiMessageId
+                            ? { ...msg, text: accumulatedContent }
+                            : msg
+                        )
+                      );
+                    } else if (data.type === 'thinking') {
+                      setMessages(prev =>
+                        prev.map(msg =>
+                          msg.id === aiMessageId
+                            ? { 
+                                ...msg, 
+                                thinking: [...(msg.thinking || []), data.thinking]
+                              }
+                            : msg
+                        )
+                      );
+                    } else if (data.type === 'done') {
+                      const finalContent = data.message !== undefined ? data.message : accumulatedContent;
+                      setMessages(prev =>
+                        prev.map(msg =>
+                          msg.id === aiMessageId
+                            ? { 
+                                ...msg, 
+                                text: finalContent,
+                                thinking: data.thinking 
+                                  ? [...(msg.thinking || []), data.thinking]
+                                  : msg.thinking
+                              }
+                            : msg
+                        )
+                      );
+                        
+                      if (data.conversationId && !currentChatId) {
+                        setCurrentChatId(data.conversationId);
+                        await loadConversations();
+                      }
+                    }
+                  } catch (e) {
+                    console.error('Error parsing SSE data:', e, line);
+                  }
+                }
+              }
+              
+              setIsLoading(false);
+              return;
+            }
+          } catch (readerError) {
+            console.error('Error getting reader:', readerError);
+            throw readerError;
+          }
+
+          if (!reader) {
+            throw new Error('No response body reader available');
+          }
+
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let accumulatedContent = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            
+            if (done) {
+              break;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  
+                  if (data.type === 'start') {
+                    if (data.conversationId && !currentChatId) {
+                      setCurrentChatId(data.conversationId);
+                      await loadConversations();
+                    }
+                  } else if (data.type === 'chunk') {
+                    accumulatedContent += data.content;
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === aiMessageId
+                          ? { ...msg, text: accumulatedContent }
+                          : msg
+                      )
+                    );
+                  } else if (data.type === 'thinking') {
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === aiMessageId
+                          ? { 
+                              ...msg, 
+                              thinking: [...(msg.thinking || []), data.thinking]
+                            }
+                          : msg
+                      )
+                    );
+                  } else if (data.type === 'done') {
+                    const finalContent = data.message !== undefined ? data.message : accumulatedContent || '';
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === aiMessageId
+                          ? { 
+                              ...msg, 
+                              text: finalContent,
+                              thinking: data.thinking 
+                                ? [...(msg.thinking || []), data.thinking]
+                                : msg.thinking
+                            }
+                          : msg
+                      )
+                    );
+                    
+                    if (data.conversationId && !currentChatId) {
+                      setCurrentChatId(data.conversationId);
+                      await loadConversations();
+                    }
+                  } else if (data.type === 'error') {
+                    throw new Error(data.error || 'Streaming error');
+                  }
+                } catch (e) {
+                  console.error('Error parsing SSE data:', e, line);
+                }
+              }
+            }
+          }
+          
+          setIsLoading(false);
+          return;
+        } else {
+          // Handle non-streaming response (fallback)
+          const data = await response.json();
+          const aiMessage = data.message || data.content;
+          
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === aiMessageId
+                ? { ...msg, text: aiMessage, thinking: data.thinking || undefined }
+                : msg
+            )
+          );
+          
           if (data.conversationId && !currentChatId) {
             setCurrentChatId(data.conversationId);
             await loadConversations();
           }
-        } else {
-          const errorMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            text: `Error: ${data.error || 'Failed to get response'}`,
-            isUser: false,
-          };
-          setMessages([...newMessages, errorMessage]);
         }
       } catch (error) {
-        const errorMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          text: 'Error: Could not connect to server. Make sure the backend is running.',
-          isUser: false,
-        };
-        setMessages([...newMessages, errorMessage]);
+        console.error('Chat error:', error);
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === aiMessageId
+              ? { 
+                  ...msg, 
+                  text: `Something went wrong. Please try again.` 
+                }
+              : msg
+          )
+        );
       } finally {
         setIsLoading(false);
       }
