@@ -406,9 +406,20 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
                 
                 // Always send thinking event for subsequent rounds so user can see what AI is doing
                 if (thinkingText.length > 0 || (currentResponse.tool_calls && currentResponse.tool_calls.length > 0)) {
-                  console.log(`🧠 Round ${roundNumber - 1}: Sending thinking event`);
+                  console.log(`🧠 Round ${roundNumber - 1}: Streaming thinking (${thinkingText.length} chars)`);
+                  
+                  // Stream thinking text in chunks for consistency with Round 1
+                  const chunkSize = 20; // Characters per chunk
+                  for (let i = 0; i < thinkingText.length; i += chunkSize) {
+                    const chunk = thinkingText.slice(i, i + chunkSize);
+                    res.write(`data: ${JSON.stringify({ type: 'thinking_chunk', content: chunk })}\n\n`);
+                    // Small delay to make streaming visible (10ms per chunk)
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                  }
+                  
+                  // Send final thinking_done event with tool calls
                   res.write(`data: ${JSON.stringify({ 
-                    type: 'thinking',
+                    type: 'thinking_done',
                     thinking: {
                       thinking: thinkingText,
                       action: '',
@@ -422,13 +433,40 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
               }
             }
             
-            // Send final response
+            // Send final response - check if it's thinking or final chat
             const finalContent = currentResponse.content || '';
+            const isFinalThinking = finalContent.trim().startsWith('[THINKING]');
+            const finalChatContent = isFinalThinking 
+              ? finalContent.replace(/^\[THINKING\]\s*/i, '').trim()
+              : finalContent;
+
+            // If it's final thinking, send as thinking event
+            if (isFinalThinking && finalChatContent.length > 0) {
+              res.write(`data: ${JSON.stringify({ 
+                type: 'thinking',
+                thinking: {
+                  thinking: finalChatContent,
+                  action: '',
+                  toolCalls: []
+                }
+              })}\n\n`);
+            }
+
+            // Stream the final chat response in chunks (simulate streaming for better UX)
+            if (!isFinalThinking && finalChatContent.length > 0) {
+              const chunkSize = 10; // Characters per chunk
+              for (let i = 0; i < finalChatContent.length; i += chunkSize) {
+                const chunk = finalChatContent.slice(i, i + chunkSize);
+                res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
+                // Small delay to make streaming visible (10ms per chunk)
+                await new Promise(resolve => setTimeout(resolve, 10));
+              }
+            }
 
             await conversationService.addMessage(
               conversation.id,
               'assistant',
-              finalContent,
+              finalChatContent,
               { model: selectedModel, usage: currentResponse.usage, toolsUsed: allToolCalls }
             );
             
@@ -443,7 +481,7 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
 
             res.write(`data: ${JSON.stringify({ 
               type: 'done', 
-              message: finalContent,
+              message: finalChatContent,
               conversationId: conversation.id,
               mcpEnabled: mcpConnected,
               toolsUsed: allToolCalls
