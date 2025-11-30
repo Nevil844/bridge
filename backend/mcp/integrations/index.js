@@ -10,6 +10,7 @@ const ZerodhaIntegration = require('./zerodha.js');
 const SpotifyIntegration = require('./spotify.js');
 const ZomatoIntegration = require('./zomato.js');
 const JiraIntegration = require('./jira.js');
+const SlackIntegration = require('./slack.js');
 
 // Available integrations
 // Add new integrations here as you create them
@@ -63,14 +64,14 @@ const integrations = {
     icon: 'https://wac-cdn.atlassian.com/assets/img/favicons/atlassian/favicon-32x32.png',
     authType: 'oauth', // Uses Atlassian Remote MCP Server with OAuth (recommended)
   },
+  slack: {
+    class: SlackIntegration,
+    name: 'Slack',
+    description: 'Send messages, read channels, and manage your workspace',
+    icon: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
+    authType: 'oauth',
+  },
   // Future integrations:
-  // slack: {
-  //   class: SlackIntegration,
-  //   name: 'Slack',
-  //   description: 'Send messages, read channels, and manage your workspace',
-  //   icon: 'https://...',
-  //   authType: 'oauth',
-  // },
 };
 
 module.exports = integrations;

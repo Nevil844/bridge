@@ -22,12 +22,9 @@ const GENERIC_QUESTIONS = [
 // Integration-specific questions
 const INTEGRATION_QUESTIONS = {
   spotify: [
-    "Play today's top song",
-    "What's my most played song this week?",
+    "Play Night Changes by One Direction",
     "Create a workout playlist",
-    "Play some relaxing music",
-    "What's trending in music right now?",
-    "Show me my Spotify playlists",
+
   ],
   github: [
     "Show me my recent commits",
@@ -76,6 +73,18 @@ const INTEGRATION_QUESTIONS = {
     "Find restaurants by cuisine",
     "What's popular in my area?",
     "Show me restaurant reviews",
+  ],
+  slack: [
+    "Show me my Slack channels",
+    "What messages are in the general channel?",
+    "Send a message to the team",
+    "Who are the members in my workspace?",
+    "Search for messages about the project",
+    "Show me my direct messages",
+    "What's happening in the announcements channel?",
+    "List all public channels",
+    "Find recent messages from last week",
+    "Show me unread messages",
   ],
 };
 

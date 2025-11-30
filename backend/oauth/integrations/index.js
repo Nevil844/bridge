@@ -10,6 +10,7 @@ const ZerodhaOAuth = require('./zerodha.js');
 const SpotifyOAuth = require('./spotify.js');
 const ZomatoOAuth = require('./zomato.js');
 const JiraOAuth = require('./jira.js');
+const SlackOAuth = require('./slack.js');
 
 // Available OAuth integrations
 const oauthIntegrations = {
@@ -20,8 +21,8 @@ const oauthIntegrations = {
   spotify: SpotifyOAuth,
   zomato: ZomatoOAuth,
   jira: JiraOAuth,
+  slack: SlackOAuth,
   // Future OAuth integrations:
-  // slack: SlackOAuth,
   // microsoft: MicrosoftOAuth,
 };
 
