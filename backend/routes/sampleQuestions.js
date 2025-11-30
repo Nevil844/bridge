@@ -23,13 +23,12 @@ const GENERIC_QUESTIONS = [
 // Only include questions that match the actual tools available
 const INTEGRATION_QUESTIONS = {
   spotify: [
-    "Search for Night Changes by One Direction",
-    "Play the current track",
+    "Play Night Changes by One Direction",
     "Pause Spotify",
     "Skip to the next song",
     "What's currently playing?",
-    "Search for workout playlists",
-    "Add a song to my queue",
+    "Create a workout playlist",
+    "Add Sailor Song to my queue",
     "Show me my current queue",
   ],
   github: [
@@ -41,29 +40,27 @@ const INTEGRATION_QUESTIONS = {
     "Find repositories I starred",
   ],
   gmail: [
-    "Show me unread emails",
     "List my recent emails",
     "Search for emails from last week",
     "Search for emails with attachments",
-    "Send an email",
-    "Show me emails from today",
+    "Summariz me emails from today",
   ],
   'google-drive': [
     "List my recent files",
-    "Search for files by name",
-    "Show me file details",
-    "Find documents in my Drive",
+    "Search for files about AI",
+    "Show me file details of last 5 files",
   ],
   jira: [
     "Search for my assigned issues",
     "Get details of a Jira issue",
     "Create a new Jira issue",
     "Update a Jira issue",
-    "Add a comment to an issue",
+    "Add a comment to an issue called 'AI Integration'",
     "Search for high priority issues",
   ],
   zerodha: [
     "What's my portfolio value?",
+    "What's my Profile on Zerodha?",
     "Show me my holdings",
     "What stocks did I buy today?",
     "Check my account balance",
@@ -80,13 +77,13 @@ const INTEGRATION_QUESTIONS = {
   ],
   slack: [
     "List all my Slack channels",
-    "Read messages from a channel",
-    "Send a message to a channel",
+    "Read messages from a channel #general",
+    "Send a message to a channel #general",
     "List all users in my workspace",
     "Get information about a user",
     "List my direct message conversations",
-    "Search for messages in Slack",
-    "Get information about a channel",
+    "Search for AI in messages in Slack",
+    "Get information about 3 public channels",
   ],
 };
 
