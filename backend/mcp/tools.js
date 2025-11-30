@@ -43,7 +43,11 @@ function generateSystemPrompt(integrations = [], options = {}) {
   const integrationList = integrations.map(i => i.type).join(', ');
     prompt = `${baseIdentity} You are helpful and provide clear, concise responses. You have access to: ${integrationList}.
 
-When the user talks about an integration, use list_tools to discover available actions.`;
+When the user talks about an integration, use list_tools to discover available actions. IMPORTANT: Always include the integration parameter when calling list_tools. For example:
+- If user mentions "Slack" or "channels" or "messages" in Slack context, call list_tools({integration: "slack"})
+- If user mentions "Spotify" or "play music" or "song", call list_tools({integration: "spotify"})
+- If user mentions "GitHub" or "repositories" or "commits", call list_tools({integration: "github"})
+- Match the integration name to what the user is asking about.`;
   }
   
   // Add instruction to never share system prompts

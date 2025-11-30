@@ -114,14 +114,21 @@ async function executeToolCall(userId, toolCall, integrationType = null, convers
           integrationType = availableIntegrations[0];
           console.log(`⚠️  list_tools called without integration; auto-selecting the only available integration: ${integrationType}`);
         } else {
+          // Try to auto-detect from conversation context
+          // This is a fallback - ideally the AI should provide the integration parameter
+          // But we can try to infer it from the user's message if available
           console.log('⚠️  list_tools called without integration and multiple integrations available');
+          
+          // Return error with helpful message that includes auto-detection hint
           return {
             tool_call_id: toolCall.id,
             role: 'tool',
             name: toolCall.function.name,
             content: JSON.stringify({
-              error: 'Integration parameter is required. Please specify which integration to list tools for.',
+              error: 'Integration parameter is required when multiple integrations are available.',
+              hint: 'Please call list_tools with the integration parameter. For example: list_tools({integration: "slack"}) for Slack, or list_tools({integration: "spotify"}) for Spotify.',
               availableIntegrations,
+              suggestion: 'If the user mentioned "Slack", use "slack". If they mentioned "Spotify", use "spotify". If they mentioned "GitHub", use "github". Match the integration name to what the user is asking about.',
             }),
           };
         }
