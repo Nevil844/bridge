@@ -73,10 +73,6 @@ class SlackOAuth {
         throw new Error(response.data.error || 'Failed to exchange code for Slack access token');
       }
 
-      // Debug: Log ENTIRE Slack OAuth response
-      console.log(`🔐 Slack OAuth exchange - FULL RESPONSE OBJECT:`);
-      console.log(JSON.stringify(response.data, null, 2));
-      
       // Slack OAuth v2 can return tokens in different locations:
       // 1. User token: response.data.authed_user.access_token
       // 2. Bot token: response.data.access_token (for bot scopes)
@@ -85,8 +81,7 @@ class SlackOAuth {
       
       if (!accessToken) {
         console.error(`❌ No access token found in Slack OAuth response!`);
-        console.error(`   - authed_user.access_token: ${response.data.authed_user?.access_token || 'missing'}`);
-        console.error(`   - access_token: ${response.data.access_token || 'missing'}`);
+        console.error(`   - Full response: ${JSON.stringify(response.data, null, 2)}`);
         throw new Error('No access token in Slack OAuth response');
       }
       
@@ -98,14 +93,6 @@ class SlackOAuth {
         userId: response.data.authed_user?.id,
         expiresIn: null, // Slack tokens don't expire by default
       };
-      
-      // Debug: Log what we're returning
-      console.log(`🔐 Slack OAuth returning tokenData:`);
-      console.log(`   - Has accessToken: ${!!tokenData.accessToken}`);
-      console.log(`   - AccessToken preview: ${tokenData.accessToken ? tokenData.accessToken.substring(0, 15) + '...' : 'missing'}`);
-      console.log(`   - Has refreshToken: ${!!tokenData.refreshToken}`);
-      console.log(`   - Has userId: ${!!tokenData.userId}`);
-      console.log(`   - TokenData keys: ${Object.keys(tokenData).join(', ')}`);
       
       return tokenData;
     } catch (error) {
