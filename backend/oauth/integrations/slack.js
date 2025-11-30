@@ -73,15 +73,23 @@ class SlackOAuth {
         throw new Error(response.data.error || 'Failed to exchange code for Slack access token');
       }
 
-      // Slack OAuth v2 can return tokens in different locations:
-      // 1. User token: response.data.authed_user.access_token
-      // 2. Bot token: response.data.access_token (for bot scopes)
-      // 3. Sometimes both
-      const accessToken = response.data.authed_user?.access_token || response.data.access_token;
+      // Print FULL response to see exactly what Slack returns
+      console.log(`🔐 Slack OAuth FULL RESPONSE:`);
+      console.log(JSON.stringify(response.data, null, 2));
       
-      if (!accessToken) {
-        console.error(`❌ No access token found in Slack OAuth response!`);
-        console.error(`   - Full response: ${JSON.stringify(response.data, null, 2)}`);
+      // Extract token based on actual response structure
+      let accessToken = null;
+      
+      // Check all possible locations for the token
+      if (response.data.authed_user?.access_token) {
+        accessToken = response.data.authed_user.access_token;
+        console.log(`✅ Found USER token in authed_user.access_token: ${accessToken.substring(0, 15)}...`);
+      } else if (response.data.access_token) {
+        accessToken = response.data.access_token;
+        console.log(`✅ Found token in access_token: ${accessToken.substring(0, 15)}...`);
+      } else {
+        console.error(`❌ No access token found in any expected location!`);
+        console.error(`   - Checked: authed_user.access_token, access_token`);
         throw new Error('No access token in Slack OAuth response');
       }
       
