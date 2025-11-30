@@ -3,8 +3,9 @@ import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { formatTokenCount, getUserUsage, getWarningColor, type TokenUsage } from '@/services/usage';
+import * as Clipboard from 'expo-clipboard';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Modal, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Plan {
@@ -62,6 +63,9 @@ export default function PricingScreen() {
   const [isUpgrading, setIsUpgrading] = useState(false);
   const [usage, setUsage] = useState<TokenUsage | null>(null);
   const [isLoadingUsage, setIsLoadingUsage] = useState(true);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+  const [feedback, setFeedback] = useState('');
 
   // Get plan tier for comparison (higher number = higher tier)
   const getPlanTier = (planId: string): number => {
@@ -93,7 +97,11 @@ export default function PricingScreen() {
   const handleUpgrade = async (plan: Plan) => {
     const currentPlan = user?.plan || 'free';
     if (plan.id === currentPlan) {
-      Alert.alert('Current Plan', `You are already on the ${plan.name} plan.`);
+      if (Platform.OS === 'web') {
+        alert(`You are already on the ${plan.name} plan.`);
+      } else {
+        Alert.alert('Current Plan', `You are already on the ${plan.name} plan.`);
+      }
       return;
     }
 
@@ -101,35 +109,140 @@ export default function PricingScreen() {
     const planTier = getPlanTier(plan.id);
     const isUpgrade = planTier > currentTier;
 
-    // Show confirmation
-    Alert.alert(
-      `${isUpgrade ? 'Upgrade' : 'Change'} to ${plan.name}?`,
-      `You'll ${isUpgrade ? 'be charged' : 'get'} ${plan.price === '$0' ? 'free' : plan.price + '/month'} and get ${plan.tokens} tokens per month.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: isUpgrade ? 'Upgrade' : 'Change Plan', onPress: () => processUpgrade(plan) },
-      ]
-    );
+    // Show confirmation - use web-compatible alert
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(
+        `${isUpgrade ? 'Upgrade' : 'Change'} to ${plan.name}?\n\n` +
+        `You'll ${isUpgrade ? 'be charged' : 'get'} ${plan.price === '$0' ? 'free' : plan.price + '/month'} and get ${plan.tokens} tokens per month.`
+      );
+      if (confirmed) {
+        processUpgrade(plan);
+      }
+    } else {
+      Alert.alert(
+        `${isUpgrade ? 'Upgrade' : 'Change'} to ${plan.name}?`,
+        `You'll ${isUpgrade ? 'be charged' : 'get'} ${plan.price === '$0' ? 'free' : plan.price + '/month'} and get ${plan.tokens} tokens per month.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: isUpgrade ? 'Upgrade' : 'Change Plan', onPress: () => processUpgrade(plan) },
+        ]
+      );
+    }
   };
 
   const processUpgrade = async (plan: Plan) => {
+    // For free plan, skip the LinkedIn flow
+    if (plan.id === 'free') {
+      if (Platform.OS === 'web') {
+        alert('You are already on or switching to the free plan. No action needed.');
+      } else {
+        Alert.alert('Free Plan', 'You are already on or switching to the free plan. No action needed.');
+      }
+      return;
+    }
+
+    // For paid plans, show feedback modal
+    setSelectedPlan(plan);
+    setShowFeedbackModal(true);
+  };
+
+  const handleSendLinkedInMessage = async () => {
+    if (!selectedPlan || !user) return;
+
     try {
       setIsUpgrading(true);
       
-      // TODO: Integrate with payment processor (Stripe, etc.)
-      // For now, just show a placeholder
+      // Create the message
+      const userName = user.name || user.email || 'User';
+      const userEmail = user.email || 'Not provided';
+      const currentPlan = user.plan || 'free';
       
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API call
+      // Determine if it's an upgrade or plan change
+      const currentTier = getPlanTier(currentPlan);
+      const requestedTier = getPlanTier(selectedPlan.id);
+      const isUpgrade = requestedTier > currentTier;
+      const action = isUpgrade ? 'upgrade' : 'change';
       
-      Alert.alert(
-        '🎉 Coming Soon!',
-        `Payment integration is under development.\n\nYou selected: ${plan.name} plan (${plan.price}/month)\n\nFor now, you can continue using the free plan.`,
-        [{ text: 'OK' }]
-      );
+      const message = `Hi Nevil,
+
+I would like to ${action} my Bridge AI plan to ${selectedPlan.name.toUpperCase()}.
+
+User Details:
+- Name: ${userName}
+- Email: ${userEmail}
+- Current Plan: ${currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1)}
+- Requested Plan: ${selectedPlan.name} (${selectedPlan.price}/month - ${selectedPlan.tokens} tokens)
+
+${feedback ? `Feedback/Notes:\n${feedback}\n\n` : ''}Please ${action} my plan when convenient.
+
+Thank you!`;
+
+      // LinkedIn profile URL
+      const linkedInUrl = 'https://www.linkedin.com/in/nevil-jobanputra/';
+      
+      // Copy message to clipboard first
+      await Clipboard.setStringAsync(message);
+
+      // Show instructions FIRST, then open LinkedIn
+      if (Platform.OS === 'web') {
+        const shouldOpen = window.confirm(
+          `Message Copied to Clipboard! ✅\n\nYour upgrade request message has been copied.\n\nNext steps:\n1. Click OK to open Nevil's LinkedIn profile\n2. Click "Message" on his profile\n3. Paste the message (Ctrl+V / Cmd+V)\n4. Send it to request your plan upgrade\n\nClick OK to open LinkedIn now.`
+        );
+        
+        if (shouldOpen) {
+          // Open LinkedIn after user confirms
+          if (typeof window !== 'undefined') {
+            window.open(linkedInUrl, '_blank');
+          }
+          
+          // Show message view option
+          const viewMessage = window.confirm('Would you like to view the message you copied?');
+          if (viewMessage) {
+            alert('Your Message:\n\n' + message);
+          }
+        }
+      } else {
+        Alert.alert(
+          '📱 Message Copied!',
+          `Your upgrade request message has been copied to clipboard.\n\nNext steps:\n1. Click "Open LinkedIn" below\n2. Click "Message" on Nevil's profile\n3. Paste the message\n4. Send it to request your plan upgrade`,
+          [
+            { 
+              text: 'View Message', 
+              onPress: () => {
+                Alert.alert('Your Message', message, [
+                  { text: 'OK' }
+                ]);
+              }
+            },
+            { 
+              text: 'Open LinkedIn', 
+              onPress: async () => {
+                // Open LinkedIn after user confirms
+                const linkedInAppUrl = 'linkedin://in/nevil-jobanputra';
+                const canOpenApp = await Linking.canOpenURL(linkedInAppUrl);
+                
+                if (canOpenApp) {
+                  await Linking.openURL(linkedInAppUrl);
+                } else {
+                  await Linking.openURL(linkedInUrl);
+                }
+              }
+            },
+            { text: 'Done', onPress: () => setShowFeedbackModal(false) }
+          ]
+        );
+      }
+
+      setShowFeedbackModal(false);
+      setFeedback('');
       
     } catch (error) {
-      console.error('Upgrade error:', error);
-      Alert.alert('Error', 'Failed to process upgrade. Please try again.');
+      console.error('Error opening LinkedIn:', error);
+      if (Platform.OS === 'web') {
+        alert('Could not open LinkedIn. Please manually message Nevil at https://www.linkedin.com/in/nevil-jobanputra/');
+      } else {
+        Alert.alert('Error', 'Could not open LinkedIn. Please manually message Nevil at https://www.linkedin.com/in/nevil-jobanputra/');
+      }
     } finally {
       setIsUpgrading(false);
     }
@@ -314,6 +427,69 @@ export default function PricingScreen() {
           </ThemedText>
         </View>
       </ScrollView>
+
+      {/* Feedback Modal */}
+      <Modal
+        visible={showFeedbackModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setShowFeedbackModal(false);
+          setFeedback('');
+        }}>
+        <View style={styles.modalOverlay}>
+          <View style={[
+            styles.modalContent,
+            { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' }
+          ]}>
+            <ThemedText style={styles.modalTitle}>
+              Request Plan Upgrade
+            </ThemedText>
+            <ThemedText style={styles.modalSubtitle}>
+              We'll open LinkedIn to message Nevil. Add any feedback or notes below (optional):
+            </ThemedText>
+            
+            <TextInput
+              style={[
+                styles.feedbackInput,
+                {
+                  backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
+                  color: isDark ? '#FFFFFF' : '#000000',
+                }
+              ]}
+              placeholder="Any feedback, questions, or special requests?"
+              placeholderTextColor={isDark ? '#888' : '#999'}
+              multiline
+              numberOfLines={4}
+              value={feedback}
+              onChangeText={setFeedback}
+            />
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => {
+                  setShowFeedbackModal(false);
+                  setFeedback('');
+                }}>
+                <ThemedText style={styles.modalButtonText}>Cancel</ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonSend]}
+                onPress={handleSendLinkedInMessage}
+                disabled={isUpgrading}>
+                {isUpgrading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <ThemedText style={[styles.modalButtonText, { color: '#FFFFFF' }]}>
+                    Open LinkedIn
+                  </ThemedText>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ThemedView>
   );
 }
@@ -528,6 +704,59 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 24,
+    paddingBottom: 40,
+    maxHeight: '80%',
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    opacity: 0.7,
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  feedbackInput: {
+    borderWidth: 1,
+    borderColor: 'rgba(128, 128, 128, 0.3)',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 15,
+    minHeight: 100,
+    textAlignVertical: 'top',
+    marginBottom: 24,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  modalButtonCancel: {
+    backgroundColor: 'rgba(128, 128, 128, 0.2)',
+  },
+  modalButtonSend: {
+    backgroundColor: '#4a9eff',
+  },
+  modalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 
