@@ -40,7 +40,7 @@ class SlackOAuth {
   getAuthUrl(state) {
     const params = new URLSearchParams({
       client_id: this.clientId,
-      scope: this.scopes,
+      user_scope: this.scopes,  // Use user_scope to get user token (xoxp-), not bot token (xoxb-)
       redirect_uri: this.redirectUri,
       state: state,
     });
@@ -73,24 +73,28 @@ class SlackOAuth {
         throw new Error(response.data.error || 'Failed to exchange code for Slack access token');
       }
 
-      // Print FULL response to see exactly what Slack returns
-      console.log(`🔐 Slack OAuth FULL RESPONSE:`);
-      console.log(JSON.stringify(response.data, null, 2));
-      
       // Extract token based on actual response structure
-      let accessToken = null;
+      // Slack OAuth v2 returns:
+      // - Bot token: response.data.access_token (always present)
+      // - User token: response.data.authed_user.access_token (only if user scopes granted)
+      const userToken = response.data.authed_user?.access_token;
+      const botToken = response.data.access_token;
       
-      // Check all possible locations for the token
-      if (response.data.authed_user?.access_token) {
-        accessToken = response.data.authed_user.access_token;
-        console.log(`✅ Found USER token in authed_user.access_token: ${accessToken.substring(0, 15)}...`);
-      } else if (response.data.access_token) {
-        accessToken = response.data.access_token;
-        console.log(`✅ Found token in access_token: ${accessToken.substring(0, 15)}...`);
-      } else {
-        console.error(`❌ No access token found in any expected location!`);
-        console.error(`   - Checked: authed_user.access_token, access_token`);
+      // Use user token if available (for sending as user), otherwise use bot token
+      const accessToken = userToken || botToken;
+      
+      if (!accessToken) {
+        console.error(`❌ No access token found in Slack OAuth response!`);
+        console.error(`   - Full response: ${JSON.stringify(response.data, null, 2)}`);
         throw new Error('No access token in Slack OAuth response');
+      }
+      
+      if (userToken) {
+        console.log(`✅ Using USER token (xoxp-*) - messages will be sent as the user`);
+      } else {
+        console.log(`⚠️  Using BOT token (xoxb-*) - messages will be sent as a bot`);
+        console.log(`   - To send as user, ensure User Token Scopes are configured in Slack app`);
+        console.log(`   - Bot token requires bot to be added to channels before sending messages`);
       }
       
       const tokenData = {
