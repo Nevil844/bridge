@@ -20,11 +20,17 @@ const GENERIC_QUESTIONS = [
 ];
 
 // Integration-specific questions
+// Only include questions that match the actual tools available
 const INTEGRATION_QUESTIONS = {
   spotify: [
-    "Play Night Changes by One Direction",
-    "Create a workout playlist",
-
+    "Search for Night Changes by One Direction",
+    "Play the current track",
+    "Pause Spotify",
+    "Skip to the next song",
+    "What's currently playing?",
+    "Search for workout playlists",
+    "Add a song to my queue",
+    "Show me my current queue",
   ],
   github: [
     "Show me my recent commits",
@@ -36,27 +42,25 @@ const INTEGRATION_QUESTIONS = {
   ],
   gmail: [
     "Show me unread emails",
-    "What emails did I receive today?",
+    "List my recent emails",
     "Search for emails from last week",
-    "Show me important emails",
-    "What's in my inbox?",
-    "Find emails with attachments",
+    "Search for emails with attachments",
+    "Send an email",
+    "Show me emails from today",
   ],
   'google-drive': [
-    "Show me my recent files",
-    "What files did I upload today?",
-    "List my Google Drive folders",
-    "Find documents I shared",
-    "Show me my starred files",
-    "What's in my Drive?",
+    "List my recent files",
+    "Search for files by name",
+    "Show me file details",
+    "Find documents in my Drive",
   ],
   jira: [
-    "Show me my assigned tasks",
-    "What are my open Jira tickets?",
-    "List issues in my current sprint",
-    "Show me high priority issues",
-    "What's my Jira activity?",
-    "Find bugs assigned to me",
+    "Search for my assigned issues",
+    "Get details of a Jira issue",
+    "Create a new Jira issue",
+    "Update a Jira issue",
+    "Add a comment to an issue",
+    "Search for high priority issues",
   ],
   zerodha: [
     "What's my portfolio value?",
@@ -75,16 +79,14 @@ const INTEGRATION_QUESTIONS = {
     "Show me restaurant reviews",
   ],
   slack: [
-    "Show me my Slack channels",
-    "What messages are in the general channel?",
-    "Send a message to the team",
-    "Who are the members in my workspace?",
-    "Search for messages about the project",
-    "Show me my direct messages",
-    "What's happening in the announcements channel?",
-    "List all public channels",
-    "Find recent messages from last week",
-    "Show me unread messages",
+    "List all my Slack channels",
+    "Read messages from a channel",
+    "Send a message to a channel",
+    "List all users in my workspace",
+    "Get information about a user",
+    "List my direct message conversations",
+    "Search for messages in Slack",
+    "Get information about a channel",
   ],
 };
 
