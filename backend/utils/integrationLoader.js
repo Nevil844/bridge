@@ -33,11 +33,16 @@ async function ensureUserIntegrationsLoaded(userId) {
         }
         
         try {
-          await mcpManager.addIntegration(userId, integration.provider, integration.credentials);
-          loadedProviders.add(integration.provider);
-          console.log(`✅ Loaded ${integration.provider} integration for user ${userId}`);
+          const success = await mcpManager.addIntegration(userId, integration.provider, integration.credentials);
+          if (success) {
+            loadedProviders.add(integration.provider);
+            console.log(`✅ Loaded ${integration.provider} integration for user ${userId}`);
+          } else {
+            console.error(`⚠️  Failed to connect ${integration.provider} integration (connection returned false)`);
+          }
         } catch (error) {
           console.error(`⚠️  Failed to load ${integration.provider} integration:`, error.message);
+          console.error(`⚠️  Error stack:`, error.stack);
         }
       }
     }

@@ -76,9 +76,11 @@ class MCPManager {
     // Only invalidate if the integration was successfully connected
     if (connected) {
       this.invalidateToolsCache(userId);
+      return true;
+    } else {
+      // Connection failed - return false so caller knows it didn't work
+      return false;
     }
-
-    return true;
   }
 
   /**
@@ -132,6 +134,8 @@ class MCPManager {
       
       // Pass userId in config (needed for Spotify cache file)
       const connectionConfig = { ...config, userId };
+      
+      console.log(`  🔌 Connecting to ${type} integration for user ${userId}...`);
       const connection = await integration.connect(connectionConfig);
       
       // Store connection with integration instance
@@ -142,9 +146,11 @@ class MCPManager {
         userId,
       });
 
+      console.log(`  ✅ Successfully connected to ${type} integration`);
       return true;
     } catch (error) {
-      console.error(`Failed to connect ${type}:`, error.message);
+      console.error(`  ❌ Failed to connect ${type} integration:`, error.message);
+      console.error(`  ❌ Error stack:`, error.stack);
       return false;
     }
   }
