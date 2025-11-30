@@ -79,6 +79,11 @@ router.get('/callback', async (req, res) => {
     // Exchange code for access token
     const tokenData = await oauthHandler.exchangeCodeForToken(integrationType, authCode);
     
+    // Debug: Log what we got from OAuth
+    console.log(`🔐 OAuth callback for ${integrationType}:`);
+    console.log(`   - Token data type: ${typeof tokenData}`);
+    console.log(`   - Token data keys: ${typeof tokenData === 'object' ? Object.keys(tokenData || {}).join(', ') : 'N/A'}`);
+    
     // Handle different token formats (some integrations return just a string, others return an object)
     let config;
     if (typeof tokenData === 'string') {
@@ -91,8 +96,17 @@ router.get('/callback', async (req, res) => {
         userId: tokenData.userId,
         userName: tokenData.userName,
         email: tokenData.email,
+        // Include Slack-specific fields
+        teamId: tokenData.teamId,
+        teamName: tokenData.teamName,
       };
     }
+    
+    // Debug: Log what we're storing
+    console.log(`💾 Storing config for ${integrationType}:`);
+    console.log(`   - Config keys: ${Object.keys(config).join(', ')}`);
+    console.log(`   - Has token: ${!!config.token}`);
+    console.log(`   - Has accessToken: ${!!config.accessToken}`);
     
     // Save to database first (encrypted)
     await integrationService.storeIntegration(
