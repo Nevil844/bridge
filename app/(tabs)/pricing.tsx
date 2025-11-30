@@ -1,9 +1,9 @@
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/hooks/use-auth';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import React, { useState } from 'react';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { formatTokenCount, getUserUsage, getWarningColor, type TokenUsage } from '@/services/usage';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -27,12 +27,7 @@ const PLANS: Plan[] = [
     priceMonthly: 0,
     tokens: '200K',
     tokensCount: 200000,
-    features: [
-      '200K tokens/month',
-      'Basic AI models',
-      'GitHub integration',
-      'Community support',
-    ],
+    features: [],
     color: '#888',
   },
   {
@@ -42,13 +37,7 @@ const PLANS: Plan[] = [
     priceMonthly: 20,
     tokens: '1.25M',
     tokensCount: 1250000,
-    features: [
-      '1.25M tokens/month',
-      'All AI models',
-      'All integrations',
-      'Priority support',
-      'Advanced features',
-    ],
+    features: [],
     color: '#4a9eff',
     popular: true,
   },
@@ -59,30 +48,8 @@ const PLANS: Plan[] = [
     priceMonthly: 48,
     tokens: '3M',
     tokensCount: 3000000,
-    features: [
-      '3M tokens/month',
-      'All Pro features',
-      'Custom integrations',
-      'API access',
-      'Team collaboration',
-    ],
+    features: [],
     color: '#ff8800',
-  },
-  {
-    id: 'enterprise',
-    name: 'Enterprise',
-    price: 'Custom',
-    priceMonthly: 0,
-    tokens: '10M+',
-    tokensCount: 10000000,
-    features: [
-      '10M+ tokens/month',
-      'Unlimited models',
-      'Custom deployment',
-      'SLA guarantee',
-      'Dedicated support',
-    ],
-    color: '#9c27b0',
   },
 ];
 
@@ -92,38 +59,55 @@ export default function PricingScreen() {
   const isDark = colorScheme === 'dark';
   const { user } = useAuth();
   
-  const [selectedPlan, setSelectedPlan] = useState<string>('free');
   const [isUpgrading, setIsUpgrading] = useState(false);
+  const [usage, setUsage] = useState<TokenUsage | null>(null);
+  const [isLoadingUsage, setIsLoadingUsage] = useState(true);
+
+  // Get plan tier for comparison (higher number = higher tier)
+  const getPlanTier = (planId: string): number => {
+    const tierMap: { [key: string]: number } = {
+      'free': 0,
+      'pro': 1,
+      'power': 2,
+    };
+    return tierMap[planId] || 0;
+  };
+
+  // Get button text based on plan comparison
+  const getButtonText = (plan: Plan): string => {
+    const currentPlan = user?.plan || 'free';
+    if (plan.id === currentPlan) {
+      return 'Current Plan';
+    }
+    
+    const currentTier = getPlanTier(currentPlan);
+    const planTier = getPlanTier(plan.id);
+    
+    if (planTier > currentTier) {
+      return 'Upgrade Now';
+    } else {
+      return 'Change Plan';
+    }
+  };
 
   const handleUpgrade = async (plan: Plan) => {
-    if (plan.id === 'enterprise') {
-      Alert.alert(
-        'Enterprise Plan',
-        'Contact our sales team for enterprise pricing and custom solutions.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Contact Sales', onPress: () => {
-            // TODO: Open contact form or email
-            Alert.alert('Coming Soon', 'Contact form will be available soon.');
-          }},
-        ]
-      );
-      return;
-    }
-
     const currentPlan = user?.plan || 'free';
     if (plan.id === currentPlan) {
       Alert.alert('Current Plan', `You are already on the ${plan.name} plan.`);
       return;
     }
 
+    const currentTier = getPlanTier(currentPlan);
+    const planTier = getPlanTier(plan.id);
+    const isUpgrade = planTier > currentTier;
+
     // Show confirmation
     Alert.alert(
-      `Upgrade to ${plan.name}?`,
-      `You'll be charged ${plan.price}/month and get ${plan.tokens} tokens per month.`,
+      `${isUpgrade ? 'Upgrade' : 'Change'} to ${plan.name}?`,
+      `You'll ${isUpgrade ? 'be charged' : 'get'} ${plan.price === '$0' ? 'free' : plan.price + '/month'} and get ${plan.tokens} tokens per month.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Upgrade', onPress: () => processUpgrade(plan) },
+        { text: isUpgrade ? 'Upgrade' : 'Change Plan', onPress: () => processUpgrade(plan) },
       ]
     );
   };
@@ -151,6 +135,28 @@ export default function PricingScreen() {
     }
   };
 
+  // Fetch usage data
+  useEffect(() => {
+    const fetchUsage = async () => {
+      if (!user?.id) {
+        setIsLoadingUsage(false);
+        return;
+      }
+
+      try {
+        setIsLoadingUsage(true);
+        const usageData = await getUserUsage(user.id, user.plan || 'free');
+        setUsage(usageData);
+      } catch (error) {
+        console.error('Failed to fetch usage:', error);
+      } finally {
+        setIsLoadingUsage(false);
+      }
+    };
+
+    fetchUsage();
+  }, [user?.id, user?.plan]);
+
   return (
     <ThemedView style={styles.container}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
@@ -159,6 +165,74 @@ export default function PricingScreen() {
           <ThemedText style={styles.subtitle}>
             Upgrade for more tokens and advanced features
           </ThemedText>
+        </View>
+
+        {/* Usage Display */}
+        {user && (
+          <View style={[
+            styles.usageCard,
+            {
+              backgroundColor: isDark ? '#1C1C1E' : '#F2F2F7',
+              borderColor: usage ? getWarningColor(usage.warningLevel) : '#888',
+            }
+          ]}>
+            <View style={styles.usageHeader}>
+              <ThemedText style={styles.usageTitle}>Current Usage</ThemedText>
+              {usage && (
+                <ThemedText style={[styles.usagePlan, { textTransform: 'capitalize' }]}>
+                  {usage.plan} Plan
+                </ThemedText>
+              )}
+            </View>
+            
+            {isLoadingUsage ? (
+              <ActivityIndicator size="small" color={isDark ? '#FFFFFF' : '#000000'} style={styles.usageLoader} />
+            ) : usage ? (
+              <>
+                <View style={styles.usageStats}>
+                  <View style={styles.usageStatItem}>
+                    <ThemedText style={styles.usageStatValue}>
+                      {formatTokenCount(usage.totalTokens)}
+                    </ThemedText>
+                    <ThemedText style={styles.usageStatLabel}>Used</ThemedText>
+                  </View>
+                  <View style={styles.usageStatItem}>
+                    <ThemedText style={styles.usageStatValue}>
+                      {formatTokenCount(usage.limit)}
+                    </ThemedText>
+                    <ThemedText style={styles.usageStatLabel}>Limit</ThemedText>
+                  </View>
+                  <View style={styles.usageStatItem}>
+                    <ThemedText style={[styles.usageStatValue, { color: getWarningColor(usage.warningLevel) }]}>
+                      {formatTokenCount(usage.remainingTokens)}
+                    </ThemedText>
+                    <ThemedText style={styles.usageStatLabel}>Remaining</ThemedText>
+                  </View>
+                </View>
+                
+                <View style={styles.progressBarContainer}>
+                  <View style={[
+                    styles.progressBar,
+                    {
+                      width: `${Math.min(parseFloat(usage.usagePercentage), 100)}%`,
+                      backgroundColor: getWarningColor(usage.warningLevel),
+                    }
+                  ]} />
+                </View>
+                
+                <ThemedText style={styles.usagePercentage}>
+                  {usage.usagePercentage}% used
+                </ThemedText>
+              </>
+            ) : (
+              <ThemedText style={styles.usageError}>Unable to load usage data</ThemedText>
+            )}
+          </View>
+        )}
+
+        {/* Plans Section */}
+        <View style={styles.plansSection}>
+          <ThemedText style={styles.plansSectionTitle}>Available Plans</ThemedText>
         </View>
 
         {PLANS.map((plan) => (
@@ -199,19 +273,6 @@ export default function PricingScreen() {
               </View>
             </View>
 
-            <View style={styles.featuresContainer}>
-              {plan.features.map((feature, index) => (
-                <View key={index} style={styles.featureRow}>
-                  <IconSymbol
-                    name="checkmark.circle.fill"
-                    size={20}
-                    color={plan.color}
-                  />
-                  <ThemedText style={styles.featureText}>{feature}</ThemedText>
-                </View>
-              ))}
-            </View>
-
             <TouchableOpacity
               style={[
                 styles.upgradeButton,
@@ -227,9 +288,7 @@ export default function PricingScreen() {
                 <ActivityIndicator color={isDark ? '#FFFFFF' : '#000000'} />
               ) : (
                 <ThemedText style={styles.upgradeButtonText}>
-                  {plan.id === (user?.plan || 'free') ? 'Current Plan' : 
-                   plan.id === 'enterprise' ? 'Contact Sales' : 
-                   'Upgrade Now'}
+                  {getButtonText(plan)}
                 </ThemedText>
               )}
             </TouchableOpacity>
@@ -395,6 +454,80 @@ const styles = StyleSheet.create({
     fontSize: 13,
     opacity: 0.5,
     textAlign: 'center',
+  },
+  usageCard: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 2,
+  },
+  usageHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  usageTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  usagePlan: {
+    fontSize: 14,
+    opacity: 0.7,
+    fontWeight: '600',
+  },
+  usageLoader: {
+    paddingVertical: 20,
+  },
+  usageStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 16,
+  },
+  usageStatItem: {
+    alignItems: 'center',
+  },
+  usageStatValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  usageStatLabel: {
+    fontSize: 12,
+    opacity: 0.6,
+  },
+  progressBarContainer: {
+    height: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressBar: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  usagePercentage: {
+    fontSize: 12,
+    opacity: 0.7,
+    textAlign: 'center',
+  },
+  usageError: {
+    fontSize: 14,
+    opacity: 0.6,
+    textAlign: 'center',
+    paddingVertical: 20,
+  },
+  plansSection: {
+    marginHorizontal: 20,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  plansSectionTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 8,
   },
 });
 
