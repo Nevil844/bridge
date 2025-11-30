@@ -60,17 +60,17 @@ class SlackIntegration {
    * Credentials are already decrypted by IntegrationService
    */
   async connect(config) {
-    if (!config || !config.token) {
+    const accessToken = config?.token || config?.accessToken;
+    
+    if (!accessToken) {
       throw new Error('Slack access token is required');
     }
 
-    const accessToken = config.token;
     const userId = config.userId || 'default-user';
 
     // Test connection with auth.test
     try {
-      const authData = await this.makeRequest('POST', '/auth.test', accessToken);
-      console.log(`✅ Slack connection verified for user ${userId} (team: ${authData.team})`);
+      await this.makeRequest('POST', '/auth.test', accessToken);
     } catch (error) {
       throw new Error(`Failed to verify Slack connection: ${error.message}`);
     }

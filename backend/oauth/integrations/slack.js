@@ -73,37 +73,19 @@ class SlackOAuth {
         throw new Error(response.data.error || 'Failed to exchange code for Slack access token');
       }
 
-      // Extract token based on actual response structure
-      // Slack OAuth v2 returns:
-      // - Bot token: response.data.access_token (always present)
-      // - User token: response.data.authed_user.access_token (only if user scopes granted)
-      const userToken = response.data.authed_user?.access_token;
-      const botToken = response.data.access_token;
-      
-      // Use user token if available (for sending as user), otherwise use bot token
-      const accessToken = userToken || botToken;
+      const accessToken = response.data.authed_user?.access_token;
       
       if (!accessToken) {
-        console.error(`❌ No access token found in Slack OAuth response!`);
-        console.error(`   - Full response: ${JSON.stringify(response.data, null, 2)}`);
         throw new Error('No access token in Slack OAuth response');
-      }
-      
-      if (userToken) {
-        console.log(`✅ Using USER token (xoxp-*) - messages will be sent as the user`);
-      } else {
-        console.log(`⚠️  Using BOT token (xoxb-*) - messages will be sent as a bot`);
-        console.log(`   - To send as user, ensure User Token Scopes are configured in Slack app`);
-        console.log(`   - Bot token requires bot to be added to channels before sending messages`);
       }
       
       const tokenData = {
         accessToken: accessToken,
-        refreshToken: response.data.refresh_token || null, // Slack doesn't always provide refresh tokens
+        refreshToken: response.data.refresh_token || null,
         teamId: response.data.team?.id,
         teamName: response.data.team?.name,
         userId: response.data.authed_user?.id,
-        expiresIn: null, // Slack tokens don't expire by default
+        expiresIn: null,
       };
       
       return tokenData;
