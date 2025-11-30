@@ -73,14 +73,31 @@ class SlackOAuth {
         throw new Error(response.data.error || 'Failed to exchange code for Slack access token');
       }
 
-      return {
-        accessToken: response.data.authed_user.access_token,
+      // Debug: Log what Slack API returned
+      console.log(`🔐 Slack OAuth exchange response:`);
+      console.log(`   - Response OK: ${response.data.ok}`);
+      console.log(`   - Has authed_user: ${!!response.data.authed_user}`);
+      console.log(`   - Has authed_user.access_token: ${!!response.data.authed_user?.access_token}`);
+      console.log(`   - Has team: ${!!response.data.team}`);
+      console.log(`   - Response keys: ${Object.keys(response.data || {}).join(', ')}`);
+      
+      const tokenData = {
+        accessToken: response.data.authed_user?.access_token,
         refreshToken: response.data.refresh_token || null, // Slack doesn't always provide refresh tokens
-        teamId: response.data.team.id,
-        teamName: response.data.team.name,
-        userId: response.data.authed_user.id,
+        teamId: response.data.team?.id,
+        teamName: response.data.team?.name,
+        userId: response.data.authed_user?.id,
         expiresIn: null, // Slack tokens don't expire by default
       };
+      
+      // Debug: Log what we're returning
+      console.log(`🔐 Slack OAuth returning tokenData:`);
+      console.log(`   - Has accessToken: ${!!tokenData.accessToken}`);
+      console.log(`   - Has refreshToken: ${!!tokenData.refreshToken}`);
+      console.log(`   - Has userId: ${!!tokenData.userId}`);
+      console.log(`   - TokenData keys: ${Object.keys(tokenData).join(', ')}`);
+      
+      return tokenData;
     } catch (error) {
       console.error('Slack token exchange error:', error.response?.data || error.message);
       throw new Error('Failed to exchange code for Slack access token');
