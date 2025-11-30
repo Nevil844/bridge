@@ -140,27 +140,10 @@ class IntegrationService {
     });
 
     // Decrypt credentials for each integration
-    return integrations.map(int => {
-      const decrypted = this.decrypt(int.credentials);
-      
-      // Log what we got from DB (for debugging)
-      if (int.provider === 'slack') {
-        console.log(`📦 DB: Slack credentials from database:`);
-        console.log(`   - Encrypted (first 50 chars): ${int.credentials ? int.credentials.substring(0, 50) : 'null'}...`);
-        console.log(`   - Decrypted type: ${typeof decrypted}`);
-        console.log(`   - Decrypted keys: ${decrypted && typeof decrypted === 'object' ? Object.keys(decrypted).join(', ') : 'N/A'}`);
-        if (decrypted && typeof decrypted === 'object') {
-          console.log(`   - Has token: ${!!decrypted.token}`);
-          console.log(`   - Has accessToken: ${!!decrypted.accessToken}`);
-          console.log(`   - Full structure: ${JSON.stringify(decrypted, null, 2)}`);
-        }
-      }
-      
-      return {
-        ...int,
-        credentials: decrypted,
-      };
-    });
+    return integrations.map(int => ({
+      ...int,
+      credentials: this.decrypt(int.credentials),
+    }));
   }
 
   /**
