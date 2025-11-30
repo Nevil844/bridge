@@ -167,6 +167,39 @@ TOOLS:
 - Check conversation history and working memory for restaurant IDs, cell_id, and cart_id when adding items to cart
 
 The MCP server maintains its own OAuth session via mcp-remote`,
+
+    slack: `SLACK USAGE:
+- User is authenticated via OAuth
+- You can send messages, read channels, search messages, and manage workspace
+
+CHANNELS:
+- Use slack_list_channels to see all available channels
+- Use slack_read_channel_messages to read messages from a channel
+- Channel IDs start with "C" (e.g., C1234567890)
+- Use slack_get_channel_info to get channel details
+
+MESSAGING:
+- Use slack_send_message to send messages to channels or users
+- Channel parameter can be a channel ID (C...) or user ID (U...) for DMs
+- Use thread_ts parameter to reply to a specific message in a thread
+
+USERS:
+- Use slack_list_users to see all workspace members
+- Use slack_get_user_info to get details about a specific user
+- User IDs start with "U" (e.g., U1234567890)
+
+SEARCH:
+- Use slack_search_messages to search across the workspace
+- Search query supports Slack search syntax (e.g., "from:username hello")
+
+DIRECT MESSAGES:
+- Use slack_list_dms to see all DM conversations
+- Send DMs using slack_send_message with user ID as channel parameter
+
+IMPORTANT:
+- Always use channel/user IDs (not names) when calling tools
+- Check conversation history and working memory for channel IDs and user IDs you've already retrieved
+- When user mentions a channel name, first list channels to find the ID`,
   };
 
   if (!integrationType) {

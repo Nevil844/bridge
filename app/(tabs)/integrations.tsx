@@ -3,7 +3,6 @@ import { ThemedView } from '@/components/themed-view';
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { authenticatedFetch } from '@/utils/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -75,6 +74,14 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     connected: false,
     logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
     description: 'Control playback, manage playlists, and search music.',
+  },
+  {
+    id: 'slack',
+    name: 'Slack',
+    type: 'slack',
+    connected: false,
+    logo: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
+    description: 'Send messages, read channels, and manage your workspace.',
   },
 ];
 
@@ -171,14 +178,6 @@ const UPCOMING_INTEGRATIONS: Integration[] = [
     description: 'Pin content, manage boards, and discover visual inspiration.',
   },
   // B2B integrations
-  {
-    id: 'slack',
-    name: 'Slack',
-    type: 'slack',
-    connected: false,
-    logo: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
-    description: 'Send messages, manage channels, and automate team workflows.',
-  },
   {
     id: 'notion',
     name: 'Notion',
