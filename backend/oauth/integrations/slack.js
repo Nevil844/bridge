@@ -73,16 +73,25 @@ class SlackOAuth {
         throw new Error(response.data.error || 'Failed to exchange code for Slack access token');
       }
 
-      // Debug: Log what Slack API returned
-      console.log(`🔐 Slack OAuth exchange response:`);
-      console.log(`   - Response OK: ${response.data.ok}`);
-      console.log(`   - Has authed_user: ${!!response.data.authed_user}`);
-      console.log(`   - Has authed_user.access_token: ${!!response.data.authed_user?.access_token}`);
-      console.log(`   - Has team: ${!!response.data.team}`);
-      console.log(`   - Response keys: ${Object.keys(response.data || {}).join(', ')}`);
+      // Debug: Log ENTIRE Slack OAuth response
+      console.log(`🔐 Slack OAuth exchange - FULL RESPONSE OBJECT:`);
+      console.log(JSON.stringify(response.data, null, 2));
+      
+      // Slack OAuth v2 can return tokens in different locations:
+      // 1. User token: response.data.authed_user.access_token
+      // 2. Bot token: response.data.access_token (for bot scopes)
+      // 3. Sometimes both
+      const accessToken = response.data.authed_user?.access_token || response.data.access_token;
+      
+      if (!accessToken) {
+        console.error(`❌ No access token found in Slack OAuth response!`);
+        console.error(`   - authed_user.access_token: ${response.data.authed_user?.access_token || 'missing'}`);
+        console.error(`   - access_token: ${response.data.access_token || 'missing'}`);
+        throw new Error('No access token in Slack OAuth response');
+      }
       
       const tokenData = {
-        accessToken: response.data.authed_user?.access_token,
+        accessToken: accessToken,
         refreshToken: response.data.refresh_token || null, // Slack doesn't always provide refresh tokens
         teamId: response.data.team?.id,
         teamName: response.data.team?.name,
@@ -93,6 +102,7 @@ class SlackOAuth {
       // Debug: Log what we're returning
       console.log(`🔐 Slack OAuth returning tokenData:`);
       console.log(`   - Has accessToken: ${!!tokenData.accessToken}`);
+      console.log(`   - AccessToken preview: ${tokenData.accessToken ? tokenData.accessToken.substring(0, 15) + '...' : 'missing'}`);
       console.log(`   - Has refreshToken: ${!!tokenData.refreshToken}`);
       console.log(`   - Has userId: ${!!tokenData.userId}`);
       console.log(`   - TokenData keys: ${Object.keys(tokenData).join(', ')}`);
