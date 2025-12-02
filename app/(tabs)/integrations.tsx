@@ -88,7 +88,7 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     name: 'YouTube',
     type: 'youtube',
     connected: false,
-    logo: 'https://www.youtube.com/img/desktop/yt_1200.png',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/150px-YouTube_full-color_icon_%282017%29.svg.png',
     description: 'Search videos, manage playlists, and access your YouTube content.',
   },
 ];
@@ -144,14 +144,6 @@ const UPCOMING_INTEGRATIONS: Integration[] = [
     connected: false,
     logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/Instagram_logo_2016.svg/150px-Instagram_logo_2016.svg.png',
     description: 'Post photos, manage stories, and grow your social presence.',
-  },
-  {
-    id: 'youtube',
-    name: 'YouTube',
-    type: 'youtube',
-    connected: false,
-    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/150px-YouTube_full-color_icon_%282017%29.svg.png',
-    description: 'Upload videos, manage playlists, and track your channel analytics.',
   },
   {
     id: 'twitter',
