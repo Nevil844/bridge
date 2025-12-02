@@ -126,9 +126,9 @@ async function executeToolCall(userId, toolCall, integrationType = null, convers
             name: toolCall.function.name,
             content: JSON.stringify({
               error: 'Integration parameter is required when multiple integrations are available.',
-              hint: 'Please call list_tools with the integration parameter. For example: list_tools({integration: "slack"}) for Slack, or list_tools({integration: "spotify"}) for Spotify.',
+              hint: 'Please call list_tools with the integration parameter. For example: list_tools({integration: "slack"}) for Slack, list_tools({integration: "spotify"}) for Spotify, list_tools({integration: "youtube"}) for YouTube.',
               availableIntegrations,
-              suggestion: 'If the user mentioned "Slack", use "slack". If they mentioned "Spotify", use "spotify". If they mentioned "GitHub", use "github". Match the integration name to what the user is asking about.',
+              suggestion: 'If the user mentioned "Slack", use "slack". If they mentioned "Spotify", use "spotify". If they mentioned "GitHub", use "github". If they mentioned "YouTube" or "video" or "playlist", use "youtube". Match the integration name to what the user is asking about.',
             }),
           };
         }

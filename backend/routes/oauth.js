@@ -94,6 +94,8 @@ router.get('/callback', async (req, res) => {
         // Include Slack-specific fields
         teamId: tokenData.teamId,
         teamName: tokenData.teamName,
+        // Include YouTube-specific fields
+        username: tokenData.username,
       };
     }
     

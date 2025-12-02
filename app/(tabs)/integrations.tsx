@@ -83,6 +83,14 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     logo: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
     description: 'Send messages, read channels, and manage your workspace.',
   },
+  {
+    id: 'youtube',
+    name: 'YouTube',
+    type: 'youtube',
+    connected: false,
+    logo: 'https://www.youtube.com/img/desktop/yt_1200.png',
+    description: 'Search videos, manage playlists, and access your YouTube content.',
+  },
 ];
 
 const UPCOMING_INTEGRATIONS: Integration[] = [

@@ -11,6 +11,7 @@ const SpotifyIntegration = require('./spotify.js');
 const ZomatoIntegration = require('./zomato.js');
 const JiraIntegration = require('./jira.js');
 const SlackIntegration = require('./slack.js');
+const YouTubeIntegration = require('./youtube.js');
 
 // Available integrations
 // Add new integrations here as you create them
@@ -69,6 +70,13 @@ const integrations = {
     name: 'Slack',
     description: 'Send messages, read channels, and manage your workspace',
     icon: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
+    authType: 'oauth',
+  },
+  youtube: {
+    class: YouTubeIntegration,
+    name: 'YouTube',
+    description: 'Search videos, manage playlists, and access your YouTube content',
+    icon: 'https://www.youtube.com/img/desktop/yt_1200.png',
     authType: 'oauth',
   },
   // Future integrations:
