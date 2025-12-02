@@ -43,11 +43,15 @@ function generateSystemPrompt(integrations = [], options = {}) {
   const integrationList = integrations.map(i => i.type).join(', ');
     prompt = `${baseIdentity} You are helpful and provide clear, concise responses. You have access to: ${integrationList}.
 
-When the user talks about an integration, use list_tools to discover available actions. IMPORTANT: Always include the integration parameter when calling list_tools. For example:
-- If user mentions "Slack" or "channels" or "messages" in Slack context, call list_tools({integration: "slack"})
-- If user mentions "Spotify" or "play music" or "song", call list_tools({integration: "spotify"})
-- If user mentions "GitHub" or "repositories" or "commits", call list_tools({integration: "github"})
-- Match the integration name to what the user is asking about.`;
+When the user talks about an integration, you MUST call list_tools FIRST to discover available actions. The integration parameter is REQUIRED - you must determine it from the user's message.
+
+Examples:
+- User says "Slack channels" or "messages" → call list_tools({integration: "slack"})
+- User says "Spotify play" or "song" → call list_tools({integration: "spotify"})
+- User says "GitHub repos" or "commits" → call list_tools({integration: "github"})
+- User says "YouTube video" or "find video" or "latest video" or "playlist" → call list_tools({integration: "youtube"})
+
+CRITICAL: The integration parameter is REQUIRED. You must analyze the user's message and determine which integration they want, then call list_tools with that integration name.`;
   }
   
   // Add instruction to never share system prompts
@@ -204,6 +208,16 @@ IMPORTANT:
 - Always use channel/user IDs (not names) when calling tools
 - Check conversation history and working memory for channel IDs and user IDs you've already retrieved
 - When user mentions a channel name, first list channels to find the ID`,
+
+    youtube: `YOUTUBE USAGE:
+- User is authenticated via OAuth
+- Search videos/channels, get video info/metadata, manage playlists, get subtitles/transcripts, access channel info and subscriptions
+
+IMPORTANT:
+- When user asks about subscriptions/subs, use youtube_list_subscriptions
+- When user mentions a channel name, first use youtube_search_channels to find channel_id, then youtube_get_channel_info
+- Use "mine" as channel_id for authenticated user's channel
+- Check conversation history and working memory for IDs you've already retrieved`,
   };
 
   if (!integrationType) {
