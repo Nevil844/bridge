@@ -34,14 +34,41 @@ function generateSystemPrompt(integrations = [], options = {}) {
   
   let prompt = '';
   
+  // Get current date and time in IST (Indian Standard Time)
+  const now = new Date();
+  const istDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const currentDate = istDate.toISOString().split('T')[0]; // YYYY-MM-DD
+  const currentDateTimeIST = now.toLocaleString('en-US', { 
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
+  const currentTime = now.toLocaleTimeString('en-US', { 
+    hour: '2-digit', 
+    minute: '2-digit', 
+    timeZone: 'Asia/Kolkata',
+    timeZoneName: 'short'
+  });
+  
   // Base identity - always include
   const baseIdentity = 'Your name is Bridge AI and you are an assistant.';
   
   if (integrations.length === 0) {
-    prompt = `${baseIdentity} You are helpful and provide clear, concise responses.`;
+    prompt = `${baseIdentity} You are helpful and provide clear, concise responses.
+
+Current Date (IST): ${currentDate}
+Current Date & Time (IST): ${currentDateTimeIST}`;
   } else {
   const integrationList = integrations.map(i => i.type).join(', ');
     prompt = `${baseIdentity} You are helpful and provide clear, concise responses. You have access to: ${integrationList}.
+
+Current Date (IST): ${currentDate}
+Current Date & Time (IST): ${currentDateTimeIST}
 
 When the user talks about an integration, you MUST call list_tools FIRST to discover available actions. The integration parameter is REQUIRED - you must determine it from the user's message.
 
@@ -50,6 +77,7 @@ Examples:
 - User says "Spotify play" or "song" → call list_tools({integration: "spotify"})
 - User says "GitHub repos" or "commits" → call list_tools({integration: "github"})
 - User says "YouTube video" or "find video" or "latest video" or "playlist" → call list_tools({integration: "youtube"})
+- User says "Calendar events" or "meeting" or "schedule" or "appointment" → call list_tools({integration: "google-calendar"})
 
 CRITICAL: The integration parameter is REQUIRED. You must analyze the user's message and determine which integration they want, then call list_tools with that integration name.`;
   }
@@ -218,6 +246,47 @@ IMPORTANT:
 - When user mentions a channel name, first use youtube_search_channels to find channel_id, then youtube_get_channel_info
 - Use "mine" as channel_id for authenticated user's channel
 - Check conversation history and working memory for IDs you've already retrieved`,
+
+    google_calendar: `GOOGLE CALENDAR USAGE:
+- User is authenticated via OAuth
+- View events, create meetings, manage calendar, and schedule appointments
+
+CALENDARS:
+- Use list_calendars to see all available calendars (primary calendar and shared calendars)
+- Use "primary" as calendarId for the user's main calendar
+- Other calendar IDs come from list_calendars response
+
+EVENTS:
+- Use list_events to see events from a calendar (defaults to upcoming events from now)
+- Use get_upcoming_events for a quick view of upcoming events (defaults to next 7 days)
+- Use search_events to find events by keywords or date range
+- Use get_event to get detailed information about a specific event
+
+CREATING EVENTS:
+- Use create_event when user wants to schedule a meeting, add an event, or create an appointment
+- Required fields: calendarId (use "primary"), summary (event title), start, end
+- Start and end must be objects with either:
+  - dateTime: ISO 8601 string (e.g., "2024-01-15T10:00:00Z") for timed events
+  - date: date string (e.g., "2024-01-15") for all-day events
+- Include timeZone in start/end objects (e.g., "America/New_York", "Asia/Kolkata")
+- Use attendees array to add people: [{email: "user@example.com"}]
+- Use location field for event venue/address
+- Use reminders to set notifications (default is 15 min before)
+
+UPDATING/DELETING:
+- Use update_event to modify existing events (change time, title, location, attendees, etc.)
+- Use delete_event to remove events from calendar
+
+TIME FORMATS:
+- Always use ISO 8601 format for dateTime: "YYYY-MM-DDTHH:mm:ssZ" (UTC) or with timezone
+- For all-day events, use date format: "YYYY-MM-DD"
+- When user says "today", "tomorrow", "next week", etc., calculate the actual date/time
+- Default timeMin for list_events is now (current time) if not specified
+
+IMPORTANT:
+- Check conversation history and working memory for calendar IDs and event IDs you've already retrieved
+- When user mentions "my calendar", use "primary" as calendarId
+- Always include timeZone when creating/updating events with specific times`,
   };
 
   if (!integrationType) {

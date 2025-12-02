@@ -60,6 +60,14 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     description: 'Read, send, search, and manage your Gmail emails.',
   },
   {
+    id: 'google-calendar',
+    name: 'Google Calendar',
+    type: 'google-calendar',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Google_Calendar_icon_%282020%29.svg/512px-Google_Calendar_icon_%282020%29.svg.png?20221106121915',
+    description: 'View events, create meetings, manage your calendar, and schedule appointments.',
+  },
+  {
     id: 'zerodha',
     name: 'Zerodha',
     type: 'zerodha',

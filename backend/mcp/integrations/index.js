@@ -12,6 +12,7 @@ const ZomatoIntegration = require('./zomato.js');
 const JiraIntegration = require('./jira.js');
 const SlackIntegration = require('./slack.js');
 const YouTubeIntegration = require('./youtube.js');
+const GoogleCalendarIntegration = require('./google-calendar.js');
 
 // Available integrations
 // Add new integrations here as you create them
@@ -77,6 +78,13 @@ const integrations = {
     name: 'YouTube',
     description: 'Search videos, manage playlists, and access your YouTube content',
     icon: 'https://www.youtube.com/img/desktop/yt_1200.png',
+    authType: 'oauth',
+  },
+  'google-calendar': {
+    class: GoogleCalendarIntegration,
+    name: 'Google Calendar',
+    description: 'View events, create meetings, manage your calendar, and schedule appointments',
+    icon: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Google_Calendar_icon_%282020%29.svg/512px-Google_Calendar_icon_%282020%29.svg.png?20221106121915',
     authType: 'oauth',
   },
   // Future integrations:

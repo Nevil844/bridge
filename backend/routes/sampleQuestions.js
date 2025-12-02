@@ -59,6 +59,18 @@ const INTEGRATION_QUESTIONS = {
     "Search for files about 'AI' or 'machine learning'",
     "Show me the last 5 files I modified",
   ],
+  'google-calendar': [
+    "Show me my upcoming events for this week",
+    "What meetings do I have today?",
+    "Create a meeting with John at 3 PM tomorrow titled 'Project Review'",
+    "Schedule a dentist appointment for next Monday at 2 PM",
+    "Find all events with 'meeting' in the title",
+    "Show me events for the next 7 days",
+    "Create an all-day event for 'Team Offsite' on December 15th",
+    "What's on my calendar for tomorrow?",
+    "Schedule a 30-minute call with Sarah next Friday at 10 AM",
+    "Show me all my calendars",
+  ],
   jira: [
     "Show me all issues assigned to me on the board",
     "Get details of issues on board",
