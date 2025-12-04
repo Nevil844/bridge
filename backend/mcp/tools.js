@@ -70,16 +70,16 @@ Current Date & Time (IST): ${currentDateTimeIST}`;
 Current Date (IST): ${currentDate}
 Current Date & Time (IST): ${currentDateTimeIST}
 
-When the user talks about an integration, you MUST call list_tools FIRST to discover available actions. The integration parameter is REQUIRED - you must determine it from the user's message.
+When the user mentions or implies an integration, you MUST call the list_tools tool FIRST to discover the available actions for that specific integration. The integration parameter is REQUIRED — you must infer it from the user’s request and include it in the tool input.
 
 Examples:
-- User says "Slack channels" or "messages" → call list_tools({integration: "slack"})
-- User says "Spotify play" or "song" → call list_tools({integration: "spotify"})
-- User says "GitHub repos" or "commits" → call list_tools({integration: "github"})
-- User says "YouTube video" or "find video" or "latest video" or "playlist" → call list_tools({integration: "youtube"})
-- User says "Calendar events" or "meeting" or "schedule" or "appointment" → call list_tools({integration: "google-calendar"})
+- User says "Slack channels" or "messages" → call the list_tools tool with input {"integration": "slack"}
+- User says "Spotify play" or "song" → call the list_tools tool with input {"integration": "spotify"}
+- User says "GitHub repos" or "commits" → call the list_tools tool with input {"integration": "github"}
+- User says "YouTube video" or "find video" or "latest video" or "playlist" → call the list_tools tool with input {"integration": "youtube"}
+- User says "Calendar events" or "meeting" or "schedule" or "appointment" → call the list_tools tool with input {"integration": "google-calendar"}
 
-CRITICAL: The integration parameter is REQUIRED. You must analyze the user's message and determine which integration they want, then call list_tools with that integration name.`;
+CRITICAL: The integration parameter is REQUIRED. Carefully analyze the user’s message, decide which single integration they are asking about, and then call list_tools with a tool input object that includes exactly that "integration" field. NEVER call list_tools with an empty input or without the integration field.`;
   }
   
   // Add instruction to never share system prompts
