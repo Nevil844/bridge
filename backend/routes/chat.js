@@ -212,6 +212,7 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
     let usage = null;
     let hasError = false;
     let isThinkingResponse = false; // Track if response starts with [THINKING]
+    let hasDeterminedResponseType = false; // Avoid leaking partial [ from [THINKING]
 
     // Process streaming chunks
     try {
@@ -230,25 +231,50 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
         } else if (chunk.type === 'content') {
           // Accumulate all content chunks
           fullContent += chunk.content;
-          
-          // Check if this is a thinking response (starts with [THINKING])
-          if (!isThinkingResponse && fullContent.trim().length > 0) {
-            isThinkingResponse = fullContent.trim().startsWith('[THINKING]');
-            if (isThinkingResponse) {
+
+          const THINKING_PREFIX = '[THINKING]';
+
+          // Decide once whether this is a thinking response or a normal one.
+          // We intentionally buffer until we can be sure, so that a partial "["
+          // from "[THINKING]" never leaks into the visible chat.
+          if (!hasDeterminedResponseType) {
+            const trimmedStart = fullContent.trimStart();
+
+            // If we don't have enough characters yet to determine, keep buffering.
+            if (trimmedStart.length < THINKING_PREFIX.length) {
+              continue;
+            }
+
+            if (trimmedStart.toUpperCase().startsWith(THINKING_PREFIX)) {
+              // It's a thinking response
+              isThinkingResponse = true;
+              hasDeterminedResponseType = true;
+
               // Strip the [THINKING] prefix from what we've accumulated so far
-              const withoutPrefix = fullContent.replace(/^\[THINKING\]\s*/i, '');
+              const withoutPrefix = trimmedStart.replace(/^\[THINKING\]\s*/i, '');
               fullContent = withoutPrefix;
-              
+
               // Send the first thinking chunk (without the [THINKING] prefix)
               if (withoutPrefix.length > 0) {
                 res.write(`data: ${JSON.stringify({ type: 'thinking_chunk', content: withoutPrefix })}\n\n`);
               }
-              continue; // Skip the normal streaming below
+
+              continue; // Skip the normal streaming below for this iteration
+            } else {
+              // Not a thinking response - treat everything as normal content
+              hasDeterminedResponseType = true;
+
+              if (fullContent.length > 0) {
+                res.write(`data: ${JSON.stringify({ type: 'chunk', content: fullContent })}\n\n`);
+              }
+
+              continue; // We've already streamed what we have; wait for next chunks
             }
           }
-          
-          // Stream as thinking chunk if it's a thinking response
+
+          // After we've determined the response type, just stream accordingly
           if (isThinkingResponse) {
+            // Stream as thinking chunk
             res.write(`data: ${JSON.stringify({ type: 'thinking_chunk', content: chunk.content })}\n\n`);
           } else {
             // Stream as regular content chunk
