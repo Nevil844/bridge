@@ -455,10 +455,11 @@ export default function IntegrationsScreen() {
     } catch (error) {
       console.error('OAuth error:', error);
       
+      const message = 'Something went wrong. Please try again.';
       if (Platform.OS === 'web') {
-        alert('Failed to start OAuth. Make sure the backend is running.');
+        alert(message);
       } else {
-        Alert.alert('Error', 'Failed to start OAuth. Make sure the backend is running.');
+        Alert.alert('Error', message);
       }
       
       setIsLoading(false);
