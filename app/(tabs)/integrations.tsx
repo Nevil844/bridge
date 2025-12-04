@@ -1,5 +1,6 @@
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { getIntegrationMetadata } from '@/components/ui/integrations/metadata';
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { authenticatedFetch } from '@/utils/api';
@@ -269,6 +270,7 @@ export default function IntegrationsScreen() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [detailsIntegration, setDetailsIntegration] = useState<Integration | null>(null);
 
   const isDark = colorScheme === 'dark';
 
@@ -326,11 +328,31 @@ export default function IntegrationsScreen() {
     }
   };
 
+  const openIntegrationDetails = (integration: Integration) => {
+    setDetailsIntegration(integration);
+  };
+
+  const closeIntegrationDetails = () => {
+    setDetailsIntegration(null);
+  };
+
   const handleAddIntegration = async (integration: Integration) => {
     setSelectedIntegration(integration);
     
     // All integrations use OAuth flow for now
     await handleOAuthFlow(integration);
+  };
+
+  const handleConnectFromDetails = async () => {
+    if (!detailsIntegration) return;
+    await handleAddIntegration(detailsIntegration);
+    // Details will remain visible while OAuth flow runs; user can close manually if desired
+  };
+
+  const handleDisconnectFromDetails = async () => {
+    if (!detailsIntegration) return;
+    await handleDisconnect(detailsIntegration);
+    closeIntegrationDetails();
   };
 
   const handleOAuthFlow = async (integration: Integration) => {
@@ -503,6 +525,136 @@ export default function IntegrationsScreen() {
     });
   }, [integrations]);
 
+  // Full-screen details "screen" instead of popup when an integration is selected
+  if (detailsIntegration) {
+    const meta = getIntegrationMetadata(detailsIntegration.type);
+
+    return (
+      <ThemedView style={styles.container}>
+        <ScrollView style={styles.scrollView}>
+          <View style={[styles.header, { paddingTop: insets.top + 12, paddingBottom: 12 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+              <TouchableOpacity onPress={closeIntegrationDetails} style={{ marginRight: 12 }}>
+                <ThemedText style={styles.backButtonText}>{'← Back'}</ThemedText>
+              </TouchableOpacity>
+              <ThemedText style={styles.title}>Integration details</ThemedText>
+            </View>
+          </View>
+
+          <View style={[styles.section, { paddingTop: 0 }]}>
+            <View
+              style={[
+                styles.detailsCard,
+                { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' },
+              ]}
+            >
+              <View style={styles.modalHeaderRow}>
+                <View style={styles.modalHeaderInfo}>
+                  {detailsIntegration.logo ? (
+                    <Image
+                      source={{ uri: detailsIntegration.logo }}
+                      style={[styles.integrationLogo, { width: 48, height: 48 }]}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <ThemedText style={styles.integrationIcon}>🔗</ThemedText>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <ThemedText style={styles.modalTitle}>
+                      {detailsIntegration.name}
+                    </ThemedText>
+                  </View>
+                </View>
+              </View>
+
+              <ThemedText style={styles.modalDescription}>
+                {detailsIntegration.description}
+              </ThemedText>
+
+              {meta && (
+                <View style={{ marginTop: 12 }}>
+                  <ThemedText style={styles.label}>How it works</ThemedText>
+                  <ThemedText style={styles.modalDescription}>
+                    {meta.howItWorks}
+                  </ThemedText>
+
+                  {meta.authNotes && (
+                    <>
+                      <ThemedText style={[styles.label, { marginTop: 12 }]}>
+                        Authentication
+                      </ThemedText>
+                      <ThemedText style={styles.modalDescription}>
+                        {meta.authNotes}
+                      </ThemedText>
+                    </>
+                  )}
+
+                  {meta.exceptions && meta.exceptions.length > 0 && (
+                    <>
+                      <ThemedText style={[styles.label, { marginTop: 12 }]}>
+                        Special notes
+                      </ThemedText>
+                      {meta.exceptions.map((note, index) => (
+                        <ThemedText key={index} style={styles.infoText}>
+                          • {note}
+                        </ThemedText>
+                      ))}
+                    </>
+                  )}
+
+                  {meta.tools && meta.tools.length > 0 && (
+                    <>
+                      <ThemedText style={[styles.label, { marginTop: 12 }]}>
+                        Available tools
+                      </ThemedText>
+                      {meta.tools.map((tool, index) => (
+                        <View key={index} style={{ marginBottom: 8 }}>
+                          <ThemedText style={styles.integrationName}>
+                            {tool.name}
+                          </ThemedText>
+                          <ThemedText style={styles.infoText}>
+                            {tool.description}
+                          </ThemedText>
+                          {tool.importantParams && tool.importantParams.length > 0 && (
+                            <ThemedText style={styles.smallText}>
+                              Key parameters: {tool.importantParams.join(', ')}
+                            </ThemedText>
+                          )}
+                        </View>
+                      ))}
+                    </>
+                  )}
+                </View>
+              )}
+
+              <View style={styles.modalFooter}>
+                {detailsIntegration.connected ? (
+                  <TouchableOpacity
+                    style={[styles.button, styles.disconnectButton, { flex: 1 }]}
+                    onPress={handleDisconnectFromDetails}
+                  >
+                    <ThemedText style={styles.disconnectButtonText}>
+                      Disconnect
+                    </ThemedText>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.button, styles.connectButton, { flex: 1 }]}
+                    onPress={handleConnectFromDetails}
+                  >
+                    <ThemedText style={styles.connectButtonText}>
+                      Connect
+                    </ThemedText>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </View>
+        </ScrollView>
+      </ThemedView>
+    );
+  }
+
   return (
     <ThemedView style={styles.container}>
       <ScrollView style={styles.scrollView}>
@@ -538,9 +690,6 @@ export default function IntegrationsScreen() {
                     <ThemedText style={styles.integrationName}>
                       {integration.name}
                     </ThemedText>
-                    <ThemedText style={styles.integrationStatus}>
-                      {integration.connected ? '✓ Connected' : 'Not connected'}
-                    </ThemedText>
                   </View>
                 </View>
 
@@ -566,6 +715,15 @@ export default function IntegrationsScreen() {
               <ThemedText style={styles.integrationDescription}>
                 {integration.description}
               </ThemedText>
+
+              <TouchableOpacity
+                style={styles.learnMoreButton}
+                onPress={() => openIntegrationDetails(integration)}
+              >
+                <ThemedText style={styles.linkButtonText}>
+                  View how it works & tools →
+                </ThemedText>
+              </TouchableOpacity>
             </View>
           ))}
         </View>
@@ -609,41 +767,22 @@ export default function IntegrationsScreen() {
                           {integration.name}
                         </ThemedText>
                       </View>
-                      <ThemedText style={styles.integrationStatus}>
-                        {integration.connected 
-                          ? '✓ Connected' 
-                          : isFunctional 
-                            ? 'Works locally (not in production)' 
-                            : 'In development'}
-                      </ThemedText>
                     </View>
                   </View>
-
-                  {/* Show connect/disconnect button for functional integrations (JIRA, Zomato) */}
-                  {isFunctional && (
-                    integration.connected ? (
-                      <TouchableOpacity
-                        style={[styles.button, styles.disconnectButton]}
-                        onPress={() => handleDisconnect(integration)}>
-                        <ThemedText style={styles.disconnectButtonText}>
-                          Disconnect
-                        </ThemedText>
-                      </TouchableOpacity>
-                    ) : (
-                      <TouchableOpacity
-                        style={[styles.button, styles.connectButton]}
-                        onPress={() => handleAddIntegration(integration)}>
-                        <ThemedText style={styles.connectButtonText}>
-                          Connect
-                        </ThemedText>
-                      </TouchableOpacity>
-                    )
-                  )}
                 </View>
 
                 <ThemedText style={styles.integrationDescription}>
                   {integration.description}
                 </ThemedText>
+
+                <TouchableOpacity
+                  style={styles.learnMoreButton}
+                  onPress={() => openIntegrationDetails(integration)}
+                >
+                  <ThemedText style={styles.linkButtonText}>
+                    View how it works & tools →
+                  </ThemedText>
+                </TouchableOpacity>
               </View>
             );
           })}
@@ -799,20 +938,21 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     opacity: 0.8,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
-  modalContent: {
-    borderRadius: 20,
-    padding: 24,
+  modalHeaderInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
   },
   modalTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 12,
   },
   modalDescription: {
     fontSize: 14,
@@ -842,6 +982,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     opacity: 0.5,
     marginBottom: 4,
+  },
+  closeButton: {
+    marginLeft: 12,
+  },
+  closeButtonText: {
+    fontSize: 18,
+    fontWeight: '600',
+    opacity: 0.7,
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 16,
+    gap: 12,
+  },
+  detailsCard: {
+    borderRadius: 16,
+    padding: 20,
+    backgroundColor: '#FFFFFF',
+  },
+  backButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#007AFF',
+  },
+  learnMoreButton: {
+    marginTop: 8,
   },
   loadingOverlay: {
     position: 'absolute',
