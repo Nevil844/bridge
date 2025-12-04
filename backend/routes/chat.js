@@ -18,6 +18,48 @@ const appConfig = require('../config/app');
 
 const router = express.Router();
 
+/**
+ * Generate a human-readable conversation title from the first user message
+ * - Uses the first non-empty line
+ * - Strips markdown and extra whitespace
+ * - Truncates to a reasonable length
+ */
+function generateTitleFromMessage(message) {
+  if (!message || typeof message !== 'string') {
+    return 'New Chat';
+  }
+
+  // Use first non-empty line
+  const firstLine = message.split('\n').find(line => line.trim().length > 0) || message;
+
+  // Strip simple markdown formatting and collapse whitespace
+  let title = firstLine
+    // Remove markdown headers / bullets
+    .replace(/^(\s*[-*#+]+\s*)/, '')
+    // Remove backticks
+    .replace(/`/g, '')
+    // Collapse whitespace
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Basic URL stripping to avoid titles that are just links
+  if (/^https?:\/\//i.test(title)) {
+    title = 'New Chat';
+  }
+
+  // Truncate to 60 chars for sidebar
+  const MAX_LENGTH = 60;
+  if (title.length > MAX_LENGTH) {
+    title = `${title.slice(0, MAX_LENGTH - 1).trim()}…`;
+  }
+
+  if (!title) {
+    return 'New Chat';
+  }
+
+  return title;
+}
+
 // Configure multer for file uploads
 // Supports both web (File/Blob) and mobile (React Native FormData) uploads
 const upload = multer({ 
@@ -570,7 +612,9 @@ router.post('/', verifyUser, checkQuota, async (req, res) => {
         return res.status(404).json({ error: 'Conversation not found' });
       }
     } else {
-      conversation = await conversationService.createConversation(user, 'New Chat');
+      // Auto-generate a title from the first user message
+      const generatedTitle = generateTitleFromMessage(message);
+      conversation = await conversationService.createConversation(user, generatedTitle);
     }
     
     // Search for relevant memories
