@@ -41,11 +41,18 @@ interface ThinkingData {
   memoryCount?: number;
 }
 
+interface TokenUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+}
+
 interface Message {
   id: string;
   text: string;
   isUser: boolean;
   thinking?: ThinkingData[]; // Array of thinking data for AI messages (all internal calls)
+  tokenUsage?: TokenUsage;
 }
 
 interface Model {
@@ -81,6 +88,17 @@ export default function HomeScreen() {
   const headerPaddingTop = topInset + 20;
   const headerButtonTop = topInset + 24;
   const inputBottomPadding = Platform.OS === 'web' ? 16 : Math.max(insets.bottom, 16);
+  const normalizeTokenUsage = (usage?: { input_tokens?: number; output_tokens?: number }) => {
+    if (!usage) return undefined;
+    const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined;
+    const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined;
+    const totalTokens =
+      (inputTokens ?? 0) + (outputTokens ?? 0);
+    if (inputTokens === undefined && outputTokens === undefined) {
+      return undefined;
+    }
+    return { inputTokens, outputTokens, totalTokens };
+  };
 
   useEffect(() => {
     loadUserId();
@@ -487,7 +505,8 @@ export default function HomeScreen() {
                                 text: finalContent,
                                 thinking: data.thinking 
                                   ? [...(msg.thinking || []), data.thinking]
-                                  : msg.thinking
+                                  : msg.thinking,
+                                tokenUsage: normalizeTokenUsage(data.usage)
                               }
                             : msg
                         )
@@ -642,7 +661,8 @@ export default function HomeScreen() {
                               text: finalContent,
                               thinking: data.thinking 
                                 ? [...(msg.thinking || []), data.thinking]
-                                : msg.thinking
+                                : msg.thinking,
+                              tokenUsage: normalizeTokenUsage(data.usage)
                             }
                           : msg
                       )
@@ -672,7 +692,12 @@ export default function HomeScreen() {
           setMessages(prev =>
             prev.map(msg =>
               msg.id === aiMessageId
-                ? { ...msg, text: aiMessage, thinking: data.thinking || undefined }
+                ? { 
+                    ...msg, 
+                    text: aiMessage, 
+                    thinking: data.thinking || undefined,
+                    tokenUsage: normalizeTokenUsage(data.usage)
+                  }
                 : msg
             )
           );
@@ -872,7 +897,8 @@ export default function HomeScreen() {
                               text: finalContent,
                               thinking: data.thinking 
                                 ? [...(msg.thinking || []), data.thinking]
-                                : msg.thinking
+                                : msg.thinking,
+                              tokenUsage: normalizeTokenUsage(data.usage)
                             }
                           : msg
                       )
@@ -900,7 +926,12 @@ export default function HomeScreen() {
             setMessages(prev =>
               prev.map(msg =>
                 msg.id === aiMessageId
-                  ? { ...msg, text: aiMessage, thinking: data.thinking || undefined }
+                  ? { 
+                      ...msg, 
+                      text: aiMessage, 
+                      thinking: data.thinking || undefined,
+                      tokenUsage: normalizeTokenUsage(data.usage)
+                    }
                   : msg
               )
             );
@@ -1034,7 +1065,8 @@ export default function HomeScreen() {
                               text: finalContent, // Use accumulated content from chunks
                               thinking: data.thinking 
                                 ? [...(msg.thinking || []), data.thinking]
-                                : msg.thinking
+                                : msg.thinking,
+                              tokenUsage: normalizeTokenUsage(data.usage)
                             }
                           : msg
                       )
@@ -1074,7 +1106,8 @@ export default function HomeScreen() {
                 ? { 
                     ...msg, 
                     text: aiMessage, 
-                    thinking: data.thinking ? [data.thinking] : undefined 
+                    thinking: data.thinking ? [data.thinking] : undefined,
+                    tokenUsage: normalizeTokenUsage(data.usage)
                   }
                 : msg
             )
@@ -1505,6 +1538,16 @@ export default function HomeScreen() {
                     isUser={message.isUser}
                   />
                   </View>
+                  {!message.isUser && message.tokenUsage && (
+                    <Text
+                      style={[
+                        styles.tokenUsageText,
+                        { color: isDark ? '#9CA3AF' : '#6B7280' },
+                      ]}
+                    >
+                      Token Usage: {typeof message.tokenUsage.totalTokens === 'number' ? message.tokenUsage.totalTokens : '—'}
+                    </Text>
+                  )}
                   <View
                     style={[
                       styles.messageActions,
@@ -1896,6 +1939,10 @@ const styles = StyleSheet.create({
   },
   aiMessage: {
     alignSelf: 'flex-start',
+  },
+  tokenUsageText: {
+    fontSize: 12,
+    marginTop: 4,
   },
   messageActions: {
     flexDirection: 'row',
