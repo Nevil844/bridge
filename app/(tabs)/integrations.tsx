@@ -533,11 +533,22 @@ export default function IntegrationsScreen() {
       <ThemedView style={styles.container}>
         <ScrollView style={styles.scrollView}>
           <View style={[styles.header, { paddingTop: insets.top + 12, paddingBottom: 12 }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-              <TouchableOpacity onPress={closeIntegrationDetails} style={{ marginRight: 12 }}>
-                <ThemedText style={styles.backButtonText}>{'← Back'}</ThemedText>
-              </TouchableOpacity>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 12,
+              }}
+            >
               <ThemedText style={styles.title}>Integration details</ThemedText>
+              <TouchableOpacity
+                onPress={closeIntegrationDetails}
+                style={styles.closeButton}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <ThemedText style={styles.closeButtonText}>✕</ThemedText>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -553,7 +564,7 @@ export default function IntegrationsScreen() {
                   {detailsIntegration.logo ? (
                     <Image
                       source={{ uri: detailsIntegration.logo }}
-                      style={[styles.integrationLogo, { width: 48, height: 48 }]}
+                      style={[styles.detailsLogo]}
                       resizeMode="contain"
                     />
                   ) : (
@@ -562,6 +573,9 @@ export default function IntegrationsScreen() {
                   <View style={{ flex: 1 }}>
                     <ThemedText style={styles.modalTitle}>
                       {detailsIntegration.name}
+                    </ThemedText>
+                    <ThemedText style={styles.modalSubtitle}>
+                      {detailsIntegration.type}
                     </ThemedText>
                   </View>
                 </View>
@@ -573,14 +587,14 @@ export default function IntegrationsScreen() {
 
               {meta && (
                 <View style={{ marginTop: 12 }}>
-                  <ThemedText style={styles.label}>How it works</ThemedText>
+                  <ThemedText style={styles.sectionBadge}>How it works</ThemedText>
                   <ThemedText style={styles.modalDescription}>
                     {meta.howItWorks}
                   </ThemedText>
 
                   {meta.authNotes && (
                     <>
-                      <ThemedText style={[styles.label, { marginTop: 12 }]}>
+                      <ThemedText style={[styles.sectionBadge, { marginTop: 16 }]}>
                         Authentication
                       </ThemedText>
                       <ThemedText style={styles.modalDescription}>
@@ -591,33 +605,39 @@ export default function IntegrationsScreen() {
 
                   {meta.exceptions && meta.exceptions.length > 0 && (
                     <>
-                      <ThemedText style={[styles.label, { marginTop: 12 }]}>
+                      <ThemedText style={[styles.sectionBadge, { marginTop: 16 }]}>
                         Special notes
                       </ThemedText>
                       {meta.exceptions.map((note, index) => (
-                        <ThemedText key={index} style={styles.infoText}>
-                          • {note}
-                        </ThemedText>
+                        <View key={index} style={styles.noteChip}>
+                          <View style={styles.noteDot} />
+                          <ThemedText style={styles.noteText}>
+                            {note}
+                          </ThemedText>
+                        </View>
                       ))}
                     </>
                   )}
 
                   {meta.tools && meta.tools.length > 0 && (
                     <>
-                      <ThemedText style={[styles.label, { marginTop: 12 }]}>
+                      <ThemedText style={[styles.sectionBadge, { marginTop: 16 }]}>
                         Available tools
                       </ThemedText>
                       {meta.tools.map((tool, index) => (
-                        <View key={index} style={{ marginBottom: 8 }}>
-                          <ThemedText style={styles.integrationName}>
+                        <View key={index} style={styles.toolCard}>
+                          <ThemedText style={styles.toolName}>
                             {tool.name}
                           </ThemedText>
-                          <ThemedText style={styles.infoText}>
+                          <ThemedText style={styles.toolDescription}>
                             {tool.description}
                           </ThemedText>
                           {tool.importantParams && tool.importantParams.length > 0 && (
-                            <ThemedText style={styles.smallText}>
-                              Key parameters: {tool.importantParams.join(', ')}
+                            <ThemedText style={styles.toolParams}>
+                              Key parameters:{' '}
+                              <ThemedText style={styles.toolParamsHighlight}>
+                                {tool.importantParams.join(', ')}
+                              </ThemedText>
                             </ThemedText>
                           )}
                         </View>
@@ -676,7 +696,11 @@ export default function IntegrationsScreen() {
                 { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' },
               ]}>
               <View style={styles.integrationHeader}>
-                <View style={styles.integrationInfo}>
+                <TouchableOpacity
+                  style={styles.integrationInfo}
+                  activeOpacity={0.8}
+                  onPress={() => openIntegrationDetails(integration)}
+                >
                   {integration.logo ? (
                     <Image
                       source={{ uri: integration.logo }}
@@ -691,7 +715,7 @@ export default function IntegrationsScreen() {
                       {integration.name}
                     </ThemedText>
                   </View>
-                </View>
+                </TouchableOpacity>
 
                 {integration.connected ? (
                   <TouchableOpacity
@@ -712,16 +736,12 @@ export default function IntegrationsScreen() {
                 )}
               </View>
 
-              <ThemedText style={styles.integrationDescription}>
-                {integration.description}
-              </ThemedText>
-
               <TouchableOpacity
-                style={styles.learnMoreButton}
+                activeOpacity={0.8}
                 onPress={() => openIntegrationDetails(integration)}
               >
-                <ThemedText style={styles.linkButtonText}>
-                  View how it works & tools →
+                <ThemedText style={styles.integrationDescription}>
+                  {integration.description}
                 </ThemedText>
               </TouchableOpacity>
             </View>
@@ -751,7 +771,11 @@ export default function IntegrationsScreen() {
                   },
                 ]}>
                 <View style={styles.integrationHeader}>
-                  <View style={styles.integrationInfo}>
+                  <TouchableOpacity
+                    style={styles.integrationInfo}
+                    activeOpacity={0.8}
+                    onPress={() => openIntegrationDetails(integration)}
+                  >
                     {integration.logo ? (
                       <Image
                         source={{ uri: integration.logo }}
@@ -768,19 +792,15 @@ export default function IntegrationsScreen() {
                         </ThemedText>
                       </View>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 </View>
 
-                <ThemedText style={styles.integrationDescription}>
-                  {integration.description}
-                </ThemedText>
-
                 <TouchableOpacity
-                  style={styles.learnMoreButton}
+                  activeOpacity={0.8}
                   onPress={() => openIntegrationDetails(integration)}
                 >
-                  <ThemedText style={styles.linkButtonText}>
-                    View how it works & tools →
+                  <ThemedText style={styles.integrationDescription}>
+                    {integration.description}
                   </ThemedText>
                 </TouchableOpacity>
               </View>
@@ -909,6 +929,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
     fontSize: 14,
+    textAlign: 'center',
   },
   disconnectButton: {
     backgroundColor: 'transparent',
@@ -919,6 +940,7 @@ const styles = StyleSheet.create({
     color: '#FF3B30',
     fontWeight: '600',
     fontSize: 14,
+    textAlign: 'center',
   },
   infoSection: {
     paddingHorizontal: 20,
@@ -951,14 +973,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   modalTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    opacity: 0.6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginTop: 2,
   },
   modalDescription: {
     fontSize: 14,
-    opacity: 0.6,
-    marginBottom: 20,
-    lineHeight: 20,
+    opacity: 0.8,
+    marginBottom: 16,
+    lineHeight: 22,
   },
   label: {
     fontSize: 14,
@@ -983,13 +1012,78 @@ const styles = StyleSheet.create({
     opacity: 0.5,
     marginBottom: 4,
   },
+  sectionBadge: {
+    alignSelf: 'flex-start',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+    color: '#94a3b8',
+  },
+  noteChip: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 4,
+    marginTop: 4,
+  },
+  noteDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FF3B30',
+    marginTop: 6,
+    marginRight: 8,
+  },
+  noteText: {
+    flex: 1,
+    fontSize: 13,
+    opacity: 0.8,
+    lineHeight: 18,
+  },
+  toolCard: {
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginTop: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(148, 163, 184, 0.35)',
+    backgroundColor: 'rgba(15, 23, 42, 0.06)',
+  },
+  toolName: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+    color: '#0a7ea4',
+  },
+  toolDescription: {
+    fontSize: 13,
+    opacity: 0.8,
+    lineHeight: 19,
+  },
+  toolParams: {
+    fontSize: 12,
+    marginTop: 4,
+    opacity: 0.8,
+  },
+  toolParamsHighlight: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0a7ea4',
+  },
+  detailsLogo: {
+    width: 40,
+    height: 40,
+    borderRadius: 9,
+  },
   closeButton: {
     marginLeft: 12,
   },
   closeButtonText: {
     fontSize: 18,
     fontWeight: '600',
-    opacity: 0.7,
+    opacity: 0.9,
+    color: '#FF3B30',
   },
   modalFooter: {
     flexDirection: 'row',
