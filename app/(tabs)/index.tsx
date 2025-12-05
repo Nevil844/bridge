@@ -9,6 +9,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { API_ENDPOINTS } from '@/config/api';
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { usePreferences } from '@/hooks/use-preferences';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import * as Clipboard from 'expo-clipboard';
@@ -67,6 +68,7 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const screenHeight = Dimensions.get('window').height;
   const { user, logout } = useAuth();
+  const { toolApprovalEnabled } = usePreferences();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -507,6 +509,7 @@ export default function HomeScreen() {
             conversationId: currentChatId,
             stream: true, // Enable streaming
             webSearch: webSearchEnabled,
+            requireToolApproval: toolApprovalEnabled,
           }),
         });
 
@@ -865,6 +868,7 @@ export default function HomeScreen() {
             conversationId: currentChatId, // Pass conversationId to continue existing or create new
             stream: true, // Enable streaming for better UX
             webSearch: webSearchEnabled,
+            requireToolApproval: toolApprovalEnabled,
           }),
         });
 

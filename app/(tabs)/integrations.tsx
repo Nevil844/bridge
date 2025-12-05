@@ -694,7 +694,11 @@ export default function IntegrationsScreen() {
               key={integration.id}
               style={[
                 styles.integrationCard,
-                { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' },
+                { 
+                  backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                  borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                  borderWidth: 1,
+                },
               ]}>
               <View style={styles.integrationHeader}>
                 <TouchableOpacity
@@ -768,6 +772,8 @@ export default function IntegrationsScreen() {
                   styles.upcomingCard,
                   { 
                     backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                    borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                    borderWidth: 1,
                     opacity: isFunctional ? 1 : 0.6,
                   },
                 ]}>
@@ -1126,8 +1132,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   upcomingCard: {
-    borderWidth: 1,
-    borderColor: 'rgba(128, 128, 128, 0.2)',
+    // Border is now set dynamically in the component
   },
   comingSoonBadge: {
     paddingHorizontal: 8,
