@@ -4,6 +4,7 @@ import { SampleQuestions } from '@/components/sample-questions';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ThinkingProcess } from '@/components/thinking-process';
+import ToolApprovalModal, { PendingTool } from '@/components/tool-approval-modal';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { API_ENDPOINTS } from '@/config/api';
 import { useAuth } from '@/hooks/use-auth';
@@ -82,6 +83,15 @@ export default function HomeScreen() {
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set(['bedrock'])); // Default expand Bedrock (default model provider)
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [showWebSearchMenu, setShowWebSearchMenu] = useState(false);
+  const [pendingToolApproval, setPendingToolApproval] = useState<{
+    approvalId: string;
+    tools: PendingTool[];
+  } | null>(null);
+  const [approvalExpiresAt, setApprovalExpiresAt] = useState<number | null>(null);
+  const [approvalCountdown, setApprovalCountdown] = useState<string>('');
+  const [approvalRemainingMs, setApprovalRemainingMs] = useState<number>(0);
+  const TOOL_APPROVAL_TIMEOUT_MS = 45000;
+  const [isApprovingTool, setIsApprovingTool] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === 'web' ? 16 : Math.max(insets.top, 12);
@@ -277,6 +287,67 @@ export default function HomeScreen() {
       console.error('Error loading model:', error);
     }
   };
+
+  const submitToolApproval = useCallback(
+    async (decision: 'approve' | 'reject') => {
+      if (!pendingToolApproval) {
+        return;
+      }
+
+      try {
+        setIsApprovingTool(true);
+        const { authenticatedFetch } = require('@/utils/api');
+        await authenticatedFetch(API_ENDPOINTS.CHAT_TOOL_APPROVAL, {
+          method: 'POST',
+          body: JSON.stringify({
+            approvalId: pendingToolApproval.approvalId,
+            decision,
+          }),
+        });
+      } catch (error) {
+        console.error('Tool approval failed:', error);
+        Alert.alert('Tool approval failed', 'Please try again.');
+      } finally {
+        setIsApprovingTool(false);
+        setPendingToolApproval(null);
+        setApprovalExpiresAt(null);
+        setApprovalCountdown('');
+        setApprovalRemainingMs(0);
+      }
+    },
+    [pendingToolApproval]
+  );
+
+  useEffect(() => {
+    if (pendingToolApproval && approvalExpiresAt) {
+      const updateCountdown = () => {
+        const remaining = Math.max(0, approvalExpiresAt - Date.now());
+        setApprovalRemainingMs(remaining);
+        const seconds = Math.ceil(remaining / 1000);
+        const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
+        const ss = String(seconds % 60).padStart(2, '0');
+        setApprovalCountdown(`${mm}:${ss}`);
+      };
+
+      updateCountdown();
+      const timer = setInterval(updateCountdown, 500);
+      return () => clearInterval(timer);
+    }
+
+    setApprovalCountdown('');
+    setApprovalRemainingMs(0);
+    return undefined;
+  }, [pendingToolApproval, approvalExpiresAt]);
+
+  const approvalProgress = approvalExpiresAt
+    ? Math.max(0, Math.min(1, approvalRemainingMs / TOOL_APPROVAL_TIMEOUT_MS))
+    : 0;
+
+  const approvalColor = approvalProgress > 0.66
+    ? '#34C759' // green
+    : approvalProgress > 0.33
+      ? '#FFD60A' // yellow
+      : '#FF3B30'; // red
 
   const selectModel = async (modelId: string, tier?: 'free' | 'premium') => {
     // Allow selection of both free and premium models
@@ -651,6 +722,12 @@ export default function HomeScreen() {
                         return msg;
                       })
                     );
+                  } else if (data.type === 'tool_confirmation') {
+                    setPendingToolApproval({
+                      approvalId: data.approvalId,
+                      tools: data.tools || [],
+                    });
+                    setApprovalExpiresAt(Date.now() + TOOL_APPROVAL_TIMEOUT_MS);
                   } else if (data.type === 'done') {
                     const finalContent = data.message !== undefined ? data.message : accumulatedContent || '';
                     setMessages(prev =>
@@ -863,46 +940,52 @@ export default function HomeScreen() {
                         setCurrentChatId(data.conversationId);
                         await loadConversations();
                       }
-                  } else if (data.type === 'chunk') {
-                    accumulatedContent += data.content;
-                    setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { ...msg, text: accumulatedContent }
-                          : msg
-                      )
-                    );
-                  } else if (data.type === 'thinking') {
-                    // Add thinking event to the array
-                    setMessages(prev =>
-                      prev.map(msg => {
-                        if (msg.id === aiMessageId) {
-                          const currentThinking = msg.thinking || [];
-                          const newThinking = [...currentThinking, data.thinking];
-                          return { 
-                            ...msg, 
-                            thinking: newThinking
-                          };
-                        }
-                        return msg;
-                      })
-                    );
-                  } else if (data.type === 'done') {
-                    const finalContent = data.message !== undefined ? data.message : accumulatedContent;
-                    setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { 
+                    } else if (data.type === 'chunk') {
+                      accumulatedContent += data.content;
+                      setMessages(prev =>
+                        prev.map(msg =>
+                          msg.id === aiMessageId
+                            ? { ...msg, text: accumulatedContent }
+                            : msg
+                        )
+                      );
+                    } else if (data.type === 'thinking') {
+                      // Add thinking event to the array
+                      setMessages(prev =>
+                        prev.map(msg => {
+                          if (msg.id === aiMessageId) {
+                            const currentThinking = msg.thinking || [];
+                            const newThinking = [...currentThinking, data.thinking];
+                            return { 
                               ...msg, 
-                              text: finalContent,
-                              thinking: data.thinking 
-                                ? [...(msg.thinking || []), data.thinking]
-                                : msg.thinking,
-                              tokenUsage: normalizeTokenUsage(data.usage)
-                            }
-                          : msg
-                      )
-                    );
+                              thinking: newThinking
+                            };
+                          }
+                          return msg;
+                        })
+                      );
+                    } else if (data.type === 'tool_confirmation') {
+                      setPendingToolApproval({
+                        approvalId: data.approvalId,
+                        tools: data.tools || [],
+                      });
+                      setApprovalExpiresAt(Date.now() + TOOL_APPROVAL_TIMEOUT_MS);
+                    } else if (data.type === 'done') {
+                      const finalContent = data.message !== undefined ? data.message : accumulatedContent;
+                      setMessages(prev =>
+                        prev.map(msg =>
+                          msg.id === aiMessageId
+                            ? { 
+                                ...msg, 
+                                text: finalContent,
+                                thinking: data.thinking 
+                                  ? [...(msg.thinking || []), data.thinking]
+                                  : msg.thinking,
+                                tokenUsage: normalizeTokenUsage(data.usage)
+                              }
+                            : msg
+                        )
+                      );
                       
                       if (data.conversationId && !currentChatId) {
                         setCurrentChatId(data.conversationId);
@@ -1053,6 +1136,12 @@ export default function HomeScreen() {
                         return msg;
                       })
                     );
+                  } else if (data.type === 'tool_confirmation') {
+                    setPendingToolApproval({
+                      approvalId: data.approvalId,
+                      tools: data.tools || [],
+                    });
+                    setApprovalExpiresAt(Date.now() + TOOL_APPROVAL_TIMEOUT_MS);
                   } else if (data.type === 'done') {
                     // Stream complete - use accumulated content (which was built from chunks) or fallback to message
                     // Prefer accumulatedContent since it's the clean streamed text
@@ -1489,6 +1578,19 @@ export default function HomeScreen() {
             </View>
           </TouchableOpacity>
         </Modal>
+
+        <ToolApprovalModal
+          visible={!!pendingToolApproval}
+          isDark={isDark}
+          tools={pendingToolApproval?.tools || []}
+          approvalCountdown={approvalCountdown}
+          approvalRemainingMs={approvalRemainingMs}
+          approvalProgress={approvalProgress}
+          approvalColor={approvalColor}
+          onApprove={() => submitToolApproval('approve')}
+          onReject={() => submitToolApproval('reject')}
+          isApproving={isApprovingTool}
+        />
 
         {/* Messages Area */}
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>

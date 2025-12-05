@@ -25,19 +25,79 @@ export const INTEGRATION_METADATA: Record<string, IntegrationMetadata> = {
       'Requires a GitHub personal access token (PAT) with appropriate scopes for repo/code access. You can revoke access anytime from your GitHub settings.',
     tools: [
       {
-        name: 'Repository & code tools',
-        description:
-          'Browse repositories, list files, read file contents, and search across code for symbols or text.',
+        name: 'github_search_repositories',
+        description: 'Search for repositories by query, language, or other criteria.',
+        importantParams: ['query', 'language', 'sort', 'order'],
       },
       {
-        name: 'Issues & PR tools',
-        description:
-          'Search, read, and summarize issues and pull requests, including comments and review discussions.',
+        name: 'github_get_repository',
+        description: 'Get detailed information about a specific repository.',
+        importantParams: ['owner', 'repo'],
       },
       {
-        name: 'Metadata & org tools',
-        description:
-          'Inspect repository metadata, branches, and other resources exposed by the GitHub MCP server.',
+        name: 'github_list_files',
+        description: 'List files and directories in a repository.',
+        importantParams: ['owner', 'repo', 'path', 'ref'],
+      },
+      {
+        name: 'github_read_file',
+        description: 'Read the contents of a file from a repository.',
+        importantParams: ['owner', 'repo', 'path', 'ref'],
+      },
+      {
+        name: 'github_search_code',
+        description: 'Search across code in repositories for symbols or text.',
+        importantParams: ['query', 'language', 'repo'],
+      },
+      {
+        name: 'github_get_issue',
+        description: 'Get details of a specific issue including comments.',
+        importantParams: ['owner', 'repo', 'issue_number'],
+      },
+      {
+        name: 'github_list_issues',
+        description: 'List issues in a repository with filters.',
+        importantParams: ['owner', 'repo', 'state', 'labels'],
+      },
+      {
+        name: 'github_create_issue',
+        description: 'Create a new issue in a repository.',
+        importantParams: ['owner', 'repo', 'title', 'body', 'labels'],
+      },
+      {
+        name: 'github_get_pull_request',
+        description: 'Get details of a specific pull request including reviews and comments.',
+        importantParams: ['owner', 'repo', 'pull_number'],
+      },
+      {
+        name: 'github_list_pull_requests',
+        description: 'List pull requests in a repository.',
+        importantParams: ['owner', 'repo', 'state'],
+      },
+      {
+        name: 'github_create_pull_request',
+        description: 'Create a new pull request.',
+        importantParams: ['owner', 'repo', 'title', 'head', 'base', 'body'],
+      },
+      {
+        name: 'github_get_branch',
+        description: 'Get information about a specific branch.',
+        importantParams: ['owner', 'repo', 'branch'],
+      },
+      {
+        name: 'github_list_branches',
+        description: 'List branches in a repository.',
+        importantParams: ['owner', 'repo'],
+      },
+      {
+        name: 'github_get_commit',
+        description: 'Get details of a specific commit.',
+        importantParams: ['owner', 'repo', 'sha'],
+      },
+      {
+        name: 'github_list_commits',
+        description: 'List commits in a repository.',
+        importantParams: ['owner', 'repo', 'sha', 'path'],
       },
     ],
   },
@@ -167,7 +227,7 @@ export const INTEGRATION_METADATA: Record<string, IntegrationMetadata> = {
     type: 'zerodha',
     name: 'Zerodha',
     howItWorks:
-      'Bridge connects to Zerodha’s official Kite MCP server. The AI can access your portfolio, market data, and trading tools via Zerodha’s MCP tools.',
+      "Bridge connects to Zerodha's official Kite MCP server. The AI can access your portfolio, market data, and trading tools via Zerodha's MCP tools.",
     authNotes:
       'Requires a Zerodha API token and an interactive login via the official Kite MCP flow. Tokens are verified against Zerodha APIs and stored securely.',
     exceptions: [
@@ -178,12 +238,57 @@ export const INTEGRATION_METADATA: Record<string, IntegrationMetadata> = {
       {
         name: 'login',
         description:
-          'First-time login tool that opens the official Kite authorization page and establishes a session.',
+          'First-time login tool that opens the official Kite authorization page and establishes a session. Must be called before any other tool.',
       },
       {
-        name: 'Portfolio & market tools',
-        description:
-          'Once logged in, Zerodha MCP exposes tools for portfolio positions, holdings, orders, and market data.',
+        name: 'get_profile',
+        description: 'Get your Zerodha user profile information.',
+      },
+      {
+        name: 'get_holdings',
+        description: 'Get your current stock holdings and positions.',
+      },
+      {
+        name: 'get_positions',
+        description: 'Get your current positions including day and net positions.',
+      },
+      {
+        name: 'get_orders',
+        description: 'Get your order book with all pending and executed orders.',
+      },
+      {
+        name: 'get_order_history',
+        description: 'Get historical order information.',
+        importantParams: ['order_id'],
+      },
+      {
+        name: 'get_margins',
+        description: 'Get your account margins including available, used, and net margins.',
+      },
+      {
+        name: 'get_quote',
+        description: 'Get real-time quote for instruments.',
+        importantParams: ['instruments'],
+      },
+      {
+        name: 'get_ohlc',
+        description: 'Get OHLC (Open, High, Low, Close) data for instruments.',
+        importantParams: ['instruments', 'interval'],
+      },
+      {
+        name: 'place_order',
+        description: 'Place a new order (buy/sell).',
+        importantParams: ['exchange', 'tradingsymbol', 'transaction_type', 'quantity', 'order_type', 'product'],
+      },
+      {
+        name: 'modify_order',
+        description: 'Modify an existing order.',
+        importantParams: ['order_id', 'order_type', 'quantity', 'price'],
+      },
+      {
+        name: 'cancel_order',
+        description: 'Cancel an existing order.',
+        importantParams: ['order_id'],
       },
     ],
   },
@@ -354,6 +459,35 @@ export const INTEGRATION_METADATA: Record<string, IntegrationMetadata> = {
 export function getIntegrationMetadata(type: string | undefined | null): IntegrationMetadata | null {
   if (!type) return null;
   return INTEGRATION_METADATA[type] ?? null;
+}
+
+/**
+ * Map a tool name (case-insensitive) to its integration type using metadata.
+ * Supports tool names listed with slashes, e.g. "list_events / get_upcoming_events".
+ */
+export function getIntegrationTypeForTool(toolName: string | undefined | null): string | null {
+  if (!toolName) return null;
+  const normalized = toolName.trim().toLowerCase();
+  if (!normalized) return null;
+
+  // Build a lookup once and memoize it on the module scope
+  if (!(global as any).__INTEGRATION_TOOL_LOOKUP) {
+    const lookup: Record<string, string> = {};
+    Object.values(INTEGRATION_METADATA).forEach(meta => {
+      meta.tools.forEach(tool => {
+        // Split names like "list_events / get_upcoming_events / search_events"
+        tool.name.split('/').map(part => part.trim().toLowerCase()).forEach(part => {
+          if (part) {
+            lookup[part] = meta.type;
+          }
+        });
+      });
+    });
+    (global as any).__INTEGRATION_TOOL_LOOKUP = lookup;
+  }
+
+  const lookup = (global as any).__INTEGRATION_TOOL_LOOKUP as Record<string, string>;
+  return lookup[normalized] || null;
 }
 
 
