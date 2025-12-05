@@ -109,6 +109,20 @@ class ConversationService {
   }
 
   /**
+   * Delete all conversations for a user (cascade deletes messages)
+   */
+  async deleteAllConversations(userId) {
+    // Ensure user exists
+    const user = await userService.getOrCreateUser(userId, null);
+    
+    return await this.prisma.conversation.deleteMany({
+      where: {
+        userId: user.id,
+      },
+    });
+  }
+
+  /**
    * Add message to conversation
    */
   async addMessage(conversationId, role, content, metadata = null) {

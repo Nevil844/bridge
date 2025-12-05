@@ -31,6 +31,36 @@ export default function SettingsScreen() {
                 borderWidth: 1,
               },
             ]}
+            onPress={() => router.push('/profile')}>
+            <View style={styles.settingButtonContent}>
+              <IconSymbol
+                name="person.circle.fill"
+                size={24}
+                color={isDark ? '#FFFFFF' : '#000000'}
+              />
+              <View style={styles.settingButtonText}>
+                <ThemedText style={styles.settingButtonTitle}>Profile</ThemedText>
+                <ThemedText style={styles.settingButtonSubtitle}>
+                  View your profile and account settings
+                </ThemedText>
+              </View>
+            </View>
+            <IconSymbol
+              name="chevron.right"
+              size={20}
+              color={isDark ? '#8E8E93' : '#8E8E93'}
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.settingButton,
+              { 
+                backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                borderWidth: 1,
+              },
+            ]}
             onPress={() => router.push('/usage')}>
             <View style={styles.settingButtonContent}>
               <IconSymbol
@@ -73,7 +103,7 @@ export default function SettingsScreen() {
               <View style={styles.settingButtonText}>
                 <ThemedText style={styles.settingButtonTitle}>Preferences</ThemedText>
                 <ThemedText style={styles.settingButtonSubtitle}>
-                  Theme, tool approval, and other settings
+                  Personalize your experience
                 </ThemedText>
               </View>
             </View>

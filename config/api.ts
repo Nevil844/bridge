@@ -35,6 +35,7 @@ export const API_ENDPOINTS = {
     GOOGLE_SESSION: `${API_CONFIG.BASE_URL}/api/auth/google/session`,
     ME: `${API_CONFIG.BASE_URL}/api/auth/me`,
     TOKEN: `${API_CONFIG.BASE_URL}/api/auth/token`,
+    DELETE_ACCOUNT: `${API_CONFIG.BASE_URL}/api/auth/account`,
   },
   WAITLIST: `${API_CONFIG.BASE_URL}/api/waitlist`,
   SAMPLE_QUESTIONS: `${API_CONFIG.BASE_URL}/api/sample-questions`,

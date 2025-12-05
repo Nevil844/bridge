@@ -106,6 +106,23 @@ router.delete('/:id', verifyUser, async (req, res) => {
 });
 
 /**
+ * DELETE /api/conversations
+ * Delete all conversations for the authenticated user
+ */
+router.delete('/', verifyUser, async (req, res) => {
+  try {
+    const result = await conversationService.deleteAllConversations(req.userId);
+    res.json({ 
+      success: true, 
+      deletedCount: result.count 
+    });
+  } catch (error) {
+    console.error('Error deleting all conversations:', error);
+    res.status(500).json({ error: 'Failed to delete all conversations' });
+  }
+});
+
+/**
  * GET /api/conversations/:id/messages
  * Get conversation messages with pagination
  */
