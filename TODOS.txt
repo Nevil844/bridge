@@ -1,2 +1,5 @@
 Add cache read in bedrock to optimize token pricing
 Improve latency for audio inputs
+Add tool confirmation before execution
+Add web search
+Response validation
