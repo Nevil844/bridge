@@ -394,6 +394,28 @@ router.get('/me', async (req, res) => {
 });
 
 /**
+ * DELETE /api/auth/account
+ * Delete user account and all related data
+ */
+const { verifyUser } = require('../middleware/auth');
+router.delete('/account', verifyUser, async (req, res) => {
+  try {
+    const userId = req.userId;
+    
+    // Delete user (cascade deletes all related data: conversations, messages, integrations, memories, token usage)
+    await userService.deleteUser(userId);
+    
+    res.json({ 
+      success: true,
+      message: 'Account deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting account:', error);
+    res.status(500).json({ error: 'Failed to delete account' });
+  }
+});
+
+/**
  * Test endpoint to verify callback is accessible
  */
 router.get('/google/test', (req, res) => {

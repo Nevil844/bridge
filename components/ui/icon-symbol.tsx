@@ -49,6 +49,7 @@ const MAPPING = {
   'stop.circle.fill': 'stop-circle',
   'doc.on.doc': 'content-copy',
   'xmark.circle.fill': 'cancel',
+  'person.circle.fill': 'account-circle',
   // Landing page icons
   'shield.fill': 'shield',
   'bolt.fill': 'bolt',

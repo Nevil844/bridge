@@ -557,7 +557,11 @@ export default function IntegrationsScreen() {
             <View
               style={[
                 styles.detailsCard,
-                { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' },
+                { 
+                  backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                  borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                  borderWidth: 1,
+                },
               ]}
             >
               <View style={styles.modalHeaderRow}>
