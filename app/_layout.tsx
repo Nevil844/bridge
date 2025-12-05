@@ -87,6 +87,27 @@ export default function RootLayout() {
             presentation: 'fullScreenModal',
           }} 
         />
+        <Stack.Screen 
+          name="preferences" 
+          options={{ 
+            headerShown: false,
+            presentation: 'card',
+          }} 
+        />
+        <Stack.Screen 
+          name="usage" 
+          options={{ 
+            headerShown: false,
+            presentation: 'card',
+          }} 
+        />
+        <Stack.Screen 
+          name="about" 
+          options={{ 
+            headerShown: false,
+            presentation: 'card',
+          }} 
+        />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       <StatusBar style="auto" />

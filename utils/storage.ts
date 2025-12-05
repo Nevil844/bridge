@@ -29,6 +29,8 @@ export const STORAGE_KEYS = {
   OAUTH_USER_ID: 'oauth_userId',
   OAUTH_EMAIL: 'oauth_email',
   OAUTH_STATE: 'oauth_state',
+  // Preferences
+  TOOL_APPROVAL: 'preference_tool_approval',
 } as const;
 
 /**

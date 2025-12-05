@@ -1,8 +1,10 @@
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { formatTokenCount, getUserUsage, getWarningColor, type TokenUsage } from '@/services/usage';
+import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Modal, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
@@ -59,6 +61,7 @@ export default function PricingScreen() {
   const insets = useSafeAreaInsets();
   const isDark = colorScheme === 'dark';
   const { user } = useAuth();
+  const router = useRouter();
   
   const [isUpgrading, setIsUpgrading] = useState(false);
   const [usage, setUsage] = useState<TokenUsage | null>(null);
@@ -274,10 +277,23 @@ Thank you!`;
     <ThemedView style={styles.container}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
-          <ThemedText style={styles.title}>Choose Your Plan</ThemedText>
-          <ThemedText style={styles.subtitle}>
-            Upgrade for more tokens and advanced features
-          </ThemedText>
+          <View style={styles.headerRow}>
+            <View style={styles.headerTextContainer}>
+              <ThemedText style={styles.title}>Choose Your Plan</ThemedText>
+              <ThemedText style={styles.subtitle}>
+                Upgrade for more tokens and advanced features
+              </ThemedText>
+            </View>
+            <TouchableOpacity
+              onPress={() => router.replace('/usage')}
+              style={styles.closeButton}>
+              <IconSymbol
+                name="xmark.circle.fill"
+                size={28}
+                color={isDark ? '#FFFFFF' : '#000000'}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Usage Display */}
@@ -505,6 +521,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 24,
   },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  headerTextContainer: {
+    flex: 1,
+    marginRight: 12,
+  },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
@@ -515,6 +540,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     opacity: 0.7,
     lineHeight: 22,
+  },
+  closeButton: {
+    padding: 4,
+    marginTop: 4,
   },
   planCard: {
     marginHorizontal: 20,

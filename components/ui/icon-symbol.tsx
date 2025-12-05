@@ -30,7 +30,10 @@ const MAPPING = {
   'envelope': 'mail',
   'arrow.right.square': 'send',
   // Settings icons
+  'chart.bar': 'bar-chart',
+  'gearshape': 'settings',
   'arrow.clockwise': 'refresh',
+  'info.circle': 'info',
   // Pricing icons
   'checkmark.circle.fill': 'check-circle',
   // Alert icons
@@ -45,6 +48,7 @@ const MAPPING = {
   'arrow.up': 'arrow-upward',
   'stop.circle.fill': 'stop-circle',
   'doc.on.doc': 'content-copy',
+  'xmark.circle.fill': 'cancel',
   // Landing page icons
   'shield.fill': 'shield',
   'bolt.fill': 'bolt',
