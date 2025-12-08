@@ -425,15 +425,146 @@ export const INTEGRATION_METADATA: Record<string, IntegrationMetadata> = {
     type: 'jira',
     name: 'Jira',
     howItWorks:
-      'Bridge connects to your Jira workspace via OAuth and exposes tools for issues, projects, and workflows. This integration currently works best in local environments.',
+      'Bridge connects to your Jira workspace via OAuth and uses the JIRA REST API directly. The AI can list projects, search issues, create and update issues, add comments, and manage workflows. All operations use your OAuth token and work reliably on servers.',
     authNotes:
-      'Requires Jira OAuth configuration (domain, client ID/secret) and user consent. Access can be revoked from your Atlassian account.',
-    exceptions: ['Currently optimized for local development; production support is still being hardened.'],
+      'Requires Jira OAuth configuration (domain, client ID/secret) and user consent. Access can be revoked from your Atlassian account. Tokens are stored encrypted.',
     tools: [
       {
-        name: 'Issues & projects',
+        name: 'jira_list_projects',
         description:
-          'Search, read, and update Jira issues; browse projects and basic workflow metadata.',
+          'List all accessible JIRA projects with their keys, names, project types, and metadata. Returns project details including lead, category, and properties.',
+        importantParams: ['expand', 'recent'],
+      },
+      {
+        name: 'jira_search_issues',
+        description:
+          'Search JIRA issues using JQL (JIRA Query Language). Returns matching issues with their details. Supports filtering, pagination, and field selection.',
+        importantParams: ['jql', 'maxResults', 'fields', 'startAt'],
+      },
+      {
+        name: 'jira_get_issue',
+        description:
+          'Get details of a specific JIRA issue by key or ID. Returns full issue information including fields, comments, and changelog.',
+        importantParams: ['issueKey', 'fields', 'expand'],
+      },
+      {
+        name: 'jira_create_issue',
+        description:
+          'Create a new JIRA issue. Supports all standard JIRA fields including summary, description, issue type, assignee, priority, labels, and more.',
+        importantParams: ['project', 'summary', 'issueType', 'description', 'assignee', 'priority'],
+      },
+      {
+        name: 'jira_update_issue',
+        description:
+          'Update an existing JIRA issue. Can update summary, description, assignee, priority, labels, due date, and other fields.',
+        importantParams: ['issueKey', 'summary', 'description', 'assignee', 'priority'],
+      },
+      {
+        name: 'jira_add_comment',
+        description:
+          'Add a comment to a JIRA issue. Supports plain text comments with optional visibility settings.',
+        importantParams: ['issueKey', 'comment', 'visibility'],
+      },
+      {
+        name: 'jira_transition_issue',
+        description:
+          'Transition an issue to a new status/workflow state. Returns available transitions if the requested transition is not found.',
+        importantParams: ['issueKey', 'transitionName', 'transitionId', 'fields'],
+      },
+      {
+        name: 'jira_add_attachment',
+        description:
+          'Upload and attach a file to a JIRA issue. Supports various file types.',
+        importantParams: ['issueKey', 'filePath', 'fileName'],
+      },
+      {
+        name: 'jira_add_watcher',
+        description:
+          'Add a user to an issue\'s watcher list by account ID or email.',
+        importantParams: ['issueKey', 'accountId', 'email'],
+      },
+      {
+        name: 'jira_assign_issue',
+        description:
+          'Assign a JIRA issue to a user, default assignee, or unassign. Supports email/name lookup.',
+        importantParams: ['issueKey', 'assignee'],
+      },
+      {
+        name: 'jira_bulk_create_issues',
+        description:
+          'Create multiple JIRA issues (up to 50 per call) with full feature support including markdown, assignee resolution, and priority handling.',
+        importantParams: ['issues'],
+      },
+      {
+        name: 'jira_link_issues',
+        description:
+          'Link two JIRA issues using a specified link type with an optional comment.',
+        importantParams: ['inwardIssue', 'outwardIssue', 'linkType', 'comment'],
+      },
+      {
+        name: 'jira_create_project',
+        description:
+          'Create a new JIRA project with required lead, template, and type configuration.',
+        importantParams: ['key', 'name', 'projectTypeKey', 'leadAccountId'],
+      },
+      {
+        name: 'jira_create_sprint',
+        description:
+          'Create a new sprint on a JIRA board with optional start/end dates and goal.',
+        importantParams: ['boardId', 'name', 'goal', 'startDate', 'endDate'],
+      },
+      {
+        name: 'jira_create_version',
+        description:
+          'Create a new version for releases or milestones in a JIRA project.',
+        importantParams: ['project', 'name', 'description', 'released', 'releaseDate'],
+      },
+      {
+        name: 'jira_delete_comment',
+        description:
+          'Delete a specific comment from a JIRA issue using its ID and the issue\'s ID/key. Requires user permission to delete comments on the issue.',
+        importantParams: ['issueKey', 'commentId'],
+      },
+      {
+        name: 'jira_delete_issue',
+        description:
+          'Delete a JIRA issue by its ID or key. This action cannot be undone.',
+        importantParams: ['issueKey', 'deleteSubtasks'],
+      },
+      {
+        name: 'jira_delete_version',
+        description:
+          'Delete a JIRA version and optionally reassign its issues.',
+        importantParams: ['versionId', 'moveAffectedIssuesTo', 'moveFixIssuesTo'],
+      },
+      {
+        name: 'jira_delete_worklog',
+        description:
+          'Delete a worklog from a JIRA issue with estimate adjustment options.',
+        importantParams: ['issueKey', 'worklogId', 'adjustEstimate'],
+      },
+      {
+        name: 'jira_find_users',
+        description:
+          'Search for JIRA users by email, display name, or username to find account IDs. Essential for assigning issues, adding watchers, and other user-related operations.',
+        importantParams: ['query', 'maxResults', 'includeActive', 'includeInactive'],
+      },
+      {
+        name: 'jira_get_issue_type_schemes',
+        description:
+          'Retrieve all JIRA issue type schemes with optional filtering and pagination.',
+        importantParams: ['startAt', 'maxResults', 'id'],
+      },
+      {
+        name: 'jira_get_issue_statuses',
+        description:
+          'Retrieve all available issue statuses from JIRA with details.',
+      },
+      {
+        name: 'jira_get_all_users',
+        description:
+          'Retrieve all users from the JIRA instance including active, inactive, and other user states with pagination support.',
+        importantParams: ['startAt', 'maxResults', 'includeActive', 'includeInactive'],
       },
     ],
   },
