@@ -74,10 +74,13 @@ router.get('/callback', async (req, res) => {
       return res.send(createSuccessPage('Already Connected', 'This authorization was already processed successfully.'));
     }
 
-    const { userId, integrationType } = stateData;
+    const { userId, integrationType, codeVerifier } = stateData;
 
-    // Exchange code for access token
-    const tokenData = await oauthHandler.exchangeCodeForToken(integrationType, authCode);
+    // Exchange code for access token (pass state for PKCE support)
+    const tokenData = await oauthHandler.exchangeCodeForToken(integrationType, authCode, state);
+    
+    // Clean up state after token exchange
+    oauthHandler.deleteState(state);
     
     // Handle different token formats (some integrations return just a string, others return an object)
     let config;

@@ -585,6 +585,53 @@ export const INTEGRATION_METADATA: Record<string, IntegrationMetadata> = {
       },
     ],
   },
+  x: {
+    id: 'x',
+    type: 'x',
+    name: 'X (Twitter)',
+    howItWorks:
+      'Bridge uses the X API v2 directly with your OAuth tokens. The AI can read tweets, search content, post tweets, delete tweets, and get user information. All operations use your authenticated X account.',
+    authNotes:
+      'Requires X OAuth 2.0 with PKCE (OAuth Authorization Code flow). You need to grant permissions for tweet.read, tweet.write, users.read, and offline.access. Tokens are stored encrypted and can be revoked from your X account settings.',
+    tools: [
+      {
+        name: 'x_get_user_info / x_get_my_info',
+        description:
+          'Get information about X users, including your own profile. Returns user details like username, name, description, profile image, and public metrics.',
+        importantParams: ['username', 'user_id', 'fields'],
+      },
+      {
+        name: 'x_get_tweet',
+        description:
+          'Get details of a specific tweet by ID, including text, author, creation time, engagement metrics, and replies.',
+        importantParams: ['tweet_id', 'fields'],
+      },
+      {
+        name: 'x_get_user_tweets / x_get_my_tweets',
+        description:
+          'Get tweets from a specific user or your own tweets. Supports filtering by date range and limiting results.',
+        importantParams: ['username', 'user_id', 'max_results', 'start_time', 'end_time'],
+      },
+      {
+        name: 'x_search_tweets',
+        description:
+          'Search for tweets using X search syntax. Supports queries like "hello world", "from:username", "#hashtag", and date filters.',
+        importantParams: ['query', 'max_results', 'start_time', 'end_time'],
+      },
+      {
+        name: 'x_post_tweet',
+        description:
+          'Post a new tweet from your account. Supports text up to 280 characters and optional replies to existing tweets.',
+        importantParams: ['text', 'reply_to_tweet_id'],
+      },
+      {
+        name: 'x_delete_tweet',
+        description:
+          'Delete a tweet from your account. This action cannot be undone.',
+        importantParams: ['tweet_id'],
+      },
+    ],
+  },
 };
 
 export function getIntegrationMetadata(type: string | undefined | null): IntegrationMetadata | null {
