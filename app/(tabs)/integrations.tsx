@@ -690,7 +690,9 @@ export default function IntegrationsScreen() {
         </View>
 
         <View style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>Available Integrations</ThemedText>
+          <ThemedText style={styles.sectionTitle}>
+            Available Integrations ({integrations.length})
+          </ThemedText>
 
           {sortedIntegrations.map((integration) => (
             <View
@@ -758,7 +760,9 @@ export default function IntegrationsScreen() {
 
         {/* Upcoming Integrations */}
         <View style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>Upcoming Integrations</ThemedText>
+          <ThemedText style={styles.sectionTitle}>
+            Upcoming Integrations ({upcomingIntegrations.length})
+          </ThemedText>
           <ThemedText style={[styles.subtitle, { marginBottom: 16 }]}>
             These integrations are under development
           </ThemedText>
