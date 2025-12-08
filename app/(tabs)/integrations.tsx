@@ -69,6 +69,14 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     description: 'View events, create meetings, manage your calendar, and schedule appointments.',
   },
   {
+    id: 'jira',
+    name: 'Jira',
+    type: 'jira',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Jira_Logo.svg/150px-Jira_Logo.svg.png',
+    description: 'Create and manage issues, projects, workflows, and more.',
+  },
+  {
     id: 'zerodha',
     name: 'Zerodha',
     type: 'zerodha',
@@ -103,15 +111,6 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
 ];
 
 const UPCOMING_INTEGRATIONS: Integration[] = [
-  // Moved from Available - works locally but not in production
-  {
-    id: 'jira',
-    name: 'Jira',
-    type: 'jira',
-    connected: false,
-    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Jira_Logo.svg/150px-Jira_Logo.svg.png',
-    description: 'Create and manage issues, projects, workflows, and more.',
-  },
   {
     id: 'zomato',
     name: 'Zomato',
@@ -765,8 +764,8 @@ export default function IntegrationsScreen() {
           </ThemedText>
 
           {upcomingIntegrations.map((integration) => {
-            // JIRA and Zomato work locally - show connect button
-            const isFunctional = integration.type === 'jira' || integration.type === 'zomato';
+            // Zomato works locally - show connect button
+            const isFunctional = integration.type === 'zomato';
             
             return (
               <View
