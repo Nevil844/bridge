@@ -13,6 +13,7 @@ const JiraOAuth = require('./jira.js');
 const SlackOAuth = require('./slack.js');
 const YouTubeOAuth = require('./youtube.js');
 const GoogleCalendarOAuth = require('./google-calendar.js');
+const XOAuth = require('./x.js');
 
 // Available OAuth integrations
 const oauthIntegrations = {
@@ -26,6 +27,7 @@ const oauthIntegrations = {
   slack: SlackOAuth,
   youtube: YouTubeOAuth,
   'google-calendar': GoogleCalendarOAuth,
+  x: XOAuth,
   // Future OAuth integrations:
   // microsoft: MicrosoftOAuth,
 };

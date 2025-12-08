@@ -124,6 +124,17 @@ const INTEGRATION_QUESTIONS = {
     "Show me my YouTube subscriptions",
     "Search for 'React tutorial' videos sorted by view count",
   ],
+  x: [
+    "Show me my last 5 tweets",
+    "Search for tweets about 'AI' from the last week",
+    "Get information about @elonmusk",
+    "Search for tweets with #JavaScript hashtag",
+    "Show me my profile information",
+    "Search for tweets containing 'machine learning' from the last month",
+    "Get the latest tweets from @github",
+    "Show me tweets I posted this week",
+    "Search for tweets from @openai",
+  ],
 };
 
 /**

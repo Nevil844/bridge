@@ -13,6 +13,7 @@ const JiraIntegration = require('./jira.js');
 const SlackIntegration = require('./slack.js');
 const YouTubeIntegration = require('./youtube.js');
 const GoogleCalendarIntegration = require('./google-calendar.js');
+const XIntegration = require('./x.js');
 
 // Available integrations
 // Add new integrations here as you create them
@@ -85,6 +86,13 @@ const integrations = {
     name: 'Google Calendar',
     description: 'View events, create meetings, manage your calendar, and schedule appointments',
     icon: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Google_Calendar_icon_%282020%29.svg/512px-Google_Calendar_icon_%282020%29.svg.png?20221106121915',
+    authType: 'oauth',
+  },
+  x: {
+    class: XIntegration,
+    name: 'X (Twitter)',
+    description: 'Read and post tweets, search content, manage your X account',
+    icon: 'https://cdn-icons-png.flaticon.com/512/3256/3256013.png',
     authType: 'oauth',
   },
   // Future integrations:

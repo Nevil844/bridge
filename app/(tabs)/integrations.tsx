@@ -108,6 +108,14 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/150px-YouTube_full-color_icon_%282017%29.svg.png',
     description: 'Search videos, manage playlists, and access your YouTube content.',
   },
+  {
+    id: 'x',
+    name: 'X (Twitter)',
+    type: 'x',
+    connected: false,
+    logo: 'https://cdn-icons-png.flaticon.com/512/3256/3256013.png',
+    description: 'Read and post tweets, search content, manage your X account.',
+  },
 ];
 
 const UPCOMING_INTEGRATIONS: Integration[] = [
@@ -152,14 +160,6 @@ const UPCOMING_INTEGRATIONS: Integration[] = [
     connected: false,
     logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/Instagram_logo_2016.svg/150px-Instagram_logo_2016.svg.png',
     description: 'Post photos, manage stories, and grow your social presence.',
-  },
-  {
-    id: 'twitter',
-    name: 'X (Twitter)',
-    type: 'twitter',
-    connected: false,
-    logo: 'https://cdn-icons-png.flaticon.com/512/3256/3256013.png',
-    description: 'Post tweets, manage timeline, and grow your social influence.',
   },
   {
     id: 'telegram',

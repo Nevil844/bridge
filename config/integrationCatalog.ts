@@ -48,6 +48,11 @@ const ENTRIES: IntegrationDisplay[] = [
     name: 'YouTube',
     logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/150px-YouTube_full-color_icon_%282017%29.svg.png',
   },
+  {
+    type: 'x',
+    name: 'X (Twitter)',
+    logo: 'https://cdn-icons-png.flaticon.com/512/3256/3256013.png',
+  },
   // Upcoming / secondary
   { type: 'jira', name: 'Jira', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Jira_Logo.svg/150px-Jira_Logo.svg.png' },
   { type: 'zomato', name: 'Zomato', logo: 'https://logo.clearbit.com/zomato.com' },
@@ -55,7 +60,6 @@ const ENTRIES: IntegrationDisplay[] = [
   { type: 'aws', name: 'AWS', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/93/Amazon_Web_Services_Logo.svg/300px-Amazon_Web_Services_Logo.svg.png' },
   { type: 'discord', name: 'Discord', logo: 'https://cdn-icons-png.flaticon.com/512/5968/5968756.png' },
   { type: 'instagram', name: 'Instagram', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/Instagram_logo_2016.svg/150px-Instagram_logo_2016.svg.png' },
-  { type: 'twitter', name: 'X (Twitter)', logo: 'https://cdn-icons-png.flaticon.com/512/3256/3256013.png' },
   { type: 'telegram', name: 'Telegram', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Telegram_logo.svg/150px-Telegram_logo.svg.png' },
   { type: 'reddit', name: 'Reddit', logo: 'https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png' },
   { type: 'pinterest', name: 'Pinterest', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/08/Pinterest-logo.png/150px-Pinterest-logo.png' },
