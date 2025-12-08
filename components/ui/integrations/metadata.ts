@@ -648,6 +648,11 @@ export function getIntegrationTypeForTool(toolName: string | undefined | null): 
   const normalized = toolName.trim().toLowerCase();
   if (!normalized) return null;
 
+  // Quick check for X tools (they all start with 'x_')
+  if (normalized.startsWith('x_')) {
+    return 'x';
+  }
+
   // Build a lookup once and memoize it on the module scope
   if (!(global as any).__INTEGRATION_TOOL_LOOKUP) {
     const lookup: Record<string, string> = {};

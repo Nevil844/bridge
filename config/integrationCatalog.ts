@@ -51,7 +51,7 @@ const ENTRIES: IntegrationDisplay[] = [
   {
     type: 'x',
     name: 'X (Twitter)',
-    logo: 'https://cdn-icons-png.flaticon.com/512/3256/3256013.png',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/X_logo.jpg/1200px-X_logo.jpg',
   },
   // Upcoming / secondary
   { type: 'jira', name: 'Jira', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Jira_Logo.svg/150px-Jira_Logo.svg.png' },

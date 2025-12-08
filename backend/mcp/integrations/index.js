@@ -92,7 +92,7 @@ const integrations = {
     class: XIntegration,
     name: 'X (Twitter)',
     description: 'Read and post tweets, search content, manage your X account',
-    icon: 'https://cdn-icons-png.flaticon.com/512/3256/3256013.png',
+    icon: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/X_logo.jpg/1200px-X_logo.jpg',
     authType: 'oauth',
   },
   // Future integrations:
