@@ -113,7 +113,7 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     name: 'X (Twitter)',
     type: 'x',
     connected: false,
-    logo: 'https://cdn-icons-png.flaticon.com/512/3256/3256013.png',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/X_logo.jpg/1200px-X_logo.jpg',
     description: 'Read and post tweets, search content, manage your X account.',
   },
 ];
