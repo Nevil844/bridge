@@ -6,8 +6,8 @@
  * - Mobile: Uses AsyncStorage (non-sensitive) and SecureStore (sensitive)
  */
 
-import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 // Lazy load SecureStore only on mobile
 let SecureStore: any = null;
@@ -31,6 +31,8 @@ export const STORAGE_KEYS = {
   OAUTH_STATE: 'oauth_state',
   // Preferences
   TOOL_APPROVAL: 'preference_tool_approval',
+  // Disclaimer
+  AI_DISCLAIMER_ACKNOWLEDGED: 'ai_disclaimer_acknowledged',
 } as const;
 
 /**
