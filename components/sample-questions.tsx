@@ -32,7 +32,25 @@ export function SampleQuestions({ userId, onQuestionSelect }: SampleQuestionsPro
       }
     };
 
-    fetchQuestions();
+    if (userId) {
+      fetchQuestions();
+      
+      // Refetch questions after a delay to allow integrations to load
+      // This ensures questions update when integrations are initialized
+      const refetchTimer = setTimeout(() => {
+        fetchQuestions();
+      }, 3000); // Refetch after 3 seconds
+      
+      // Also refetch after 10 seconds to catch any late-loading integrations
+      const lateRefetchTimer = setTimeout(() => {
+        fetchQuestions();
+      }, 10000);
+      
+      return () => {
+        clearTimeout(refetchTimer);
+        clearTimeout(lateRefetchTimer);
+      };
+    }
   }, [userId]);
 
   useEffect(() => {
