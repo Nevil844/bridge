@@ -2,9 +2,11 @@ import { GlowingOrb } from '@/components/glowing-orb';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { API_ENDPOINTS } from '@/config/api';
+import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { secureStorage, storage, STORAGE_KEYS } from '@/utils/storage';
 import { setAccessToken } from '@/utils/api';
+import { secureStorage, storage, STORAGE_KEYS } from '@/utils/storage';
+import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useState } from 'react';
 import {
@@ -23,13 +25,18 @@ import {
 WebBrowser.maybeCompleteAuthSession();
 
 interface LoginScreenProps {
-  onLoginSuccess: (user: { id: string; email: string; name: string; picture?: string; plan?: string }) => void;
+  onLoginSuccess?: (user: { id: string; email: string; name: string; picture?: string; plan?: string }) => void;
 }
 
-export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
+export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const router = useRouter();
+  const { login: authLogin } = useAuth();
+  
+  // Use provided callback or auth hook
+  const handleLoginSuccess = onLoginSuccess || authLogin;
 
   const pollForSession = async (state: string) => {
     try {
@@ -70,7 +77,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             const userResponse = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${session.userId}`);
             if (userResponse.ok) {
               const userData = await userResponse.json();
-              onLoginSuccess({
+              handleLoginSuccess({
                 id: userData.id,
                 email: userData.email,
                 name: userData.username || userData.email,
@@ -167,12 +174,12 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         const userResponse = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${oauthUserId}`);
         if (userResponse.ok) {
           const userData = await userResponse.json();
-          onLoginSuccess({
-            id: userData.id,
-            email: userData.email,
-            name: userData.username || userData.email,
-            plan: userData.plan || 'free',
-          });
+            handleLoginSuccess({
+              id: userData.id,
+              email: userData.email,
+              name: userData.username || userData.email,
+              plan: userData.plan || 'free',
+            });
           setIsLoading(false);
           // Clear secure storage
           await secureStorage.removeItem(STORAGE_KEYS.OAUTH_USER_ID);
@@ -292,7 +299,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             const userResponse = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${params.userId}`);
             if (userResponse.ok) {
               const userData = await userResponse.json();
-              onLoginSuccess({
+              handleLoginSuccess({
                 id: userData.id,
                 email: userData.email,
                 name: userData.username || userData.email,
@@ -334,12 +341,12 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         if (userResponse.ok) {
           const userData = await userResponse.json();
           console.log('✅ User data fetched:', userData);
-          onLoginSuccess({
-            id: userData.id,
-            email: userData.email,
-            name: userData.username || userData.email,
-            plan: userData.plan || 'free',
-          });
+            handleLoginSuccess({
+              id: userData.id,
+              email: userData.email,
+              name: userData.username || userData.email,
+              plan: userData.plan || 'free',
+            });
           setIsLoading(false);
           return;
         } else {
@@ -352,12 +359,12 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         if (userResponse.ok) {
           const userData = await userResponse.json();
           await storage.setItem(STORAGE_KEYS.USER_ID, userData.id);
-          onLoginSuccess({
-            id: userData.id,
-            email: userData.email,
-            name: userData.username || userData.email,
-            plan: userData.plan || 'free',
-          });
+            handleLoginSuccess({
+              id: userData.id,
+              email: userData.email,
+              name: userData.username || userData.email,
+              plan: userData.plan || 'free',
+            });
           setIsLoading(false);
           return;
         }
@@ -603,9 +610,24 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           )}
         </TouchableOpacity>
 
-        <ThemedText style={styles.footerText}>
-          By continuing, you agree to our Terms of Service and Privacy Policy
-        </ThemedText>
+        <View style={styles.footerContainer}>
+          <ThemedText style={styles.footerText}>
+            By continuing, you agree to our{' '}
+            <Text
+              style={[styles.linkText, { color: isDark ? '#4A9EFF' : '#007AFF' }]}
+              onPress={() => router.push('/terms')}
+            >
+              Terms of Service
+            </Text>
+            {' '}and{' '}
+            <Text
+              style={[styles.linkText, { color: isDark ? '#4A9EFF' : '#007AFF' }]}
+              onPress={() => router.push('/privacy')}
+            >
+              Privacy Policy
+            </Text>
+          </ThemedText>
+        </View>
       </View>
     </ThemedView>
   );
@@ -682,11 +704,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  footerContainer: {
+    marginTop: 20,
+    paddingHorizontal: 20,
+  },
   footerText: {
     fontSize: 12,
     opacity: 0.5,
     textAlign: 'center',
-    marginTop: 20,
+  },
+  linkText: {
+    textDecorationLine: 'underline',
+    fontWeight: '500',
   },
 });
 

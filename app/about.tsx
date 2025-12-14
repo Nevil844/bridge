@@ -77,6 +77,29 @@ export default function AboutScreen() {
                 </TouchableOpacity>
               </View>
             </View>
+
+            <View style={styles.legalSection}>
+              <View style={styles.developerDivider} />
+              <View style={styles.legalLinks}>
+                <TouchableOpacity 
+                  onPress={() => router.push('/terms')}
+                  style={styles.legalLinkButton}
+                >
+                  <ThemedText style={[styles.legalLink, { color: isDark ? '#4A9EFF' : '#007AFF' }]}>
+                    Terms of Service
+                  </ThemedText>
+                </TouchableOpacity>
+                <ThemedText style={styles.developerSeparator}>•</ThemedText>
+                <TouchableOpacity 
+                  onPress={() => router.push('/privacy')}
+                  style={styles.legalLinkButton}
+                >
+                  <ThemedText style={[styles.legalLink, { color: isDark ? '#4A9EFF' : '#007AFF' }]}>
+                    Privacy Policy
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -108,5 +131,9 @@ const styles = StyleSheet.create({
   developerLinks: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   developerLink: { fontSize: 15, color: '#4a9eff', fontWeight: '600' },
   developerSeparator: { fontSize: 16, opacity: 0.4, marginHorizontal: 12 },
+  legalSection: { marginTop: 16, paddingTop: 16 },
+  legalLinks: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
+  legalLinkButton: { paddingVertical: 4 },
+  legalLink: { fontSize: 15, fontWeight: '600' },
 });
 

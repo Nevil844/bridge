@@ -6,7 +6,6 @@ import 'react-native-reanimated';
 
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import LoginScreen from './login';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -68,10 +67,35 @@ export default function RootLayout() {
   // Show login screen if not authenticated (and auth is enabled)
   if (!DISABLE_AUTH_FOR_TESTING && !isAuthenticated) {
     return (
-      <>
-        <LoginScreen onLoginSuccess={login} />
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+          }}
+        >
+          <Stack.Screen 
+            name="login"
+            options={{ 
+              headerShown: false,
+            }} 
+          />
+          <Stack.Screen 
+            name="terms" 
+            options={{ 
+              headerShown: false,
+              presentation: 'card',
+            }} 
+          />
+          <Stack.Screen 
+            name="privacy" 
+            options={{ 
+              headerShown: false,
+              presentation: 'card',
+            }} 
+          />
+        </Stack>
         <StatusBar style="auto" />
-      </>
+      </ThemeProvider>
     );
   }
 
@@ -110,6 +134,20 @@ export default function RootLayout() {
         />
         <Stack.Screen 
           name="profile" 
+          options={{ 
+            headerShown: false,
+            presentation: 'card',
+          }} 
+        />
+        <Stack.Screen 
+          name="terms" 
+          options={{ 
+            headerShown: false,
+            presentation: 'card',
+          }} 
+        />
+        <Stack.Screen 
+          name="privacy" 
           options={{ 
             headerShown: false,
             presentation: 'card',
