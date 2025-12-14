@@ -48,6 +48,20 @@ class XIntegration {
       if (error.response) {
         const errorData = error.response.data;
         const errorMsg = errorData?.detail || errorData?.title || error.message;
+        
+        // Enhanced error logging for debugging
+        console.error(`❌ X API Error Details:`, {
+          status: error.response.status,
+          statusText: error.response.statusText,
+          error: errorData?.error,
+          error_description: errorData?.error_description,
+          detail: errorData?.detail,
+          title: errorData?.title,
+          type: errorData?.type,
+          endpoint: url,
+          method: method,
+        });
+        
         throw new Error(`X API error (${error.response.status}): ${errorMsg}`);
       }
       throw error;
@@ -55,27 +69,184 @@ class XIntegration {
   }
 
   /**
+   * Refresh access token if needed
+   * @param {string} accessToken - Current access token
+   * @param {string} refreshToken - Refresh token
+   * @param {string} userId - User ID for database updates
+   * @param {boolean} forceRefresh - Force refresh even if token is valid (for testing)
+   * @returns {Promise<string>} - Valid access token
+   */
+  async refreshTokenIfNeeded(accessToken, refreshToken, userId, forceRefresh = false) {
+    if (!refreshToken) {
+      return accessToken;
+    }
+
+    try {
+      const XOAuth = require('../../oauth/integrations/x.js');
+      const xOAuth = new XOAuth();
+      
+      // FOR TESTING: Force refresh by setting forceRefresh = true
+      const FORCE_REFRESH_FOR_TESTING = false;
+      
+      const shouldForceRefresh = forceRefresh || FORCE_REFRESH_FOR_TESTING;
+      
+      // Try to validate token (skip if forcing refresh)
+      if (!shouldForceRefresh) {
+        try {
+          await Promise.race([
+            xOAuth.validateToken(accessToken),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
+          ]);
+          return accessToken; // Token is valid
+        } catch (validationError) {
+          // Token invalid or expired, refresh it
+          if (validationError.message.includes('Invalid or expired') || 
+              validationError.message.includes('expired') ||
+              validationError.response?.status === 401) {
+            console.log('⚠️  X token validation failed, refreshing...');
+            try {
+              const refreshResult = await Promise.race([
+                xOAuth.refreshAccessToken(refreshToken),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+              ]);
+              console.log('✅ X token refreshed successfully');
+              
+              // Update database with new token (non-blocking)
+              if (userId && refreshResult.accessToken) {
+                try {
+                  const integrationService = require('../../db/services/integration');
+                  await integrationService.storeIntegration(
+                    userId,
+                    'x',
+                    {
+                      token: refreshResult.accessToken,
+                      refreshToken: refreshResult.refreshToken || refreshToken,
+                    }
+                  );
+                  console.log('✅ Updated X token in database');
+                } catch (dbError) {
+                  console.warn('⚠️  Could not update X token in database:', dbError.message);
+                  // Don't fail - token is refreshed in memory
+                }
+              }
+              
+              return refreshResult.accessToken;
+            } catch (refreshError) {
+              // If refresh token is invalid, throw a clear error instead of using expired token
+              if (refreshError.message.includes('Invalid refresh token') || 
+                  refreshError.message.includes('re-authenticate')) {
+                console.error('❌ X refresh token is invalid - user needs to re-authenticate');
+                throw new Error('X authentication expired. Please reconnect your X account from the integrations page.');
+              }
+              // For other refresh errors, log and throw
+              console.error('❌ X token refresh failed:', refreshError.message);
+              throw refreshError;
+            }
+          }
+          // Other errors (network, etc.) - return original token
+          throw validationError;
+        }
+      }
+      
+      // Force refresh path (for testing)
+      if (shouldForceRefresh) {
+        console.log('🔄 FORCING X token refresh (testing mode)...');
+        try {
+          const refreshResult = await Promise.race([
+            xOAuth.refreshAccessToken(refreshToken),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+          ]);
+          console.log('✅ X token refreshed successfully (forced refresh)');
+          
+          // Update database with new token (non-blocking)
+          if (userId && refreshResult.accessToken) {
+            try {
+              const integrationService = require('../../db/services/integration');
+              await integrationService.storeIntegration(
+                userId,
+                'x',
+                {
+                  token: refreshResult.accessToken,
+                  refreshToken: refreshResult.refreshToken || refreshToken,
+                }
+              );
+              console.log('✅ Updated X token in database');
+            } catch (dbError) {
+              console.warn('⚠️  Could not update X token in database:', dbError.message);
+              // Don't fail - token is refreshed in memory
+            }
+          }
+          
+          return refreshResult.accessToken;
+        } catch (refreshError) {
+          // If refresh token is invalid, throw a clear error instead of using expired token
+          if (refreshError.message.includes('Invalid refresh token') || 
+              refreshError.message.includes('re-authenticate')) {
+            console.error('❌ X refresh token is invalid - user needs to re-authenticate');
+            throw new Error('X authentication expired. Please reconnect your X account from the integrations page.');
+          }
+          // For other refresh errors, fall back to original token
+          console.error('❌ X token refresh failed (forced), using original token:', refreshError.message);
+          return accessToken; // Return original token if forced refresh fails
+        }
+      }
+    } catch (error) {
+      // If it's a re-authentication error, propagate it
+      if (error.message.includes('reconnect') || error.message.includes('re-authenticate')) {
+        throw error;
+      }
+      console.log('⚠️  Could not validate/refresh X token, using existing:', error.message);
+      return accessToken;
+    }
+  }
+
+  /**
    * Connect to X API (validate token)
+   * Automatically refreshes token if expired
    * @param {Object} config - Integration configuration
    * @param {string} config.token - OAuth 2.0 access token
+   * @param {string} config.refreshToken - OAuth 2.0 refresh token
+   * @param {string} config.userId - User ID for token refresh updates
    * @returns {Promise<Object>} - Connection object
    */
   async connect(config) {
     const accessToken = config?.token || config?.accessToken;
+    const refreshToken = config?.refreshToken;
+    const userId = config?.userId;
     
     if (!accessToken) {
       throw new Error('X access token is required');
     }
 
+    // Validate token format - X OAuth 2.0 user context tokens should be strings
+    if (typeof accessToken !== 'string') {
+      throw new Error('X access token must be a string');
+    }
+
+    // Refresh token if needed (like Spotify/Jira)
+    let validToken;
+    try {
+      validToken = await this.refreshTokenIfNeeded(accessToken, refreshToken, userId);
+    } catch (refreshError) {
+      // Fall back to original token if refresh fails
+      validToken = accessToken;
+    }
+    
+    if (!validToken || validToken.length === 0) {
+      validToken = accessToken;
+    }
+
     // Test connection by fetching user info
     try {
-      const userData = await this.makeRequest('GET', '/users/me', accessToken, {
+      const userData = await this.makeRequest('GET', '/users/me', validToken, {
         'user.fields': 'id,name,username',
       });
       
       return {
-        accessToken: accessToken,
-        userId: userData.data?.id,
+        accessToken: validToken, // Use refreshed token if it was refreshed
+        refreshToken: refreshToken, // Keep refresh token
+        userId: userId, // Store userId for token refresh in callTool
+        xUserId: userData.data?.id, // X user ID
         username: userData.data?.username,
       };
     } catch (error) {
@@ -263,13 +434,24 @@ class XIntegration {
 
   /**
    * Call a tool - direct API implementation
+   * Automatically refreshes token if expired before making API calls
    */
   async callTool(connection, toolName, args) {
     if (!connection || !connection.accessToken) {
       throw new Error('Not connected to X');
     }
 
-    const accessToken = connection.accessToken;
+    // Refresh token if needed before making request (like Spotify/Jira)
+    let accessToken = connection.accessToken;
+    if (connection.refreshToken && connection.userId) {
+      accessToken = await this.refreshTokenIfNeeded(
+        connection.accessToken,
+        connection.refreshToken,
+        connection.userId
+      );
+      // Update connection with refreshed token
+      connection.accessToken = accessToken;
+    }
 
     try {
       switch (toolName) {
