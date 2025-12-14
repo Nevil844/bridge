@@ -95,11 +95,15 @@ class XOAuth {
         throw new Error('No access token received from X API');
       }
 
+      // Log successful token exchange
+      console.log('✅ X OAuth token exchange successful');
+
       return {
         accessToken: response.data.access_token,
         refreshToken: response.data.refresh_token || null,
         expiresIn: response.data.expires_in || 7200, // Default 2 hours
         tokenType: response.data.token_type || 'bearer',
+        scope: response.data.scope || null,
       };
     } catch (error) {
       console.error('X OAuth token exchange error:', error.response?.data || error.message);
@@ -112,7 +116,7 @@ class XOAuth {
    * @param {string} refreshToken - Refresh token
    * @returns {Promise<Object>} - New token data
    */
-  async refreshToken(refreshToken) {
+  async refreshAccessToken(refreshToken) {
     try {
       const credentials = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
 
@@ -143,7 +147,19 @@ class XOAuth {
       };
     } catch (error) {
       console.error('X token refresh error:', error.response?.data || error.message);
-      throw new Error('Failed to refresh X access token');
+      
+      // Provide helpful error messages for common cases
+      if (error.response?.status === 400) {
+        const errorData = error.response.data;
+        if (errorData.error === 'invalid_request' || errorData.error === 'invalid_grant') {
+          throw new Error('Invalid refresh token. The token may have expired or been revoked. Please re-authenticate.');
+        }
+        if (errorData.error === 'invalid_client') {
+          throw new Error('Invalid client credentials. Please check your X_CLIENT_ID and X_CLIENT_SECRET in .env');
+        }
+      }
+      
+      throw new Error(`Failed to refresh X access token: ${error.response?.data?.error_description || error.message}`);
     }
   }
 
@@ -159,6 +175,7 @@ class XOAuth {
         {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
           },
           params: {
             'user.fields': 'id,name,username,description,profile_image_url',
@@ -168,6 +185,21 @@ class XOAuth {
 
       return response.data.data;
     } catch (error) {
+      // Enhanced error logging
+      if (error.response) {
+        const errorData = error.response.data;
+        console.error('❌ X token validation error:', {
+          status: error.response.status,
+          error: errorData?.error,
+          detail: errorData?.detail,
+          title: errorData?.title,
+        });
+        
+        // Check if it's the Application-Only error
+        if (errorData?.detail?.includes('Application-Only')) {
+          throw new Error('Token appears to be Application-Only instead of User Context. Please reconnect your X account.');
+        }
+      }
       throw new Error('Invalid or expired X access token');
     }
   }
