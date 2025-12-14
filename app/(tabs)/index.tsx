@@ -1,3 +1,4 @@
+import AIDisclaimerModal from '@/components/ai-disclaimer-modal';
 import { GlowingOrb } from '@/components/glowing-orb';
 import { MarkdownText } from '@/components/markdown-text';
 import { SampleQuestions } from '@/components/sample-questions';
@@ -10,6 +11,7 @@ import { API_ENDPOINTS } from '@/config/api';
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePreferences } from '@/hooks/use-preferences';
+import { storage, STORAGE_KEYS } from '@/utils/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import * as Clipboard from 'expo-clipboard';
@@ -67,7 +69,7 @@ interface Model {
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const screenHeight = Dimensions.get('window').height;
-  const { user, logout } = useAuth();
+  const { user, logout, isAuthenticated } = useAuth();
   const { toolApprovalEnabled } = usePreferences();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -94,6 +96,7 @@ export default function HomeScreen() {
   const [approvalRemainingMs, setApprovalRemainingMs] = useState<number>(0);
   const TOOL_APPROVAL_TIMEOUT_MS = 45000;
   const [isApprovingTool, setIsApprovingTool] = useState(false);
+  const [showAIDisclaimer, setShowAIDisclaimer] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === 'web' ? 16 : Math.max(insets.top, 12);
@@ -118,6 +121,35 @@ export default function HomeScreen() {
     loadAvailableModels();
     cleanupOldData(); // Remove old AsyncStorage data
   }, []);
+
+  // Show disclaimer after login succeeds (when user becomes authenticated)
+  useEffect(() => {
+    const checkAIDisclaimer = async () => {
+      if (!user || !isAuthenticated) return;
+      
+      try {
+        const hasAcknowledged = await storage.getItem(STORAGE_KEYS.AI_DISCLAIMER_ACKNOWLEDGED);
+        if (!hasAcknowledged || hasAcknowledged !== 'true') {
+          // Show disclaimer if user hasn't acknowledged it yet
+          setShowAIDisclaimer(true);
+        }
+      } catch (error) {
+        console.error('Error checking AI disclaimer:', error);
+      }
+    };
+
+    checkAIDisclaimer();
+  }, [user, isAuthenticated]);
+
+  const handleAIDisclaimerAcknowledge = async () => {
+    try {
+      await storage.setItem(STORAGE_KEYS.AI_DISCLAIMER_ACKNOWLEDGED, 'true');
+      setShowAIDisclaimer(false);
+    } catch (error) {
+      console.error('Error saving AI disclaimer acknowledgment:', error);
+      setShowAIDisclaimer(false);
+    }
+  };
 
   const loadUserId = async () => {
     try {
@@ -1594,6 +1626,11 @@ export default function HomeScreen() {
           onApprove={() => submitToolApproval('approve')}
           onReject={() => submitToolApproval('reject')}
           isApproving={isApprovingTool}
+        />
+
+        <AIDisclaimerModal
+          visible={showAIDisclaimer}
+          onUnderstand={handleAIDisclaimerAcknowledge}
         />
 
         {/* Messages Area */}
