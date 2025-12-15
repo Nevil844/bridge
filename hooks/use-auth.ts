@@ -1,4 +1,5 @@
 import { API_ENDPOINTS } from '@/config/api';
+import { storage, STORAGE_KEYS } from '@/utils/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -142,6 +143,8 @@ export function useAuth() {
       // Clear access token
       const { clearAccessToken } = require('@/utils/api');
       await clearAccessToken();
+      // Reset AI disclaimer acknowledgment so it shows again next login
+      await storage.removeItem(STORAGE_KEYS.AI_DISCLAIMER_ACKNOWLEDGED);
       // Persist logout flag so test mode doesn't auto-login again
       await AsyncStorage.setItem('hasLoggedOut', 'true');
       setUser(null);
