@@ -1270,11 +1270,15 @@ export default function HomeScreen() {
       <ThemedView style={styles.container}>
         {/* Header */}
         <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
-          {/* Hamburger Menu */}
-          <TouchableOpacity 
-            style={[styles.hamburgerButton, { top: headerButtonTop }]}
-            onPress={() => setShowSidebar(true)}>
-            <IconSymbol name="line.3.horizontal" size={24} color={isDark ? '#FFFFFF' : '#000000'} />
+          <TouchableOpacity
+            style={styles.headerIconButton}
+            onPress={() => setShowSidebar(true)}
+          >
+            <IconSymbol
+              name="line.3.horizontal"
+              size={24}
+              color={isDark ? '#FFFFFF' : '#000000'}
+            />
           </TouchableOpacity>
 
           <View style={styles.headerCenter}>
@@ -1306,11 +1310,15 @@ export default function HomeScreen() {
             */}
           </View>
 
-          {/* New Chat Button */}
-          <TouchableOpacity 
-            style={[styles.newChatHeaderButton, { top: headerButtonTop }]}
-            onPress={startNewChat}>
-            <IconSymbol name="square.and.pencil" size={22} color={isDark ? '#FFFFFF' : '#000000'} />
+          <TouchableOpacity
+            style={styles.headerIconButton}
+            onPress={startNewChat}
+          >
+            <IconSymbol
+              name="square.and.pencil"
+              size={22}
+              color={isDark ? '#FFFFFF' : '#000000'}
+            />
           </TouchableOpacity>
         </View>
 
@@ -1925,34 +1933,31 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingTop: 60,
     paddingBottom: 20,
     paddingHorizontal: 16,
     position: 'relative',
   },
   hamburgerButton: {
-    position: 'absolute',
-    left: 16,
-    top: 64,
     padding: 8,
-    zIndex: 10,
+  },
+  headerIconButton: {
+    padding: 8,
   },
   newChatHeaderButton: {
-    position: 'absolute',
-    right: 16,
-    top: 64,
     padding: 8,
-    zIndex: 10,
-    opacity: 0.7,
   },
   headerCenter: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   title: {
-    fontSize: 20,
+    fontSize: 30,
     fontWeight: '600',
-    marginBottom: 8,
+    letterSpacing: 0.5,
   },
   modelSelector: {
     flexDirection: 'row',
