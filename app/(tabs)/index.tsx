@@ -1278,12 +1278,16 @@ export default function HomeScreen() {
           </TouchableOpacity>
 
           <View style={styles.headerCenter}>
-            <Text style={[
-              styles.title,
-              { color: isDark ? '#4A9EFF' : '#007AFF' }
-            ]}>Bridge AI</Text>
-            
-            {/* Model Selector */}
+            <Text
+              style={[
+                styles.title,
+                { color: isDark ? '#4A9EFF' : '#007AFF' },
+              ]}
+            >
+              Bridge AI
+            </Text>
+
+            {/* Model Selector temporarily disabled
             <TouchableOpacity
               style={[
                 styles.modelSelector,
@@ -1292,12 +1296,14 @@ export default function HomeScreen() {
                   borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
                 },
               ]}
-              onPress={() => setShowModelPicker(true)}>
+              onPress={() => setShowModelPicker(true)}
+            >
               <ThemedText style={styles.modelSelectorText}>
                 {availableModels.find((m) => m.id === selectedModel)?.name || 'Loading...'}
               </ThemedText>
               <ThemedText style={styles.dropdownIcon}>▼</ThemedText>
             </TouchableOpacity>
+            */}
           </View>
 
           {/* New Chat Button */}
