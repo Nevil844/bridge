@@ -85,11 +85,12 @@ export default function ProfileScreen() {
     try {
       await logout();
       // The app will automatically show login screen when user is null
-      // Just navigate back to tabs, auth check will handle the rest
+      // Force reload to ensure auth state is properly cleared
       if (Platform.OS === 'web') {
         window.location.reload();
       } else {
-        router.replace('/(tabs)');
+        // Don't navigate - let the auth system handle the redirect to login
+        // The _layout.tsx will detect isAuthenticated=false and show login screen
       }
     } catch (error) {
       console.error('Error logging out:', error);
@@ -151,12 +152,11 @@ export default function ProfileScreen() {
       
       if (Platform.OS === 'web') {
         alert('Your account has been deleted successfully.');
+        window.location.reload();
       } else {
         Alert.alert('Account Deleted', 'Your account has been deleted successfully.');
+        // Don't navigate - let the auth system handle the redirect to login
       }
-      
-      // Navigate away
-      router.replace('/(tabs)');
     } catch (error) {
       console.error('Error deleting account:', error);
       const message = error instanceof Error ? error.message : 'Failed to delete account';

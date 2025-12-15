@@ -169,6 +169,13 @@ export function useAuth() {
       setUser(null);
       setIsAuthenticated(false);
       setHasLoggedOut(true);
+      
+      // Force immediate reload on web to clear all state
+      const { Platform } = require('react-native');
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        // Use replace to avoid adding to history
+        window.location.replace('/login');
+      }
     } catch (error) {
       console.error('Error logging out:', error);
     }
