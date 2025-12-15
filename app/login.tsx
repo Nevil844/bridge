@@ -35,8 +35,16 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
   const router = useRouter();
   const { login: authLogin } = useAuth();
   
-  // Use provided callback or auth hook
-  const handleLoginSuccess = onLoginSuccess || authLogin;
+  // Use provided callback or auth hook, with web reload wrapper
+  const handleLoginSuccess = async (userData: { id: string; email: string; name: string; picture?: string; plan?: string }) => {
+    const loginFn = onLoginSuccess || authLogin;
+    await loginFn(userData);
+    
+    // On web, force reload to reset navigation state
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.href = '/';
+    }
+  };
 
   const pollForSession = async (state: string) => {
     try {
@@ -239,7 +247,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
       if (userResponse.ok) {
         const userData = await userResponse.json();
         console.log('✅ User data retrieved:', userData);
-        onLoginSuccess({
+        await handleLoginSuccess({
           id: userData.id,
           email: userData.email,
           name: userData.username || userData.email,
@@ -462,7 +470,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
             await storage.setItem(STORAGE_KEYS.USER_ID, userData.id);
             
             // Call login success callback
-            onLoginSuccess({
+            await handleLoginSuccess({
               id: userData.id,
               email: userData.email,
               name: userData.username || userData.email,
@@ -508,15 +516,16 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
         API_ENDPOINTS.AUTH.GOOGLE_CALLBACK
       );
 
-      console.log('🌐 OAuth result:', result.type, result.url ? 'has URL' : 'no URL');
-      if (result.url) {
-        console.log('📋 Callback URL:', result.url);
+      const resultUrl = result.type === 'success' ? result.url : undefined;
+      console.log('🌐 OAuth result:', result.type, resultUrl ? 'has URL' : 'no URL');
+      if (resultUrl) {
+        console.log('📋 Callback URL:', resultUrl);
       }
       
-      if (result.type === 'success' && result.url) {
+      if (result.type === 'success' && resultUrl) {
         // Parse the callback URL to extract user info
         console.log('✅ OAuth success, processing callback...');
-        await handleAuthCallback(result.url);
+        await handleAuthCallback(resultUrl);
       } else if (result.type === 'cancel') {
         console.log('❌ User cancelled OAuth');
         Alert.alert('Login Cancelled', 'You cancelled the login process.');

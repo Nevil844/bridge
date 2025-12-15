@@ -154,16 +154,13 @@ export default function HomeScreen() {
   const loadUserId = async () => {
     try {
       const storedUserId = await AsyncStorage.getItem('userId');
-      // Only use stored userId if it exists and is not default-user
       if (storedUserId && storedUserId !== 'default-user') {
-      setUserId(storedUserId);
+        setUserId(storedUserId);
+      } else if (user?.id) {
+        setUserId(user.id);
       } else {
-        // If no valid userId, use the one from useAuth hook
-        if (user?.id) {
-          setUserId(user.id);
-        } else {
-          setUserId('default-user');
-        }
+        // Fallback (should not happen if auth is working correctly)
+        setUserId('default-user');
       }
     } catch (error) {
       console.error('Error loading userId:', error);

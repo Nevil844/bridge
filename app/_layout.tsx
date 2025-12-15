@@ -1,6 +1,7 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack, useRouter } from 'expo-router';
+import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { ActivityIndicator, Platform, View } from 'react-native';
 import 'react-native-reanimated';
 
@@ -13,7 +14,6 @@ export const unstable_settings = {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
-  const router = useRouter();
   
   // Check if we're on the join subdomain (landing page only, no auth)
   const isJoinSubdomain = Platform.OS === 'web' && typeof window !== 'undefined' && 
@@ -25,6 +25,18 @@ export default function RootLayout() {
   
   // Disable auth for testing (set to true to skip login)
   const DISABLE_AUTH_FOR_TESTING = false;
+
+  // Protect routes: redirect to login if accessing protected routes without authentication
+  useEffect(() => {
+    if (Platform.OS === 'web' && !isLoading && !isAuthenticated && !isJoinSubdomain) {
+      if (typeof window !== 'undefined' && 
+          !window.location.pathname.includes('/login') && 
+          !window.location.pathname.includes('/terms') && 
+          !window.location.pathname.includes('/privacy')) {
+        window.location.replace('/login');
+      }
+    }
+  }, [isAuthenticated, isLoading, isJoinSubdomain]);
 
   // On join subdomain, ALWAYS show landing page without any auth checks
   if (isJoinSubdomain) {
