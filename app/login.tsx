@@ -43,6 +43,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
     // On web, force reload to reset navigation state
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       window.location.href = '/';
+    } else {
+      // On native, ensure we leave the login route
+      router.replace('/');
     }
   };
 
@@ -430,66 +433,6 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
     try {
       setIsLoading(true);
 
-      // MOBILE TEST MODE: Auto-login with existing user credentials
-      // Skip OAuth flow on mobile for testing
-      // Platform-specific test emails: iOS = nevil, Android = kushal
-      const TEST_EMAIL = Platform.OS === 'ios' 
-        ? 'neviljobanputra34@gmail.com' 
-        : Platform.OS === 'android' 
-        ? 'kushalnandha26@gmail.com' 
-        : null;
-      const IS_MOBILE = Platform.OS !== 'web';
-      
-      if (IS_MOBILE && TEST_EMAIL) {
-        console.log(`📱 MOBILE TEST MODE (${Platform.OS}): Auto-logging in with`, TEST_EMAIL);
-        
-        try {
-          // Fetch user by email from backend
-          const userResponse = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${TEST_EMAIL}`);
-          
-          if (userResponse.ok) {
-            const userData = await userResponse.json();
-            console.log('✅ Test user loaded:', userData);
-            
-            // Check if user is invited (invite-only mode)
-            const inviteCheck = await fetch(`${API_ENDPOINTS.WAITLIST}/check?email=${encodeURIComponent(TEST_EMAIL)}`);
-            if (inviteCheck.ok) {
-              const inviteData = await inviteCheck.json();
-              if (!inviteData.isInvited) {
-                Alert.alert(
-                  'Access Restricted',
-                  'This app is currently invite-only. Please join the waitlist and wait for an invitation.',
-                  [{ text: 'OK' }]
-                );
-                setIsLoading(false);
-                return;
-              }
-            }
-            
-            // Store user ID
-            await storage.setItem(STORAGE_KEYS.USER_ID, userData.id);
-            
-            // Call login success callback
-            await handleLoginSuccess({
-              id: userData.id,
-              email: userData.email,
-              name: userData.username || userData.email,
-              picture: userData.picture || undefined,
-              plan: userData.plan || 'free',
-            });
-            
-            setIsLoading(false);
-            return;
-          } else {
-            console.warn('⚠️ Test user not found, falling back to OAuth');
-            // Fall through to normal OAuth flow
-          }
-        } catch (error) {
-          console.error('❌ Error in test mode login:', error);
-          // Fall through to normal OAuth flow
-        }
-      }
-
       // Normal OAuth flow (web or if test mode fails)
       console.log('🌐 Starting OAuth flow...');
 
@@ -527,9 +470,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
         console.log('✅ OAuth success, processing callback...');
         await handleAuthCallback(resultUrl);
       } else if (result.type === 'cancel') {
-        console.log('❌ User cancelled OAuth');
-        Alert.alert('Login Cancelled', 'You cancelled the login process.');
-        setIsLoading(false);
+        console.log('⚠️ User cancelled OAuth (checking if callback still completed)...');
+        // Sometimes the browser returns cancel even though the user finished in Safari
+        await pollForSession(oauthState);
       } else if (result.type === 'dismiss') {
         // Browser was dismissed - check if we're on the callback page (web mode)
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
