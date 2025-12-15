@@ -11,6 +11,7 @@ import { API_ENDPOINTS } from '@/config/api';
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePreferences } from '@/hooks/use-preferences';
+import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { storage, STORAGE_KEYS } from '@/utils/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
@@ -33,7 +34,6 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface ThinkingData {
   isInternal: boolean;
@@ -98,11 +98,10 @@ export default function HomeScreen() {
   const [isApprovingTool, setIsApprovingTool] = useState(false);
   const [showAIDisclaimer, setShowAIDisclaimer] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
-  const insets = useSafeAreaInsets();
-  const topInset = Platform.OS === 'web' ? 16 : Math.max(insets.top, 12);
+  const { topInset, bottomInset } = useSafeAreaPadding({ top: 12, bottom: 16 });
   const headerPaddingTop = topInset + 20;
   const headerButtonTop = topInset + 24;
-  const inputBottomPadding = Platform.OS === 'web' ? 16 : Math.max(insets.bottom, 16);
+  const inputBottomPadding = bottomInset;
   const normalizeTokenUsage = (usage?: { input_tokens?: number; output_tokens?: number }) => {
     if (!usage) return undefined;
     const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined;
@@ -1318,99 +1317,109 @@ export default function HomeScreen() {
           <View style={styles.sidebarOverlay}>
             <View style={[
               styles.sidebar,
-              { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' },
+              { 
+                backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                paddingTop: topInset + 12,
+                paddingBottom: bottomInset,
+              },
             ]}>
-              {/* Sidebar Header */}
-              <View style={styles.sidebarHeader}>
-                <View style={styles.sidebarTopBar}>
-                  <TouchableOpacity 
-                    style={styles.closeIcon}
-                    onPress={() => setShowSidebar(false)}>
-                    <IconSymbol name="chevron.left" size={20} color={isDark ? '#FFFFFF' : '#000000'} />
-                  </TouchableOpacity>
-                  <Text style={[
-                    styles.sidebarTitle,
-                    { color: isDark ? '#4A9EFF' : '#007AFF' }
-                  ]}>Bridge AI</Text>
-                </View>
-                <TouchableOpacity 
-                  style={[
-                    styles.newChatButton,
-                    {
-                      backgroundColor: 'transparent',
-                      borderWidth: 1,
-                      borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-                    },
-                  ]}
-                  onPress={startNewChat}>
-                  <IconSymbol name="square.and.pencil" size={18} color={isDark ? '#FFFFFF' : '#000000'} />
-                  <ThemedText style={styles.newChatText}>New Chat</ThemedText>
-                </TouchableOpacity>
-              </View>
-
-              {/* Chat History List */}
-              <ScrollView style={styles.chatList}>
-                <ThemedText style={styles.chatListTitle}>Recent Chats</ThemedText>
-                
-                {chatHistory.length === 0 ? (
-                  <View style={styles.emptyChats}>
-                    <ThemedText style={styles.emptyChatsText}>No chat history yet</ThemedText>
+              <View style={styles.sidebarContent}>
+                {/* Sidebar Header */}
+                <View style={styles.sidebarHeader}>
+                  <View style={styles.sidebarTopBar}>
+                    <TouchableOpacity 
+                      style={styles.closeIcon}
+                      onPress={() => setShowSidebar(false)}>
+                      <IconSymbol name="chevron.left" size={20} color={isDark ? '#FFFFFF' : '#000000'} />
+                    </TouchableOpacity>
+                    <Text style={[
+                      styles.sidebarTitle,
+                      { color: isDark ? '#4A9EFF' : '#007AFF' }
+                    ]}>Bridge AI</Text>
                   </View>
-                ) : (
-                  chatHistory.map((chat) => (
-                    <View
-                      key={chat.id}
-                      style={[
-                        styles.chatItem,
-                        chat.id === currentChatId && {
-                          backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
-                        },
-                      ]}>
-                      <View style={styles.chatItemContainer}>
-                        <TouchableOpacity 
-                          style={styles.chatItemContent}
-                          onPress={() => loadChat(chat.id)}
-                          activeOpacity={0.7}>
-                          <ThemedText style={styles.chatItemTitle} numberOfLines={1}>
-                            {chat.title}
-                          </ThemedText>
-                          <ThemedText style={styles.chatItemDate}>
-                            {new Date(chat.lastActive).toLocaleDateString()}
-                          </ThemedText>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.deleteButton}
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            if (Platform.OS === 'web') {
-                              const confirmed = window.confirm('Are you sure you want to delete this chat?');
-                              if (confirmed) {
-                                deleteChat(chat.id);
-                              }
-                            } else {
-                            Alert.alert(
-                              'Delete Chat',
-                              'Are you sure you want to delete this chat?',
-                              [
-                                { text: 'Cancel', style: 'cancel' },
-                                { text: 'Delete', style: 'destructive', onPress: () => deleteChat(chat.id) }
-                              ]
-                            );
-                            }
-                          }}>
-                          <IconSymbol name="trash" size={16} color="#FF3B30" />
-                        </TouchableOpacity>
-                      </View>
+                  <TouchableOpacity 
+                    style={[
+                      styles.newChatButton,
+                      {
+                        backgroundColor: 'transparent',
+                        borderWidth: 1,
+                        borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                      },
+                    ]}
+                    onPress={startNewChat}>
+                    <IconSymbol name="square.and.pencil" size={18} color={isDark ? '#FFFFFF' : '#000000'} />
+                    <ThemedText style={styles.newChatText}>New Chat</ThemedText>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Chat History List */}
+                <ScrollView
+                  style={styles.chatList}
+                  contentContainerStyle={{ paddingBottom: bottomInset + 16 }}
+                >
+                  <ThemedText style={styles.chatListTitle}>Recent Chats</ThemedText>
+                  
+                  {chatHistory.length === 0 ? (
+                    <View style={styles.emptyChats}>
+                      <ThemedText style={styles.emptyChatsText}>No chat history yet</ThemedText>
                     </View>
-                  ))
-                )}
-              </ScrollView>
+                  ) : (
+                    chatHistory.map((chat) => (
+                      <View
+                        key={chat.id}
+                        style={[
+                          styles.chatItem,
+                          chat.id === currentChatId && {
+                            backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
+                          },
+                        ]}>
+                        <View style={styles.chatItemContainer}>
+                          <TouchableOpacity 
+                            style={styles.chatItemContent}
+                            onPress={() => loadChat(chat.id)}
+                            activeOpacity={0.7}>
+                            <ThemedText style={styles.chatItemTitle} numberOfLines={1}>
+                              {chat.title}
+                            </ThemedText>
+                            <ThemedText style={styles.chatItemDate}>
+                              {new Date(chat.lastActive).toLocaleDateString()}
+                            </ThemedText>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.deleteButton}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              if (Platform.OS === 'web') {
+                                const confirmed = window.confirm('Are you sure you want to delete this chat?');
+                                if (confirmed) {
+                                  deleteChat(chat.id);
+                                }
+                              } else {
+                              Alert.alert(
+                                'Delete Chat',
+                                'Are you sure you want to delete this chat?',
+                                [
+                                  { text: 'Cancel', style: 'cancel' },
+                                  { text: 'Delete', style: 'destructive', onPress: () => deleteChat(chat.id) }
+                                ]
+                              );
+                              }
+                            }}>
+                            <IconSymbol name="trash" size={16} color="#FF3B30" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ))
+                  )}
+                </ScrollView>
+              </View>
 
               {/* Profile Section */}
               <View style={[
                 styles.profileSection,
                 {
                   borderTopColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                  paddingBottom: bottomInset + 12,
                 },
               ]}>
                 <TouchableOpacity
@@ -2244,12 +2253,14 @@ const styles = StyleSheet.create({
   },
   sidebar: {
     width: 280,
-    paddingTop: 60,
     shadowColor: '#000',
     shadowOffset: { width: 2, height: 0 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
     elevation: 10,
+  },
+  sidebarContent: {
+    flex: 1,
   },
   sidebarBackdrop: {
     flex: 1,
@@ -2342,7 +2353,6 @@ const styles = StyleSheet.create({
   profileSection: {
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 30,
     borderTopWidth: 1,
   },
   profileButton: {

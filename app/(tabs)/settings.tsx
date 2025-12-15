@@ -2,21 +2,24 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function SettingsScreen() {
   const colorScheme = useColorScheme();
-  const insets = useSafeAreaInsets();
+  const { topInset, bottomInset } = useSafeAreaPadding({ top: 16, bottom: 24 });
   const isDark = colorScheme === 'dark';
   const router = useRouter();
 
   return (
     <ThemedView style={styles.container}>
-      <ScrollView style={styles.scrollView}>
-        <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: bottomInset + 32 }}
+      >
+        <View style={[styles.header, { paddingTop: topInset + 20 }]}>
           <ThemedText style={styles.title}>Settings</ThemedText>
         </View>
 

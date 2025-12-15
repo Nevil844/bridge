@@ -4,14 +4,14 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { API_ENDPOINTS } from '@/config/api';
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { authenticatedFetch } from '@/utils/api';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Alert, Image, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ProfileScreen() {
-  const insets = useSafeAreaInsets();
+  const { topInset, bottomInset } = useSafeAreaPadding({ top: 16, bottom: 24 });
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const router = useRouter();
@@ -172,8 +172,11 @@ export default function ProfileScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <ScrollView style={styles.scrollView}>
-        <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: bottomInset + 24 }}
+      >
+        <View style={[styles.header, { paddingTop: topInset + 20 }]}>
           <View style={styles.headerRow}>
             <TouchableOpacity
               onPress={() => router.back()}

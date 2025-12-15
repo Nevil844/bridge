@@ -4,6 +4,7 @@ import { ThemedView } from '@/components/themed-view';
 import { API_ENDPOINTS } from '@/config/api';
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { setAccessToken } from '@/utils/api';
 import { secureStorage, storage, STORAGE_KEYS } from '@/utils/storage';
 import { useRouter } from 'expo-router';
@@ -34,6 +35,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
   const isDark = colorScheme === 'dark';
   const router = useRouter();
   const { login: authLogin } = useAuth();
+  const { paddingStyle } = useSafeAreaPadding({ top: 24, bottom: 24 });
   
   // Use provided callback or auth hook, with web reload wrapper
   const handleLoginSuccess = async (userData: { id: string; email: string; name: string; picture?: string; plan?: string }) => {
@@ -524,7 +526,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
   };
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView style={[styles.container, paddingStyle]}>
       <View style={styles.content}>
         <View style={styles.logoContainer}>
           <View style={styles.orbContainer}>
@@ -590,7 +592,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 20,
   },
   content: {
     width: '100%',

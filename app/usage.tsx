@@ -3,16 +3,16 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { formatTokenCount, getUserUsage, getWarningColor, type TokenUsage } from '@/services/usage';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 
 export default function UsageScreen() {
   const colorScheme = useColorScheme();
-  const insets = useSafeAreaInsets();
+  const { topInset, bottomInset } = useSafeAreaPadding({ top: 16, bottom: 24 });
   const isDark = colorScheme === 'dark';
   const { user } = useAuth();
   const router = useRouter();
@@ -47,8 +47,11 @@ export default function UsageScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <ScrollView style={styles.scrollView}>
-        <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: bottomInset + 24 }}
+      >
+        <View style={[styles.header, { paddingTop: topInset + 20 }]}>
           <View style={styles.headerRow}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
               <IconSymbol name="chevron.left" size={24} color={isDark ? '#FFFFFF' : '#000000'} />

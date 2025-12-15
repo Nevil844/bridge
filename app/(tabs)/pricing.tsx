@@ -3,12 +3,12 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { formatTokenCount, getUserUsage, getWarningColor, type TokenUsage } from '@/services/usage';
 import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Modal, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Plan {
   id: string;
@@ -58,7 +58,7 @@ const PLANS: Plan[] = [
 
 export default function PricingScreen() {
   const colorScheme = useColorScheme();
-  const insets = useSafeAreaInsets();
+  const { topInset, bottomInset } = useSafeAreaPadding({ top: 16, bottom: 24 });
   const isDark = colorScheme === 'dark';
   const { user } = useAuth();
   const router = useRouter();
@@ -275,8 +275,12 @@ Thank you!`;
 
   return (
     <ThemedView style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+      <ScrollView
+        style={styles.scrollView}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: bottomInset + 24 }}
+      >
+        <View style={[styles.header, { paddingTop: topInset + 20 }]}>
           <View style={styles.headerRow}>
             <View style={styles.headerTextContainer}>
               <ThemedText style={styles.title}>Choose Your Plan</ThemedText>

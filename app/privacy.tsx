@@ -2,6 +2,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
@@ -9,11 +10,12 @@ import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 export default function PrivacyScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const { topInset, bottomInset } = useSafeAreaPadding({ top: 16, bottom: 24 });
   const router = useRouter();
 
   return (
     <ThemedView style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: topInset + 12 }]}>
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
@@ -25,7 +27,11 @@ export default function PrivacyScreen() {
         <View style={styles.backButton} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: bottomInset + 16 }}
+        showsVerticalScrollIndicator={false}
+      >
         <ThemedText style={styles.lastUpdated}>Last Updated: December 2025</ThemedText>
 
         <ThemedText style={styles.sectionTitle}>1. Information We Collect</ThemedText>

@@ -2,14 +2,14 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { usePreferences } from '@/hooks/use-preferences';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import { Appearance, Platform, ScrollView, StyleSheet, TouchableOpacity, View, useColorScheme as useRNColorScheme } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function PreferencesScreen() {
-  const insets = useSafeAreaInsets();
+  const { topInset, bottomInset } = useSafeAreaPadding({ top: 16, bottom: 24 });
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const router = useRouter();
@@ -61,8 +61,11 @@ export default function PreferencesScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <ScrollView style={styles.scrollView}>
-        <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: bottomInset + 24 }}
+      >
+        <View style={[styles.header, { paddingTop: topInset + 20 }]}>
           <View style={styles.headerRow}>
             <TouchableOpacity
               onPress={() => router.back()}
