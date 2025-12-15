@@ -1,5 +1,6 @@
 import { API_ENDPOINTS } from '@/config/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
@@ -40,8 +41,20 @@ export function useAuth() {
       // First, check if there's a stored user ID
       const storedUserId = await AsyncStorage.getItem('userId');
       
+      // Treat default-user as logged out: clear and show login
+      if (storedUserId === 'default-user') {
+        await AsyncStorage.removeItem('userId');
+        const { clearAccessToken } = require('@/utils/api');
+        await clearAccessToken();
+        setUser(null);
+        setIsAuthenticated(false);
+        setHasLoggedOut(true);
+        setIsLoading(false);
+        return;
+      }
+      
       // If user ID exists and is not default-user, use it (normal flow)
-      if (storedUserId && storedUserId !== 'default-user') {
+      if (storedUserId) {
         // Fetch access token first
         try {
           const { setAccessToken } = require('@/utils/api');
@@ -61,6 +74,19 @@ export function useAuth() {
         
         if (response.ok) {
           const userData = await response.json();
+          
+          // If backend somehow returns default-user, treat as logged out
+          if (userData.id === 'default-user') {
+            await AsyncStorage.removeItem('userId');
+            const { clearAccessToken } = require('@/utils/api');
+            await clearAccessToken();
+            setUser(null);
+            setIsAuthenticated(false);
+            setHasLoggedOut(true);
+            setIsLoading(false);
+            return;
+          }
+
           setUser({
             id: userData.id,
             email: userData.email,
@@ -80,54 +106,6 @@ export function useAuth() {
           setIsAuthenticated(false);
           setIsLoading(false);
           return;
-        }
-      }
-      
-      // TEST MODE: Auto-login with existing user for mobile testing
-      // Only runs if NO userId in storage AND user hasn't explicitly logged out
-      // Platform-specific test emails: iOS = nevil, Android = kushal
-      const TEST_MODE_EMAIL = Platform.OS === 'ios' 
-        ? 'neviljobanputra34@gmail.com' 
-        : Platform.OS === 'android' 
-        ? 'kushalnandha26@gmail.com' 
-        : null;
-      
-      if (TEST_MODE_EMAIL && !storedUserId && !hasExplicitlyLoggedOut) {
-        // Fetch user by email from backend
-        const response = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${TEST_MODE_EMAIL}`);
-        
-        if (response.ok) {
-          const userData = await response.json();
-          
-          // Store user ID for future use
-          await AsyncStorage.setItem('userId', userData.id);
-          
-          // Fetch and store access token
-          try {
-            const { setAccessToken } = require('@/utils/api');
-            const tokenResponse = await fetch(`${API_ENDPOINTS.AUTH.TOKEN}?userId=${userData.id}`);
-            if (tokenResponse.ok) {
-              const tokenData = await tokenResponse.json();
-              if (tokenData.accessToken) {
-                await setAccessToken(tokenData.accessToken);
-              }
-            }
-          } catch (error) {
-            // Ignore token fetch errors
-          }
-          
-          setUser({
-            id: userData.id,
-            email: userData.email,
-            name: userData.username || userData.email,
-            picture: userData.picture || undefined,
-            plan: userData.plan || 'free',
-          });
-          setIsAuthenticated(true);
-          setIsLoading(false);
-          return;
-      } else {
-          console.warn('⚠️ Test user not found in database');
         }
       }
       
@@ -170,11 +148,11 @@ export function useAuth() {
       setIsAuthenticated(false);
       setHasLoggedOut(true);
       
-      // Force immediate reload on web to clear all state
-      const { Platform } = require('react-native');
+      // Force navigation to login
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        // Use replace to avoid adding to history
         window.location.replace('/login');
+      } else {
+        router.replace('/login');
       }
     } catch (error) {
       console.error('Error logging out:', error);
