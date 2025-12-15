@@ -142,7 +142,7 @@ function createSuccessPage(title, message) {
     <!DOCTYPE html>
     <html>
       <head>
-        <title>${title}</title>
+        <title>Bridge AI – ${title}</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
           body {
@@ -152,30 +152,47 @@ function createSuccessPage(title, message) {
             align-items: center;
             height: 100vh;
             margin: 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background:
+              radial-gradient(circle at top left, rgba(74, 158, 255, 0.4), transparent 55%),
+              radial-gradient(circle at bottom right, rgba(124, 58, 237, 0.4), transparent 55%),
+              #050816;
           }
           .container {
             text-align: center;
-            background: white;
-            padding: 40px;
-            border-radius: 20px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            background: rgba(15, 23, 42, 0.96);
+            padding: 32px 28px;
+            border-radius: 24px;
+            box-shadow:
+              0 18px 60px rgba(15, 23, 42, 0.9),
+              0 0 0 1px rgba(148, 163, 184, 0.12);
             max-width: 400px;
+            width: 90%;
+            backdrop-filter: blur(22px);
           }
           .checkmark {
-            font-size: 60px;
-            color: #34C759;
-            margin-bottom: 20px;
+            width: 64px;
+            height: 64px;
+            border-radius: 32px;
+            margin: 0 auto 20px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at top, #4A9EFF, #2563EB);
+            box-shadow: 0 12px 35px rgba(37, 99, 235, 0.7);
+            color: white;
+            font-size: 32px;
           }
           h1 {
-            color: #333;
+            color: #E5E7EB;
             margin: 0 0 10px 0;
-            font-size: 24px;
+            font-size: 22px;
+            letter-spacing: 0.03em;
           }
           p {
-            color: #666;
+            color: #9CA3AF;
             margin: 0 0 20px 0;
-            font-size: 16px;
+            font-size: 14px;
+            line-height: 1.6;
           }
         </style>
       </head>
@@ -183,8 +200,8 @@ function createSuccessPage(title, message) {
         <div class="container">
           <div class="checkmark">✓</div>
           <h1>${title}</h1>
-          <p>You can now close this window and return to the app.</p>
-          ${message ? `<p style="font-size: 14px; color: #999;">${message}</p>` : ''}
+          <p>You can close this tab and continue in the Bridge AI app.</p>
+          ${message ? `<p style="font-size: 13px; color: #9CA3AF;">${message}</p>` : ''}
           <script>
             setTimeout(() => {
               window.close();

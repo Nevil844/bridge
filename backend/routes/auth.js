@@ -435,14 +435,17 @@ function createSuccessPage(userInfo, userId, state) {
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Login Successful</title>
+        <title>Bridge AI – Login Successful</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
           body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             margin: 0;
             padding: 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background:
+              radial-gradient(circle at top left, rgba(74, 158, 255, 0.4), transparent 55%),
+              radial-gradient(circle at bottom right, rgba(124, 58, 237, 0.4), transparent 55%),
+              #050816;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -450,55 +453,98 @@ function createSuccessPage(userInfo, userId, state) {
           }
           .container {
             text-align: center;
-            background: white;
-            padding: 40px;
-            border-radius: 20px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            background: rgba(15, 23, 42, 0.96);
+            padding: 32px 28px;
+            border-radius: 24px;
+            box-shadow:
+              0 18px 60px rgba(15, 23, 42, 0.9),
+              0 0 0 1px rgba(148, 163, 184, 0.12);
             max-width: 400px;
+            width: 90%;
+            backdrop-filter: blur(22px);
           }
           .checkmark {
-            font-size: 60px;
-            color: #34C759;
-            margin-bottom: 20px;
+            width: 64px;
+            height: 64px;
+            border-radius: 32px;
+            margin: 0 auto 20px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at top, #4A9EFF, #2563EB);
+            box-shadow: 0 12px 35px rgba(37, 99, 235, 0.7);
+            color: white;
+            font-size: 32px;
           }
           h1 {
-            color: #333;
+            color: #E5E7EB;
             margin: 0 0 10px 0;
-            font-size: 24px;
+            font-size: 22px;
+            letter-spacing: 0.03em;
           }
           p {
-            color: #666;
+            color: #9CA3AF;
             margin: 0 0 20px 0;
-            font-size: 16px;
+            font-size: 14px;
+            line-height: 1.6;
           }
           .user-info {
-            background: #f5f5f5;
-            padding: 15px;
-            border-radius: 10px;
+            background: rgba(15, 23, 42, 0.9);
+            padding: 14px 16px;
+            border-radius: 14px;
             margin: 20px 0;
+            border: 1px solid rgba(148, 163, 184, 0.25);
           }
           .user-info img {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            margin-bottom: 10px;
+            width: 52px;
+            height: 52px;
+            border-radius: 999px;
+            margin-bottom: 8px;
+            border: 2px solid rgba(148, 163, 184, 0.5);
           }
           .user-info p {
             margin: 5px 0;
-            font-size: 14px;
+            font-size: 13px;
+          }
+          .email {
+            color: #6B7280;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+          }
+          .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            background: rgba(37, 99, 235, 0.12);
+            color: #BFDBFE;
+            margin-top: 6px;
+          }
+          .badge-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 999px;
+            background: #4ADE80;
           }
         </style>
       </head>
       <body>
         <div class="container">
           <div class="checkmark">✓</div>
-          <h1>Login Successful!</h1>
+          <h1>Welcome to Bridge AI</h1>
           <div class="user-info">
             ${userInfo.picture ? `<img src="${userInfo.picture}" alt="${userInfo.name}" />` : ''}
             <p><strong>${userInfo.name || userInfo.email}</strong></p>
-            <p style="color: #999; font-size: 12px;">${userInfo.email}</p>
+            <p class="email">${userInfo.email}</p>
+            <div class="badge">
+              <span class="badge-dot"></span>
+              <span>Login successful</span>
+            </div>
           </div>
-          <p>You can now close this window and return to the app.</p>
+          <p>You can close this tab and continue in the Bridge AI app.</p>
           <script>
             try {
               localStorage.setItem('oauth_userId', '${userId}');
