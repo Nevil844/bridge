@@ -3,6 +3,7 @@ import { ThemedView } from '@/components/themed-view';
 import { getIntegrationMetadata } from '@/components/ui/integrations/metadata';
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { authenticatedFetch } from '@/utils/api';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -17,7 +18,6 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Integration {
   id: string;
@@ -263,7 +263,7 @@ const UPCOMING_INTEGRATIONS: Integration[] = [
 
 export default function IntegrationsScreen() {
   const colorScheme = useColorScheme();
-  const insets = useSafeAreaInsets();
+  const { topInset, bottomInset } = useSafeAreaPadding({ top: 12, bottom: 24 });
   const [integrations, setIntegrations] = useState<Integration[]>(AVAILABLE_INTEGRATIONS);
   const [upcomingIntegrations, setUpcomingIntegrations] = useState<Integration[]>(UPCOMING_INTEGRATIONS);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -531,8 +531,11 @@ export default function IntegrationsScreen() {
 
     return (
       <ThemedView style={styles.container}>
-        <ScrollView style={styles.scrollView}>
-          <View style={[styles.header, { paddingTop: insets.top + 12, paddingBottom: 12 }]}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: bottomInset + 24 }}
+      >
+        <View style={[styles.header, { paddingTop: topInset + 12, paddingBottom: 12 }]}>
             <View
               style={{
                 flexDirection: 'row',
@@ -681,8 +684,11 @@ export default function IntegrationsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <ScrollView style={styles.scrollView}>
-        <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: bottomInset + 24 }}
+      >
+        <View style={[styles.header, { paddingTop: topInset + 20 }]}>
           <ThemedText style={styles.title}>Integrations</ThemedText>
           <ThemedText style={styles.subtitle}>
             Connect your tools to Bridge AI for powerful integrations

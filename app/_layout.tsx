@@ -1,9 +1,10 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { ActivityIndicator, Platform, View } from 'react-native';
 import 'react-native-reanimated';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -38,57 +39,118 @@ export default function RootLayout() {
     }
   }, [isAuthenticated, isLoading, isJoinSubdomain]);
 
-  // On join subdomain, ALWAYS show landing page without any auth checks
-  if (isJoinSubdomain) {
+  const content = useMemo(() => {
+    // On join subdomain, ALWAYS show landing page without any auth checks
+    if (isJoinSubdomain) {
+      return (
+        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+            }}
+            initialRouteName="index"
+          >
+            <Stack.Screen 
+              name="index"
+              options={{ 
+                headerShown: false,
+              }} 
+            />
+            <Stack.Screen 
+              name="landing" 
+              options={{ 
+                headerShown: false,
+              }} 
+            />
+          </Stack>
+          <StatusBar style="auto" />
+        </ThemeProvider>
+      );
+    }
+
+    // For main app (bridge.neviljobanputra.com), require auth
+    // Show loading screen while checking authentication
+    if (!DISABLE_AUTH_FOR_TESTING && isLoading) {
+      return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" />
+        </View>
+      );
+    }
+
+    // Show login screen if not authenticated (and auth is enabled)
+    if (!DISABLE_AUTH_FOR_TESTING && !isAuthenticated) {
+      return (
+        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+            }}
+          >
+            <Stack.Screen 
+              name="login"
+              options={{ 
+                headerShown: false,
+              }} 
+            />
+            <Stack.Screen 
+              name="terms" 
+              options={{ 
+                headerShown: false,
+                presentation: 'card',
+              }} 
+            />
+            <Stack.Screen 
+              name="privacy" 
+              options={{ 
+                headerShown: false,
+                presentation: 'card',
+              }} 
+            />
+          </Stack>
+          <StatusBar style="auto" />
+        </ThemeProvider>
+      );
+    }
+
+    // Show main app (auth disabled for testing or authenticated)
     return (
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-          }}
-          initialRouteName="index"
-        >
-          <Stack.Screen 
-            name="index"
-            options={{ 
-              headerShown: false,
-            }} 
-          />
+        <Stack>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen 
             name="landing" 
             options={{ 
               headerShown: false,
+              presentation: 'fullScreenModal',
             }} 
           />
-        </Stack>
-        <StatusBar style="auto" />
-      </ThemeProvider>
-    );
-  }
-
-  // For main app (bridge.neviljobanputra.com), require auth
-  // Show loading screen while checking authentication
-  if (!DISABLE_AUTH_FOR_TESTING && isLoading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
-
-  // Show login screen if not authenticated (and auth is enabled)
-  if (!DISABLE_AUTH_FOR_TESTING && !isAuthenticated) {
-    return (
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-          }}
-        >
           <Stack.Screen 
-            name="login"
+            name="preferences" 
             options={{ 
               headerShown: false,
+              presentation: 'card',
+            }} 
+          />
+          <Stack.Screen 
+            name="usage" 
+            options={{ 
+              headerShown: false,
+              presentation: 'card',
+            }} 
+          />
+          <Stack.Screen 
+            name="about" 
+            options={{ 
+              headerShown: false,
+              presentation: 'card',
+            }} 
+          />
+          <Stack.Screen 
+            name="profile" 
+            options={{ 
+              headerShown: false,
+              presentation: 'card',
             }} 
           />
           <Stack.Screen 
@@ -105,69 +167,18 @@ export default function RootLayout() {
               presentation: 'card',
             }} 
           />
+          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
     );
-  }
+  }, [
+    DISABLE_AUTH_FOR_TESTING,
+    colorScheme,
+    isAuthenticated,
+    isJoinSubdomain,
+    isLoading,
+  ]);
 
-  // Show main app (auth disabled for testing or authenticated)
-  return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen 
-          name="landing" 
-          options={{ 
-            headerShown: false,
-            presentation: 'fullScreenModal',
-          }} 
-        />
-        <Stack.Screen 
-          name="preferences" 
-          options={{ 
-            headerShown: false,
-            presentation: 'card',
-          }} 
-        />
-        <Stack.Screen 
-          name="usage" 
-          options={{ 
-            headerShown: false,
-            presentation: 'card',
-          }} 
-        />
-        <Stack.Screen 
-          name="about" 
-          options={{ 
-            headerShown: false,
-            presentation: 'card',
-          }} 
-        />
-        <Stack.Screen 
-          name="profile" 
-          options={{ 
-            headerShown: false,
-            presentation: 'card',
-          }} 
-        />
-        <Stack.Screen 
-          name="terms" 
-          options={{ 
-            headerShown: false,
-            presentation: 'card',
-          }} 
-        />
-        <Stack.Screen 
-          name="privacy" 
-          options={{ 
-            headerShown: false,
-            presentation: 'card',
-          }} 
-        />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
-  );
+  return <SafeAreaProvider>{content}</SafeAreaProvider>;
 }
