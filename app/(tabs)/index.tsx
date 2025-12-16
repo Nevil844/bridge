@@ -84,6 +84,7 @@ export default function HomeScreen() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [chatHistory, setChatHistory] = useState<Array<{id: string, title: string, lastActive: string, messageCount: number}>>([]);
+  const [isLoadingChats, setIsLoadingChats] = useState(false);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string>('default-user');
   const [availableModels, setAvailableModels] = useState<Model[]>([]);
@@ -198,9 +199,10 @@ export default function HomeScreen() {
   }, []);
 
   // Load conversations from database
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async (showLoading = false) => {
     try {
       if (!userId) return; // Wait for userId to load
+      if (showLoading) setIsLoadingChats(true);
       // Use authenticated fetch - token is automatically added to headers
       const { authenticatedFetch } = require('@/utils/api');
       const response = await authenticatedFetch(`${API_ENDPOINTS.CONVERSATIONS}`);
@@ -215,6 +217,8 @@ export default function HomeScreen() {
       }
     } catch (error) {
       console.error('Error loading conversations:', error);
+    } finally {
+      if (showLoading) setIsLoadingChats(false);
     }
   }, [userId]);
 
@@ -997,7 +1001,10 @@ export default function HomeScreen() {
         <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
           <TouchableOpacity
             style={styles.headerIconButton}
-            onPress={() => setShowSidebar(true)}
+            onPress={() => {
+              setShowSidebar(true);
+              loadConversations(true); // Reload chats when sidebar opens
+            }}
           >
             <IconSymbol
               name="line.3.horizontal"
@@ -1098,7 +1105,12 @@ export default function HomeScreen() {
                 >
                   <ThemedText style={styles.chatListTitle}>Recent Chats</ThemedText>
                   
-                  {chatHistory.length === 0 ? (
+                  {isLoadingChats ? (
+                    <View style={styles.emptyChats}>
+                      <ActivityIndicator size="small" color="#007AFF" />
+                      <ThemedText style={[styles.emptyChatsText, { marginTop: 8 }]}>Loading chats...</ThemedText>
+                    </View>
+                  ) : chatHistory.length === 0 ? (
                     <View style={styles.emptyChats}>
                       <ThemedText style={styles.emptyChatsText}>No chat history yet</ThemedText>
                     </View>
