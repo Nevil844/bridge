@@ -20,8 +20,21 @@ export const API_CONFIG = {
   // BASE_URL: 'http://10.0.2.2:3000',       // For Android Emulator
 };
 
+// Helper to convert HTTP URL to WebSocket URL
+export const getWebSocketUrl = (httpUrl: string): string => {
+  if (httpUrl.startsWith('https://')) {
+    return httpUrl.replace('https://', 'wss://');
+  } else if (httpUrl.startsWith('http://')) {
+    return httpUrl.replace('http://', 'ws://');
+  }
+  return httpUrl;
+};
+
 export const API_ENDPOINTS = {
   CHAT: `${API_CONFIG.BASE_URL}/api/chat`,
+  get CHAT_WS() {
+    return getWebSocketUrl(`${API_CONFIG.BASE_URL}/api/chat/stream`);
+  },
   CHAT_TOOL_APPROVAL: `${API_CONFIG.BASE_URL}/api/chat/tools/approval`,
   MODELS: `${API_CONFIG.BASE_URL}/api/models`,
   MCP_STATUS: `${API_CONFIG.BASE_URL}/api/mcp/status`,
