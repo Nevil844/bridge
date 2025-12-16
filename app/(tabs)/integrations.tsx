@@ -269,23 +269,25 @@ export default function IntegrationsScreen() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [detailsIntegration, setDetailsIntegration] = useState<Integration | null>(null);
 
   const isDark = colorScheme === 'dark';
 
   useEffect(() => {
-    loadUserIntegrations();
+    loadUserIntegrations(true);
   }, []);
 
   // Reload integrations when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      loadUserIntegrations();
+      loadUserIntegrations(false);
     }, [])
   );
 
-  const loadUserIntegrations = async () => {
+  const loadUserIntegrations = async (showInitialLoading = false) => {
     try {
+      if (showInitialLoading) setIsInitialLoading(true);
       // Use authenticated fetch - token is automatically added to headers
       const response = await authenticatedFetch(`${API_ENDPOINTS.INTEGRATIONS}`);
       
@@ -324,6 +326,8 @@ export default function IntegrationsScreen() {
       setUpcomingIntegrations(updatedUpcoming);
     } catch (error) {
       console.error('Error loading integrations:', error);
+    } finally {
+      setIsInitialLoading(false);
     }
   };
 
@@ -678,6 +682,16 @@ export default function IntegrationsScreen() {
             </View>
           </View>
         </ScrollView>
+      </ThemedView>
+    );
+  }
+
+  // Show full-screen loading on initial load
+  if (isInitialLoading) {
+    return (
+      <ThemedView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <ThemedText style={{ marginTop: 16, opacity: 0.7 }}>Loading integrations...</ThemedText>
       </ThemedView>
     );
   }
