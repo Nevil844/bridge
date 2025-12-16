@@ -1,7 +1,7 @@
-import React from 'react';
-import { Text, StyleSheet, Linking, View } from 'react-native';
-import { ThemedText } from './themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import React from 'react';
+import { Linking, StyleSheet, Text, View } from 'react-native';
+import { ThemedText } from './themed-text';
 
 interface MarkdownTextProps {
   text: string;
@@ -73,16 +73,24 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
 
         const flushList = () => {
           if (pendingListItems.length === 0) return;
+          const listKey = key++;
           result.push(
-            <View key={`list-${key++}`} style={styles.listContainer}>
+            <View key={`list-${listKey}`} style={styles.listContainer}>
               {pendingListItems.map((item, idx) => {
-                const parsedItem = parseInlineFormatting(item, key + idx, textColor, codeBg, codeText);
+                const itemKey = listKey * 1000 + idx;
+                const parsedItem = parseInlineFormatting(item, itemKey, textColor, codeBg, codeText);
                 return (
-                  <View key={`list-item-${key + idx}`} style={styles.listItemRow}>
+                  <View key={`list-item-${itemKey}`} style={styles.listItemRow}>
                     <Text style={[styles.bullet, { color: textColor }]}>•</Text>
-                    <Text style={[styles.listItemText, { color: textColor }]}>
-                      {parsedItem.length > 0 ? parsedItem : item}
-                    </Text>
+                    <View style={styles.listItemTextContainer}>
+                      {parsedItem.length > 0 ? (
+                        <Text style={[styles.listItemText, { color: textColor }]}>
+                          {parsedItem}
+                        </Text>
+                      ) : (
+                        <Text style={[styles.listItemText, { color: textColor }]}>{item}</Text>
+                      )}
+                    </View>
                   </View>
                 );
               })}
@@ -93,11 +101,19 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
         };
 
         lines.forEach((line, lineIndex) => {
-          const bulletMatch = line.match(/^\s*[-*]\s+(.+)$/);
+          // Match list items: - item or * item (with optional leading whitespace)
+          const bulletMatch = line.match(/^\s*[-*•]\s+(.+)$/);
           if (bulletMatch) {
-            pendingListItems.push(bulletMatch[1]);
+            pendingListItems.push(bulletMatch[1].trim());
+            // Flush list if this is the last line or next line is not a list item
             if (lineIndex === lines.length - 1) {
               flushList();
+            } else {
+              const nextLine = lines[lineIndex + 1];
+              const nextIsListItem = /^\s*[-*•]\s+/.test(nextLine);
+              if (!nextIsListItem) {
+                flushList();
+              }
             }
             return;
           } else {
@@ -346,15 +362,21 @@ const styles = StyleSheet.create({
   listItemRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 4,
+    marginBottom: 6,
+    paddingLeft: 4,
   },
   bullet: {
-    width: 12,
-    lineHeight: 18,
+    fontSize: 18,
+    lineHeight: 22,
+    marginRight: 8,
+    marginTop: 2,
+  },
+  listItemTextContainer: {
+    flex: 1,
+    flexShrink: 1,
   },
   listItemText: {
-    flex: 1,
-    lineHeight: 18,
+    lineHeight: 22,
   },
   h1: {
     fontSize: 24,
