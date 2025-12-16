@@ -74,11 +74,11 @@ class XIntegration {
    * @param {string} refreshToken - Refresh token
    * @param {string} userId - User ID for database updates
    * @param {boolean} forceRefresh - Force refresh even if token is valid (for testing)
-   * @returns {Promise<string>} - Valid access token
+   * @returns {Promise<{accessToken: string, refreshToken: string}>} - Valid tokens
    */
   async refreshTokenIfNeeded(accessToken, refreshToken, userId, forceRefresh = false) {
     if (!refreshToken) {
-      return accessToken;
+      return { accessToken, refreshToken: refreshToken || null };
     }
 
     try {
@@ -97,7 +97,7 @@ class XIntegration {
             xOAuth.validateToken(accessToken),
             new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
           ]);
-          return accessToken; // Token is valid
+          return { accessToken, refreshToken }; // Token is valid
         } catch (validationError) {
           // Token invalid or expired, refresh it
           if (validationError.message.includes('Invalid or expired') || 
@@ -130,7 +130,10 @@ class XIntegration {
                 }
               }
               
-              return refreshResult.accessToken;
+              return {
+                accessToken: refreshResult.accessToken,
+                refreshToken: refreshResult.refreshToken || refreshToken,
+              };
             } catch (refreshError) {
               // If refresh token is invalid, throw a clear error instead of using expired token
               if (refreshError.message.includes('Invalid refresh token') || 
@@ -177,7 +180,10 @@ class XIntegration {
             }
           }
           
-          return refreshResult.accessToken;
+          return {
+            accessToken: refreshResult.accessToken,
+            refreshToken: refreshResult.refreshToken || refreshToken,
+          };
         } catch (refreshError) {
           // If refresh token is invalid, throw a clear error instead of using expired token
           if (refreshError.message.includes('Invalid refresh token') || 
@@ -187,7 +193,7 @@ class XIntegration {
           }
           // For other refresh errors, fall back to original token
           console.error('❌ X token refresh failed (forced), using original token:', refreshError.message);
-          return accessToken; // Return original token if forced refresh fails
+          return { accessToken, refreshToken }; // Return original tokens if forced refresh fails
         }
       }
     } catch (error) {
@@ -196,7 +202,7 @@ class XIntegration {
         throw error;
       }
       console.log('⚠️  Could not validate/refresh X token, using existing:', error.message);
-      return accessToken;
+      return { accessToken, refreshToken: refreshToken || null };
     }
   }
 
@@ -224,16 +230,29 @@ class XIntegration {
     }
 
     // Refresh token if needed (like Spotify/Jira)
-    let validToken;
+    let validToken = accessToken;
+    let updatedRefreshToken = refreshToken;
+    let refreshAttempted = false;
+    
     try {
-      validToken = await this.refreshTokenIfNeeded(accessToken, refreshToken, userId);
+      const refreshResult = await this.refreshTokenIfNeeded(accessToken, refreshToken, userId);
+      validToken = refreshResult.accessToken;
+      updatedRefreshToken = refreshResult.refreshToken || refreshToken;
+      refreshAttempted = true;
     } catch (refreshError) {
-      // Fall back to original token if refresh fails
+      refreshAttempted = true;
+      // If refresh fails with a re-authentication error, throw it
+      if (refreshError.message && (refreshError.message.includes('reconnect') || refreshError.message.includes('re-authenticate'))) {
+        throw refreshError;
+      }
+      // For other refresh errors, log and try with original token
+      console.warn(`⚠️  X token refresh failed during connect, using original token: ${refreshError.message}`);
       validToken = accessToken;
+      updatedRefreshToken = refreshToken;
     }
     
     if (!validToken || validToken.length === 0) {
-      validToken = accessToken;
+      throw new Error('X access token is invalid or empty');
     }
 
     // Test connection by fetching user info
@@ -244,12 +263,55 @@ class XIntegration {
       
       return {
         accessToken: validToken, // Use refreshed token if it was refreshed
-        refreshToken: refreshToken, // Keep refresh token
+        refreshToken: updatedRefreshToken, // Keep refresh token (may be updated)
         userId: userId, // Store userId for token refresh in callTool
         xUserId: userData.data?.id, // X user ID
         username: userData.data?.username,
       };
     } catch (error) {
+      // If it's a 401, the token is invalid - try refreshing one more time if we haven't already
+      if (error.response?.status === 401 && refreshToken && !refreshAttempted) {
+        try {
+          console.log('⚠️  X connection test failed with 401, attempting token refresh...');
+          const XOAuth = require('../../oauth/integrations/x.js');
+          const xOAuth = new XOAuth();
+          const refreshResult = await xOAuth.refreshAccessToken(refreshToken);
+          validToken = refreshResult.accessToken;
+          updatedRefreshToken = refreshResult.refreshToken || refreshToken;
+          
+          // Update database with new token
+          if (userId && validToken) {
+            try {
+              const integrationService = require('../../db/services/integration');
+              await integrationService.storeIntegration(
+                userId,
+                'x',
+                {
+                  token: validToken,
+                  refreshToken: updatedRefreshToken,
+                }
+              );
+            } catch (dbError) {
+              console.warn('⚠️  Could not update X token in database:', dbError.message);
+            }
+          }
+          
+          // Retry connection test with refreshed token
+          const userData = await this.makeRequest('GET', '/users/me', validToken, {
+            'user.fields': 'id,name,username',
+          });
+          
+          return {
+            accessToken: validToken,
+            refreshToken: updatedRefreshToken,
+            userId: userId,
+            xUserId: userData.data?.id,
+            username: userData.data?.username,
+          };
+        } catch (retryError) {
+          throw new Error(`Failed to verify X connection: ${retryError.message}`);
+        }
+      }
       throw new Error(`Failed to verify X connection: ${error.message}`);
     }
   }
@@ -444,13 +506,17 @@ class XIntegration {
     // Refresh token if needed before making request (like Spotify/Jira)
     let accessToken = connection.accessToken;
     if (connection.refreshToken && connection.userId) {
-      accessToken = await this.refreshTokenIfNeeded(
+      const refreshResult = await this.refreshTokenIfNeeded(
         connection.accessToken,
         connection.refreshToken,
         connection.userId
       );
-      // Update connection with refreshed token
-      connection.accessToken = accessToken;
+      // Update connection with refreshed tokens
+      connection.accessToken = refreshResult.accessToken;
+      if (refreshResult.refreshToken) {
+        connection.refreshToken = refreshResult.refreshToken;
+      }
+      accessToken = refreshResult.accessToken;
     }
 
     try {
