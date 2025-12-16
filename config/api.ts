@@ -35,6 +35,9 @@ export const API_ENDPOINTS = {
   get CHAT_WS() {
     return getWebSocketUrl(`${API_CONFIG.BASE_URL}/api/chat/stream`);
   },
+  get TRANSCRIBE_WS() {
+    return getWebSocketUrl(`${API_CONFIG.BASE_URL}/api/transcribe/stream`);
+  },
   CHAT_TOOL_APPROVAL: `${API_CONFIG.BASE_URL}/api/chat/tools/approval`,
   MODELS: `${API_CONFIG.BASE_URL}/api/models`,
   MCP_STATUS: `${API_CONFIG.BASE_URL}/api/mcp/status`,

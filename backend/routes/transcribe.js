@@ -1,10 +1,8 @@
 const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
-const { TranscribeStreamingClient, StartStreamTranscriptionCommand } = require('@aws-sdk/client-transcribe-streaming');
 const { TranscribeClient, StartTranscriptionJobCommand, GetTranscriptionJobCommand } = require('@aws-sdk/client-transcribe');
 const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
-const { Readable } = require('stream');
 const appConfig = require('../config/app');
 
 const router = express.Router();
@@ -25,158 +23,333 @@ async function streamToString(stream) {
 }
 
 /**
- * Real-time streaming transcription endpoint (WebSocket)
+ * Authenticate token and return user ID
+ */
+async function authenticateTranscribeToken(token) {
+  const integrationService = require('../db/services/integration');
+  const { getPrismaClient } = require('../db/index');
+  
+  if (!token || token.trim() === '') {
+    throw new Error('Token is required');
+  }
+
+  const prisma = getPrismaClient();
+  const integrations = await prisma.userIntegration.findMany({
+    where: {
+      provider: 'google-auth',
+      isActive: true,
+    },
+  });
+
+  let authenticatedUserId = null;
+  
+  for (const integration of integrations) {
+    try {
+      const decryptedCredentials = integrationService.decrypt(integration.credentials);
+      if (decryptedCredentials && typeof decryptedCredentials === 'object' && decryptedCredentials.accessToken === token) {
+        authenticatedUserId = integration.userId;
+        break;
+      }
+    } catch (error) {
+      continue;
+    }
+  }
+
+  if (!authenticatedUserId) {
+    throw new Error('Invalid or expired token');
+  }
+
+  return authenticatedUserId;
+}
+
+/**
+ * WebSocket transcription endpoint
+ * Collects audio chunks and processes them using AWS Transcribe batch API (supports m4a format)
  * NOTE: This is defined in server.js because express-ws requires app.ws(), not router.ws()
  * The WebSocket route is: /api/transcribe/stream
  */
 function setupTranscribeWebSocket(app) {
   app.ws('/api/transcribe/stream', (ws, req) => {
-  const region = process.env.AWS_REGION || 'us-east-1';
-  
-  const clientConfig = {
-    region: region,
-  };
-  
-  if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-    clientConfig.credentials = {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    let userId = null;
+    let authenticated = false;
+    let audioQueue = [];
+    let isStreaming = false;
+
+    const region = process.env.AWS_REGION || 'ap-south-1'; // Mumbai region
+    const clientConfig = {
+      region: region,
     };
-  }
-
-  const transcribeClient = new TranscribeStreamingClient(clientConfig);
-  let audioQueue = [];
-  let audioQueueResolver = null;
-  let isStreaming = false;
-  let transcriptionPromise = null;
-
-  // Async generator for audio chunks
-  async function* audioGenerator() {
-    while (isStreaming) {
-      if (audioQueue.length > 0) {
-        const chunk = audioQueue.shift();
-        yield { AudioEvent: { AudioChunk: chunk } };
-      } else {
-        // Wait for next chunk
-        await new Promise(resolve => {
-          audioQueueResolver = resolve;
-        });
-      }
+    
+    console.log(`🌍 Using AWS region: ${region} (for both S3 and Transcribe)`);
+    
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      clientConfig.credentials = {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      };
     }
-  }
 
-  ws.on('message', async (message) => {
-    try {
-      const data = JSON.parse(message);
-      
-      if (data.type === 'start') {
-        console.log('🎤 Starting real-time transcription stream...');
-        isStreaming = true;
-        audioQueue = [];
+    // Cleanup function
+    const cleanup = () => {
+      isStreaming = false;
+      audioQueue = [];
+    };
 
-        // Start streaming transcription
-        const command = new StartStreamTranscriptionCommand({
-          LanguageCode: data.languageCode || 'en-US',
-          MediaSampleRateHertz: data.sampleRate || 16000,
-          MediaEncoding: 'pcm',
-          AudioStream: audioGenerator(),
-        });
+    ws.on('message', async (message) => {
+      try {
+        // Handle binary audio data (m4a chunks from Expo Audio)
+        if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
+          if (!authenticated || !isStreaming) {
+            console.warn('⚠️ Received audio chunk but not authenticated or streaming not started');
+            return;
+          }
 
-        // Handle transcription results in background
-        transcriptionPromise = (async () => {
-          try {
-            const response = await transcribeClient.send(command);
-            
-            if (response.TranscriptResultStream) {
-              for await (const event of response.TranscriptResultStream) {
-                if (event.TranscriptEvent) {
-                  const results = event.TranscriptEvent.Transcript?.Results || [];
-                  results.forEach(result => {
-                    if (result.Alternatives && result.Alternatives.length > 0) {
-                      const transcript = result.Alternatives[0].Transcript;
-                      const isPartial = result.IsPartial || false;
-                      
-                      ws.send(JSON.stringify({
-                        type: 'transcript',
-                        text: transcript,
-                        isPartial: isPartial,
-                      }));
-                      
-                      if (!isPartial) {
-                        console.log('✅ Final transcript:', transcript);
-                      } else {
-                        console.log('📝 Partial transcript:', transcript);
-                      }
-                    }
-                  });
-                }
-              }
-            }
-          } catch (error) {
-            console.error('❌ Transcription stream error:', error);
-            if (ws.readyState === 1) { // WebSocket.OPEN
+          const audioChunk = Buffer.isBuffer(message) ? message : Buffer.from(message);
+          
+          if (audioChunk.length === 0) {
+            return;
+          }
+
+          // Log audio chunk receipt (first few chunks and periodically)
+          const totalChunks = audioQueue.length + 1;
+          if (totalChunks <= 5 || totalChunks % 20 === 0) {
+            console.log(`📥 Received audio chunk #${totalChunks}: ${audioChunk.length} bytes (queue size: ${audioQueue.length})`);
+          }
+
+          // Collect audio chunks for batch transcription (supports m4a format)
+          audioQueue.push(audioChunk);
+          return;
+        }
+
+        // Handle JSON messages (control messages)
+        const data = JSON.parse(message.toString());
+        
+        // First message must be authentication
+        if (!authenticated) {
+          if (data.type === 'auth' && data.token) {
+            try {
+              userId = await authenticateTranscribeToken(data.token);
+              authenticated = true;
+              console.log(`✅ Transcription WebSocket authenticated for user ${userId}`);
+              ws.send(JSON.stringify({ type: 'authenticated', userId }));
+            } catch (error) {
+              console.error('❌ Transcription authentication failed:', error);
               ws.send(JSON.stringify({
                 type: 'error',
-                message: error.message,
+                message: 'Authentication failed: ' + error.message,
               }));
+              ws.close();
+            }
+          } else {
+            ws.send(JSON.stringify({
+              type: 'error',
+              message: 'Authentication required. Send { type: "auth", token: "..." } first.',
+            }));
+            ws.close();
+          }
+          return;
+        }
+        
+        if (data.type === 'start') {
+          if (isStreaming) {
+            console.warn('⚠️ Transcription already started');
+            return;
+          }
+
+          console.log('🎤 Starting transcription (will use batch API for m4a files)...');
+          isStreaming = true;
+          audioQueue = [];
+
+        } else if (data.type === 'stop') {
+          console.log('🛑 Stopping transcription stream...');
+          isStreaming = false;
+          
+          if (audioQueue.length > 0 && ws.readyState === 1) {
+            console.log(`📦 Processing ${audioQueue.length} audio chunks using batch transcription...`);
+            
+            try {
+              const totalSize = audioQueue.reduce((sum, chunk) => sum + chunk.length, 0);
+              const combinedAudio = Buffer.concat(audioQueue, totalSize);
+              console.log(`✅ Combined audio: ${totalSize} bytes`);
+              
+              const tempFilePath = `${appConfig.uploads.dest}/transcribe-${Date.now()}-${Math.random().toString(36).substring(7)}.m4a`;
+              fs.writeFileSync(tempFilePath, combinedAudio);
+              console.log(`💾 Saved audio to temp file: ${tempFilePath}`);
+              
+              const s3Bucket = process.env.AWS_TRANSCRIBE_S3_BUCKET || process.env.AWS_S3_BUCKET;
+              
+              if (!s3Bucket) {
+                throw new Error('S3 bucket not configured. Set AWS_TRANSCRIBE_S3_BUCKET in .env');
+              }
+              
+              const TranscribeClient = require('@aws-sdk/client-transcribe').TranscribeClient;
+              const S3Client = require('@aws-sdk/client-s3').S3Client;
+              const { StartTranscriptionJobCommand, GetTranscriptionJobCommand } = require('@aws-sdk/client-transcribe');
+              const { PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+              
+              const s3ClientConfig = {
+                region: region,
+              };
+              
+              if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+                s3ClientConfig.credentials = {
+                  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+                  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+                };
+              }
+              
+              const s3Client = new S3Client(s3ClientConfig);
+              const batchTranscribeClient = new TranscribeClient(clientConfig);
+              
+              // Upload to S3
+              const jobName = `transcribe-ws-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+              const s3Key = `transcriptions/${jobName}.m4a`;
+              
+              await s3Client.send(new PutObjectCommand({
+                Bucket: s3Bucket,
+                Key: s3Key,
+                Body: combinedAudio,
+                ContentType: 'audio/m4a',
+              }));
+              
+              console.log(`✅ Uploaded audio to S3: s3://${s3Bucket}/${s3Key}`);
+              
+              const s3Uri = `s3://${s3Bucket}/${s3Key}`;
+              const startCommand = new StartTranscriptionJobCommand({
+                TranscriptionJobName: jobName,
+                Media: { MediaFileUri: s3Uri },
+                MediaFormat: 'mp4',
+                LanguageCode: data.languageCode || 'en-US',
+              });
+              
+              await batchTranscribeClient.send(startCommand);
+              console.log(`✅ Started batch transcription job: ${jobName}`);
+              
+              let jobStatus = 'IN_PROGRESS';
+              let attempts = 0;
+              const maxAttempts = 30;
+              
+              while (jobStatus === 'IN_PROGRESS' && attempts < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                const getCommand = new GetTranscriptionJobCommand({ TranscriptionJobName: jobName });
+                const jobResult = await batchTranscribeClient.send(getCommand);
+                jobStatus = jobResult.TranscriptionJob?.TranscriptionJobStatus || 'IN_PROGRESS';
+                attempts++;
+                
+                if (jobStatus === 'COMPLETED') {
+                  const transcriptUri = jobResult.TranscriptionJob?.Transcript?.TranscriptFileUri;
+                  if (!transcriptUri) {
+                    throw new Error('Transcription completed but no transcript URI found');
+                  }
+                  
+                  const https = require('https');
+                  const transcriptResponse = await new Promise((resolve, reject) => {
+                    https.get(transcriptUri, (response) => {
+                      if (response.statusCode !== 200) {
+                        reject(new Error(`Failed to fetch transcript: ${response.statusCode}`));
+                        return;
+                      }
+                      
+                      let data = '';
+                      response.on('data', (chunk) => { data += chunk; });
+                      response.on('end', () => {
+                        try {
+                          const transcriptJson = JSON.parse(data);
+                          resolve(transcriptJson);
+                        } catch (e) {
+                          reject(new Error('Failed to parse transcript JSON: ' + e.message));
+                        }
+                      });
+                    }).on('error', (error) => {
+                      reject(error);
+                    });
+                    
+                    setTimeout(() => reject(new Error('Request timeout')), 10000);
+                  });
+                  
+                  const transcriptText = transcriptResponse.results?.transcripts?.[0]?.transcript || '';
+                  
+                  if (transcriptText.trim()) {
+                    console.log(`✅ Batch transcription completed: "${transcriptText}"`);
+                    
+                    if (ws.readyState === 1) {
+                      console.log(`📤 Sending transcript to client: "${transcriptText}"`);
+                      ws.send(JSON.stringify({
+                        type: 'transcript',
+                        text: transcriptText,
+                        isPartial: false,
+                      }));
+                      await new Promise(resolve => setTimeout(resolve, 100));
+                    } else {
+                      console.warn('⚠️ WebSocket is not open, cannot send transcript');
+                    }
+                  } else {
+                    console.warn('⚠️ Batch transcription returned empty transcript');
+                  }
+                  
+                  // Cleanup S3 file
+                  try {
+                    await s3Client.send(new DeleteObjectCommand({
+                      Bucket: s3Bucket,
+                      Key: s3Key,
+                    }));
+                  } catch (cleanupError) {
+                    console.warn('⚠️ Failed to cleanup S3 file:', cleanupError);
+                  }
+                  
+                  break;
+                } else if (jobStatus === 'FAILED') {
+                  const failureReason = jobResult.TranscriptionJob?.FailureReason || 'Unknown error';
+                  throw new Error(`Transcription job failed: ${failureReason}`);
+                }
+              }
+              
+              if (jobStatus !== 'COMPLETED') {
+                throw new Error('Transcription job timed out');
+              }
+              
+              // Cleanup temp file
+              try {
+                fs.unlinkSync(tempFilePath);
+              } catch (e) {
+                console.warn('⚠️ Failed to delete temp file:', e);
+              }
+              
+            } catch (error) {
+              console.error('❌ Batch transcription error:', error);
+              if (ws.readyState === 1) {
+                ws.send(JSON.stringify({
+                  type: 'error',
+                  message: 'Transcription failed: ' + error.message,
+                }));
+              }
             }
           }
-        })();
-
-      } else if (data.type === 'audio' && isStreaming) {
-        // Send audio chunk to Transcribe
-        const audioChunk = Buffer.from(data.audio, 'base64');
-        audioQueue.push(audioChunk);
-        
-        // Resume generator if it was waiting
-        if (audioQueueResolver) {
-          audioQueueResolver();
-          audioQueueResolver = null;
-        }
-        
-      } else if (data.type === 'stop') {
-        // Stop transcription
-        console.log('🛑 Stopping transcription stream...');
-        isStreaming = false;
-        
-        // Resume generator to allow it to finish
-        if (audioQueueResolver) {
-          audioQueueResolver();
-          audioQueueResolver = null;
-        }
-        
-        // Wait for transcription to complete
-        if (transcriptionPromise) {
-          try {
-            await transcriptionPromise;
-          } catch (error) {
-            console.error('Error waiting for transcription:', error);
+          
+          if (ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'stopped' }));
           }
         }
-        
+      } catch (error) {
+        console.error('❌ WebSocket message error:', error);
         if (ws.readyState === 1) { // WebSocket.OPEN
-          ws.send(JSON.stringify({ type: 'stopped' }));
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: error.message,
+          }));
         }
       }
-    } catch (error) {
-      console.error('❌ WebSocket error:', error);
-      if (ws.readyState === 1) { // WebSocket.OPEN
-        ws.send(JSON.stringify({
-          type: 'error',
-          message: error.message,
-        }));
-      }
-    }
-  });
+    });
 
-    ws.on('close', async () => {
-      console.log('🔌 WebSocket closed, cleaning up...');
-      isStreaming = false;
-      
-      if (audioQueueResolver) {
-        audioQueueResolver();
-        audioQueueResolver = null;
-      }
+    ws.on('error', (error) => {
+      console.error('❌ WebSocket error:', error);
+      cleanup();
+    });
+
+    ws.on('close', () => {
+      console.log('🔌 Transcription WebSocket closed, cleaning up...');
+      cleanup();
     });
   });
 }
@@ -193,7 +366,7 @@ router.post('/batch', upload.single('audio'), async (req, res) => {
 
     console.log('🎵 Transcribing audio file (batch mode):', req.file.filename);
 
-    const region = process.env.AWS_REGION || 'us-east-1';
+    const region = process.env.AWS_REGION || 'ap-south-1';
     const s3Bucket = process.env.AWS_TRANSCRIBE_S3_BUCKET || process.env.AWS_S3_BUCKET;
     
     const clientConfig = {
@@ -433,13 +606,5 @@ router.post('/batch', upload.single('audio'), async (req, res) => {
   }
 });
 
-/**
- * Legacy endpoint - uses batch transcription for backward compatibility
- */
-router.post('/', upload.single('audio'), async (req, res) => {
-  // Redirect to batch endpoint
-  req.url = '/batch';
-  router.handle(req, res);
-});
 
 module.exports = { router, setupTranscribeWebSocket };
