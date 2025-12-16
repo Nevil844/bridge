@@ -11,6 +11,7 @@ const memoryRouter = require('./routes/memory');
 const usageRouter = require('./routes/usage');
 const authRouter = require('./routes/auth');
 const chatRouter = require('./routes/chat');
+const { setupChatWebSocket } = require('./routes/chat');
 const modelsRouter = require('./routes/models');
 const oauthRouter = require('./routes/oauth');
 const waitlistRouter = require('./routes/waitlist');
@@ -57,6 +58,9 @@ app.use('/api/transcribe', transcribeRouter);
 
 // Setup WebSocket route for real-time transcription (must be after expressWs)
 setupTranscribeWebSocket(app);
+
+// Setup WebSocket route for chat streaming (must be after expressWs)
+setupChatWebSocket(app);
 
 // Legacy integration endpoints (for backward compatibility)
 app.get('/api/integrations', verifyUser, async (req, res) => {
