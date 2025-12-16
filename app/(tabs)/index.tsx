@@ -78,6 +78,9 @@ export default function HomeScreen() {
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const transcribeWebSocketRef = useRef<WebSocket | null>(null);
+  const [transcriptionText, setTranscriptionText] = useState('');
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [chatHistory, setChatHistory] = useState<Array<{id: string, title: string, lastActive: string, messageCount: number}>>([]);
@@ -416,15 +419,198 @@ export default function HomeScreen() {
         playsInSilentModeIOS: true,
       });
 
+      // Create recording with PCM format for real-time streaming
       const { recording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
       
       setRecording(recording);
       setIsRecording(true);
+      setTranscriptionText('');
+
+      // Get access token for WebSocket authentication
+      const { getAccessToken } = require('@/utils/api');
+      const token = await getAccessToken();
+      
+      if (!token) {
+        Alert.alert('Error', 'No access token available. Please log in again.');
+        setIsRecording(false);
+        return;
+      }
+
+      // Create WebSocket connection for real-time transcription
+      const ws = new WebSocket(API_ENDPOINTS.TRANSCRIBE_WS);
+      transcribeWebSocketRef.current = ws;
+
+      ws.onopen = () => {
+        // Authenticate first
+        ws.send(JSON.stringify({ type: 'auth', token }));
+      };
+
+      const messageHandler = (event: MessageEvent) => {
+        // Handle binary audio data (shouldn't come from server, but handle gracefully)
+        if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
+          return;
+        }
+
+        try {
+          const data = JSON.parse(event.data);
+          console.log('📨 Transcription WebSocket message:', data.type);
+          
+          if (data.type === 'authenticated') {
+            // Don't start here - let streamAudioChunks handle it
+            console.log('✅ Transcription WebSocket authenticated');
+          } else if (data.type === 'transcript') {
+            // Update transcription text (partial or final)
+            const transcriptText = data.text || '';
+            console.log('📝 Transcript received:', transcriptText, data.isPartial ? '(partial)' : '(final)');
+            
+            if (transcriptText.trim()) {
+              setTranscriptionText(transcriptText);
+              setInputText(transcriptText);
+            } else {
+              console.warn('⚠️ Received empty transcript');
+            }
+            
+            // If final transcript, we can auto-send or let user review
+            if (!data.isPartial && transcriptText.trim()) {
+              console.log('✅ Final transcript ready:', transcriptText);
+              // Optionally auto-send final transcript
+              // handleSendWithText(transcriptText);
+            }
+          } else if (data.type === 'error') {
+            console.error('Transcription error:', data.message);
+            Alert.alert('Transcription Error', data.message);
+            setIsTranscribing(false); // Reset on error
+          } else if (data.type === 'stopped') {
+            console.log('Transcription stopped');
+            setIsTranscribing(false); // Reset when stopped
+          }
+        } catch (error) {
+          // Not JSON, might be binary - ignore
+          console.warn('Non-JSON message received (likely binary audio):', error);
+        }
+      };
+
+      ws.addEventListener('message', messageHandler);
+      
+      // Store handler reference for cleanup
+      (ws as any)._transcribeMessageHandler = messageHandler;
+
+      ws.onerror = (error) => {
+        console.error('Transcription WebSocket error:', error);
+        Alert.alert('Error', 'Failed to connect to transcription service');
+      };
+
+      ws.onclose = () => {
+        const handler = (ws as any)?._transcribeMessageHandler;
+        if (handler) {
+          ws.removeEventListener('message', handler);
+          delete (ws as any)._transcribeMessageHandler;
+        }
+        transcribeWebSocketRef.current = null;
+        console.log('🔌 Transcription WebSocket closed');
+      };
+
+      // Don't stream yet - wait until recording stops
+      // Expo Audio's getURI() only works AFTER recording stops
+      // We'll stream the file in stopRecording()
     } catch (err) {
       console.error('Failed to start recording', err);
       Alert.alert('Error', 'Failed to start recording');
+      setIsRecording(false);
+    }
+  };
+
+  // Stream audio file after recording stops
+  // Note: Expo Audio's getURI() only works AFTER recording stops
+  // This reads the m4a file and sends it to the backend for transcription
+  const streamAudioFile = async (recording: Audio.Recording, ws: WebSocket) => {
+    try {
+      // Get the recording URI (only available after recording stops)
+      const uri = recording.getURI();
+      if (!uri) {
+        throw new Error('Recording URI not available. Make sure recording has stopped.');
+      }
+
+      console.log(`📁 Reading audio file from: ${uri}`);
+
+      // Read the entire audio file using XMLHttpRequest (React Native compatible)
+      const audioData = await new Promise<Uint8Array>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', uri, true);
+        xhr.responseType = 'arraybuffer';
+        
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            const arrayBuffer = xhr.response as ArrayBuffer;
+            resolve(new Uint8Array(arrayBuffer));
+          } else {
+            reject(new Error(`Failed to read audio file: ${xhr.statusText}`));
+          }
+        };
+        
+        xhr.onerror = () => {
+          reject(new Error('Failed to read audio file: network error'));
+        };
+        
+        xhr.send();
+      });
+
+      const fileSize = audioData.length;
+      console.log(`📦 Audio file size: ${fileSize} bytes`);
+
+      if (fileSize === 0) {
+        throw new Error('Audio file is empty');
+      }
+
+      // Start transcription stream
+      if (ws.readyState === WebSocket.OPEN) {
+        console.log('🎤 Starting transcription stream...');
+        ws.send(JSON.stringify({
+          type: 'start',
+          languageCode: 'en-US',
+          sampleRate: 16000,
+        }));
+
+        // Wait a bit for the stream to initialize
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        // Stream the file in chunks
+        // Note: This is m4a format, backend needs to convert to PCM
+        const chunkSize = 3200; // AWS Transcribe recommended chunk size
+        let offset = 0;
+        let chunksSent = 0;
+
+        while (offset < fileSize && ws.readyState === WebSocket.OPEN) {
+          const endOffset = Math.min(offset + chunkSize, fileSize);
+          const audioChunk = audioData.slice(offset, endOffset);
+          
+          if (audioChunk.length > 0) {
+            chunksSent++;
+            if (chunksSent <= 5 || chunksSent % 20 === 0) {
+              console.log(`📤 Sending audio chunk #${chunksSent}: ${audioChunk.length} bytes (${Math.round(offset / fileSize * 100)}%)`);
+            }
+            ws.send(audioChunk);
+          }
+          
+          offset += chunkSize;
+          
+          // Small delay to avoid overwhelming the connection
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+
+        console.log(`✅ Finished streaming audio file. Total chunks: ${chunksSent}`);
+      }
+    } catch (error) {
+      console.error('❌ Error streaming audio file:', error);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'error',
+          message: 'Failed to stream audio: ' + (error as Error).message,
+        }));
+      }
+      throw error;
     }
   };
 
@@ -433,421 +619,123 @@ export default function HomeScreen() {
 
     try {
       setIsRecording(false);
+      setIsTranscribing(true); // Disable buttons during transcription
+      setTranscriptionText('Transcribing...'); // Show loading state
+      
+      // Stop the recording first to get the URI
+      console.log('🛑 Stopping recording...');
       await recording.stopAndUnloadAsync();
+      
+      // Now get the URI and stream the file
+      const ws = transcribeWebSocketRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        // Wait for authentication if not already authenticated
+        let authenticated = false;
+        const checkAuth = () => {
+          // Check if we received authenticated message
+          return authenticated;
+        };
+        
+        // Set up a one-time auth check
+        const authCheckHandler = (event: MessageEvent) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'authenticated') {
+              authenticated = true;
+              ws.removeEventListener('message', authCheckHandler);
+            }
+          } catch (e) {
+            // Not JSON, ignore
+          }
+        };
+        
+        // If not authenticated yet, wait for it
+        if (!authenticated) {
+          ws.addEventListener('message', authCheckHandler);
+          // Wait up to 2 seconds for authentication
+          await new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+              ws.removeEventListener('message', authCheckHandler);
+              resolve(undefined);
+            }, 2000);
+            
+            const checkInterval = setInterval(() => {
+              if (authenticated) {
+                clearTimeout(timeout);
+                clearInterval(checkInterval);
+                ws.removeEventListener('message', authCheckHandler);
+                resolve(undefined);
+              }
+            }, 100);
+          });
+        }
+        
+        // Now stream the audio file
+        await streamAudioFile(recording, ws);
+        
+        // Stop transcription stream (triggers batch processing)
+        console.log('🛑 Stopping transcription stream...');
+        ws.send(JSON.stringify({ type: 'stop' }));
+        
+        // Wait for transcript message (batch transcription takes time)
+        let transcriptReceived = false;
+        const transcriptHandler = (event: MessageEvent) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'transcript' && !data.isPartial) {
+              transcriptReceived = true;
+              console.log('✅ Received final transcript, closing WebSocket...');
+            }
+          } catch (e) {
+            // Not JSON, ignore
+          }
+        };
+        
+        ws.addEventListener('message', transcriptHandler);
+        
+        // Wait up to 30 seconds for transcript (batch transcription can take time)
+        const maxWaitTime = 30000; // 30 seconds
+        const checkInterval = 100; // Check every 100ms
+        let waited = 0;
+        
+        while (!transcriptReceived && waited < maxWaitTime && ws.readyState === WebSocket.OPEN) {
+          await new Promise(resolve => setTimeout(resolve, checkInterval));
+          waited += checkInterval;
+        }
+        
+        if (!transcriptReceived) {
+          console.warn('⚠️ Transcript not received within timeout, closing WebSocket anyway');
+        }
+        
+        ws.removeEventListener('message', transcriptHandler);
+        const handler = (ws as any)?._transcribeMessageHandler;
+        if (handler) {
+          ws.removeEventListener('message', handler);
+        }
+        ws.close();
+        transcribeWebSocketRef.current = null;
+      }
+
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
       });
 
-      const uri = recording.getURI();
       setRecording(null);
+      setIsTranscribing(false); // Re-enable buttons after transcription
 
-      if (uri) {
-        await transcribeAudio(uri);
+      // If we have final transcription text, use it
+      if (transcriptionText.trim()) {
+        setInputText(transcriptionText);
       }
     } catch (err) {
       console.error('Failed to stop recording', err);
       Alert.alert('Error', 'Failed to stop recording');
-    }
-  };
-
-  const transcribeAudio = async (audioUri: string) => {
-    try {
-      setIsLoading(true);
-      // Show immediate feedback
-      setInputText('🎤 Transcribing...');
-      
-      // userId is already in state from loadUserId()
-
-      // Create form data - handle web and mobile differently
-      const formData = new FormData();
-      
-      if (Platform.OS === 'web') {
-        // For web: fetch the audio file and create a File object
-        try {
-          const response = await fetch(audioUri);
-          const blob = await response.blob();
-          const file = new File([blob], 'recording.m4a', { type: 'audio/m4a' });
-          formData.append('audio', file);
-        } catch (fetchError) {
-          console.error('Failed to fetch audio file:', fetchError);
-          // Fallback: try to use the URI directly (might work for some cases)
-          formData.append('audio', audioUri as any);
-        }
-      } else {
-        // For mobile (React Native): use the object format
-        formData.append('audio', {
-          uri: audioUri,
-          type: 'audio/m4a',
-          name: 'recording.m4a',
-        } as any);
-      }
-      
-      formData.append('userId', userId);
-
-      const startTime = Date.now();
-      const response = await fetch(`${API_ENDPOINTS.CHAT}/transcribe`, {
-        method: 'POST',
-        body: formData,
-        // Don't set Content-Type header - let FormData set it automatically with boundary
-      });
-
-      const data = await response.json();
-      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-
-      if (response.ok && data.text) {
-        // Set the transcribed text and send it
-        setInputText(data.text);
-        // Auto-send after transcription
-        setTimeout(() => {
-          handleSendWithText(data.text);
-        }, 100);
-      } else {
-        setInputText('');
-        Alert.alert('Error', data.error || 'Failed to transcribe audio');
-      }
-    } catch (error) {
-      console.error('Transcription error:', error);
-      setInputText('');
-      Alert.alert('Error', 'Failed to transcribe audio');
-    } finally {
-      setIsLoading(false);
+      setIsTranscribing(false); // Reset transcription state on error
     }
   };
 
   const handleSendWithText = async (text: string) => {
     await handleSendWithWebSocket(text);
-  };
-
-  // Legacy SSE handler - keeping for reference but not used
-  const handleSendWithSSE = async (text: string) => {
-    if (text.trim() && !isLoading) {
-      setShowWebSearchMenu(false);
-      const userMessage: Message = {
-        id: Date.now().toString(),
-        text: text,
-        isUser: true,
-      };
-      
-      const newMessages = [...messages, userMessage];
-      setMessages(newMessages);
-      setInputText('');
-      setIsLoading(true);
-
-      // Create placeholder for AI response
-      const aiMessageId = (Date.now() + 1).toString();
-      const aiMessagePlaceholder: Message = {
-        id: aiMessageId,
-        text: '',
-        isUser: false,
-      };
-      setMessages([...newMessages, aiMessagePlaceholder]);
-
-      try {
-        // Use authenticated fetch - token is automatically added to headers
-        const { authenticatedFetch } = require('@/utils/api');
-        const response = await authenticatedFetch(API_ENDPOINTS.CHAT, {
-          method: 'POST',
-          body: JSON.stringify({
-            message: text,
-            model: selectedModel,
-            userId,
-            conversationId: currentChatId,
-            stream: true, // Enable streaming
-            webSearch: webSearchEnabled,
-            requireToolApproval: toolApprovalEnabled,
-          }),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('Response error:', errorText);
-          throw new Error(`Server error: ${response.status}`);
-        }
-
-        // Check if response is streaming (SSE)
-        const contentType = response.headers.get('content-type');
-        const isStreaming = contentType?.includes('text/event-stream');
-
-        if (isStreaming) {
-          // Handle streaming response (same as handleSend)
-          let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-          
-          try {
-            if (response.body && typeof response.body.getReader === 'function') {
-              reader = response.body.getReader();
-            } else {
-              // Fallback for React Native
-              const text = await response.text();
-              const lines = text.split('\n');
-              let accumulatedContent = '';
-              
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  try {
-                    const data = JSON.parse(line.slice(6));
-                    
-                    if (data.type === 'start') {
-                      if (data.conversationId && !currentChatId) {
-                        setCurrentChatId(data.conversationId);
-                        await loadConversations();
-                      }
-                    } else if (data.type === 'chunk') {
-                      accumulatedContent += data.content;
-                      setMessages(prev =>
-                        prev.map(msg =>
-                          msg.id === aiMessageId
-                            ? { ...msg, text: accumulatedContent }
-                            : msg
-                        )
-                      );
-                    } else if (data.type === 'thinking') {
-                      setMessages(prev =>
-                        prev.map(msg => {
-                          if (msg.id === aiMessageId) {
-                            const currentThinking = msg.thinking || [];
-                            const newThinking = [...currentThinking, data.thinking];
-                            return { 
-                              ...msg, 
-                              thinking: newThinking
-                            };
-                          }
-                          return msg;
-                        })
-                      );
-                    } else if (data.type === 'done') {
-                      const finalContent = data.message !== undefined ? data.message : accumulatedContent;
-                      setMessages(prev =>
-                        prev.map(msg =>
-                          msg.id === aiMessageId
-                            ? { 
-                                ...msg, 
-                                text: finalContent,
-                                thinking: data.thinking 
-                                  ? [...(msg.thinking || []), data.thinking]
-                                  : msg.thinking,
-                                tokenUsage: normalizeTokenUsage(data.usage)
-                              }
-                            : msg
-                        )
-                      );
-                        
-                      if (data.conversationId && !currentChatId) {
-                        setCurrentChatId(data.conversationId);
-                        await loadConversations();
-                      }
-                    }
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, line);
-                  }
-                }
-              }
-              
-              setIsLoading(false);
-              return;
-            }
-          } catch (readerError) {
-            console.error('Error getting reader:', readerError);
-            throw readerError;
-          }
-
-          if (!reader) {
-            throw new Error('No response body reader available');
-          }
-
-          const decoder = new TextDecoder();
-          let buffer = '';
-          let accumulatedContent = '';
-          let accumulatedThinking = '';
-          let currentThinkingIndex = -1;
-
-          while (true) {
-            const { done, value } = await reader.read();
-            
-            if (done) {
-              break;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                try {
-                  const data = JSON.parse(line.slice(6));
-                  
-                  if (data.type === 'start') {
-                    if (data.conversationId && !currentChatId) {
-                      setCurrentChatId(data.conversationId);
-                      await loadConversations();
-                    }
-                  } else if (data.type === 'chunk') {
-                    accumulatedContent += data.content;
-                    setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { ...msg, text: accumulatedContent }
-                          : msg
-                      )
-                    );
-                  } else if (data.type === 'thinking_chunk') {
-                    // Stream thinking text incrementally
-                    accumulatedThinking += data.content;
-                    
-                    setMessages(prev =>
-                      prev.map(msg => {
-                        if (msg.id === aiMessageId) {
-                          const thinking = msg.thinking || [];
-                          
-                          // If we don't have a current thinking item, create one
-                          if (currentThinkingIndex === -1) {
-                            currentThinkingIndex = thinking.length;
-                            return {
-                              ...msg,
-                              thinking: [...thinking, { 
-                              isInternal: true,
-                              thinking: accumulatedThinking, 
-                              action: '', 
-                              toolCalls: [],
-                              data: null
-                            }]
-                            };
-                          }
-                          
-                          // Update the current thinking item
-                          const updatedThinking = [...thinking];
-                          updatedThinking[currentThinkingIndex] = {
-                            ...updatedThinking[currentThinkingIndex],
-                            thinking: accumulatedThinking
-                          };
-                          
-                          return { ...msg, thinking: updatedThinking };
-                        }
-                        return msg;
-                      })
-                    );
-                  } else if (data.type === 'thinking_done') {
-                    // Finalize the current thinking item with tool calls
-                    setMessages(prev =>
-                      prev.map(msg => {
-                        if (msg.id === aiMessageId && currentThinkingIndex !== -1) {
-                          const thinking = msg.thinking || [];
-                          const updatedThinking = [...thinking];
-                          updatedThinking[currentThinkingIndex] = {
-                            ...data.thinking,
-                            thinking: accumulatedThinking
-                          };
-                          return { ...msg, thinking: updatedThinking };
-                        }
-                        return msg;
-                      })
-                    );
-                    
-                    // Reset for next thinking round
-                    accumulatedThinking = '';
-                    currentThinkingIndex = -1;
-                  } else if (data.type === 'thinking') {
-                    // Legacy: Add complete thinking event (for non-streaming rounds)
-                    console.log('🧠 Received thinking event (non-streaming round):', data.thinking);
-                    setMessages(prev =>
-                      prev.map(msg => {
-                        if (msg.id === aiMessageId) {
-                          const currentThinking = msg.thinking || [];
-                          const thinkingItem = {
-                            isInternal: true,
-                            thinking: data.thinking.thinking || '',
-                            action: data.thinking.action || '',
-                            toolCalls: data.thinking.toolCalls || [],
-                            data: data.thinking.data || null
-                          };
-                          const newThinking = [...currentThinking, thinkingItem];
-                          console.log(`🧠 Updated thinking array, now has ${newThinking.length} items`);
-                          return { 
-                            ...msg, 
-                            thinking: newThinking
-                          };
-                        }
-                        return msg;
-                      })
-                    );
-                  } else if (data.type === 'tool_confirmation') {
-                    setPendingToolApproval({
-                      approvalId: data.approvalId,
-                      tools: data.tools || [],
-                    });
-                    setApprovalExpiresAt(Date.now() + TOOL_APPROVAL_TIMEOUT_MS);
-                  } else if (data.type === 'done') {
-                    const finalContent = data.message !== undefined ? data.message : accumulatedContent || '';
-                    setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { 
-                              ...msg, 
-                              text: finalContent,
-                              thinking: data.thinking 
-                                ? [...(msg.thinking || []), data.thinking]
-                                : msg.thinking,
-                              tokenUsage: normalizeTokenUsage(data.usage)
-                            }
-                          : msg
-                      )
-                    );
-                    
-                    if (data.conversationId && !currentChatId) {
-                      setCurrentChatId(data.conversationId);
-                      await loadConversations();
-                    }
-                  } else if (data.type === 'error') {
-                    throw new Error(data.error || 'Streaming error');
-                  }
-                } catch (e) {
-                  console.error('Error parsing SSE data:', e, line);
-                }
-              }
-            }
-          }
-          
-          setIsLoading(false);
-          return;
-        } else {
-          // Handle non-streaming response (fallback)
-          const data = await response.json();
-          const aiMessage = data.message || data.content;
-          
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.id === aiMessageId
-                ? { 
-                    ...msg, 
-                    text: aiMessage, 
-                    thinking: data.thinking || undefined,
-                    tokenUsage: normalizeTokenUsage(data.usage)
-                  }
-                : msg
-            )
-          );
-          
-          if (data.conversationId && !currentChatId) {
-            setCurrentChatId(data.conversationId);
-            await loadConversations();
-          }
-        }
-      } catch (error) {
-        console.error('Chat error:', error);
-        setMessages(prev =>
-          prev.map(msg =>
-            msg.id === aiMessageId
-              ? { 
-                  ...msg, 
-                  text: `Something went wrong. Please try again.` 
-                }
-              : msg
-          )
-        );
-      } finally {
-        setIsLoading(false);
-      }
-    }
   };
 
   const handleRetry = (messageIndex: number) => {
@@ -1718,12 +1606,13 @@ export default function HomeScreen() {
             style={[
               styles.micButton,
               isRecording && styles.micButtonRecording,
+              (isTranscribing || isLoading) && styles.sendButtonDisabled,
               {
                 borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
               },
             ]} 
             onPress={isRecording ? stopRecording : startRecording}
-            disabled={isLoading}>
+            disabled={isLoading || isTranscribing}>
             <IconSymbol 
               name={isRecording ? 'stop.circle.fill' : 'mic.fill'} 
               size={20} 
@@ -1735,7 +1624,7 @@ export default function HomeScreen() {
           <TouchableOpacity 
             style={[
               styles.sendButton, 
-              (isLoading || isRecording) && styles.sendButtonDisabled,
+              (isLoading || isRecording || isTranscribing) && styles.sendButtonDisabled,
               {
                 borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
               },
@@ -1744,7 +1633,7 @@ export default function HomeScreen() {
               handleSend();
               Keyboard.dismiss();
             }}
-            disabled={isLoading || isRecording}>
+            disabled={isLoading || isRecording || isTranscribing}>
             <IconSymbol 
               name="arrow.up" 
               size={18} 
@@ -1753,11 +1642,13 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
         
-        {/* Recording Indicator */}
-        {isRecording && (
+        {/* Recording/Transcribing Indicator */}
+        {(isRecording || isTranscribing) && (
           <View style={styles.recordingIndicator}>
             <View style={styles.recordingDot} />
-            <ThemedText style={styles.recordingText}>Recording...</ThemedText>
+            <ThemedText style={styles.recordingText}>
+              {isTranscribing ? transcriptionText : (transcriptionText ? `🎤 ${transcriptionText}` : 'Recording...')}
+            </ThemedText>
           </View>
         )}
       </ThemedView>
