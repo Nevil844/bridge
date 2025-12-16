@@ -98,6 +98,7 @@ export default function HomeScreen() {
   const [isApprovingTool, setIsApprovingTool] = useState(false);
   const [showAIDisclaimer, setShowAIDisclaimer] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const activeWebSocketRef = useRef<WebSocket | null>(null);
   const { topInset, bottomInset } = useSafeAreaPadding({ top: 12, bottom: 16 });
   const headerPaddingTop = topInset + 20;
   const headerButtonTop = topInset + 24;
@@ -326,14 +327,25 @@ export default function HomeScreen() {
 
       try {
         setIsApprovingTool(true);
-        const { authenticatedFetch } = require('@/utils/api');
-        await authenticatedFetch(API_ENDPOINTS.CHAT_TOOL_APPROVAL, {
-          method: 'POST',
-          body: JSON.stringify({
+        
+        // Try to send via WebSocket if available, otherwise fall back to HTTP
+        if (activeWebSocketRef.current && activeWebSocketRef.current.readyState === WebSocket.OPEN) {
+          activeWebSocketRef.current.send(JSON.stringify({
+            type: 'tool_approval',
             approvalId: pendingToolApproval.approvalId,
             decision,
-          }),
-        });
+          }));
+        } else {
+          // Fall back to HTTP
+          const { authenticatedFetch } = require('@/utils/api');
+          await authenticatedFetch(API_ENDPOINTS.CHAT_TOOL_APPROVAL, {
+            method: 'POST',
+            body: JSON.stringify({
+              approvalId: pendingToolApproval.approvalId,
+              decision,
+            }),
+          });
+        }
       } catch (error) {
         console.error('Tool approval failed:', error);
         Alert.alert('Tool approval failed', 'Please try again.');
@@ -503,6 +515,11 @@ export default function HomeScreen() {
   };
 
   const handleSendWithText = async (text: string) => {
+    await handleSendWithWebSocket(text);
+  };
+
+  // Legacy SSE handler - keeping for reference but not used
+  const handleSendWithSSE = async (text: string) => {
     if (text.trim() && !isLoading) {
       setShowWebSearchMenu(false);
       const userMessage: Message = {
@@ -861,12 +878,12 @@ export default function HomeScreen() {
     }, 100);
   };
 
-  const handleSend = async () => {
-    if (inputText.trim() && !isLoading) {
+  const handleSendWithWebSocket = async (text: string) => {
+    if (text.trim() && !isLoading) {
       setShowWebSearchMenu(false);
       const userMessage: Message = {
         id: Date.now().toString(),
-        text: inputText,
+        text: text,
         isUser: true,
       };
       
@@ -885,362 +902,179 @@ export default function HomeScreen() {
       setMessages([...newMessages, aiMessagePlaceholder]);
 
       try {
-        // Use authenticated fetch - token is automatically added to headers
-        const { authenticatedFetch } = require('@/utils/api');
-        const response = await authenticatedFetch(API_ENDPOINTS.CHAT, {
-          method: 'POST',
-          body: JSON.stringify({
-            message: userMessage.text,
-            model: selectedModel,
-            userId,
-            conversationId: currentChatId, // Pass conversationId to continue existing or create new
-            stream: true, // Enable streaming for better UX
-            webSearch: webSearchEnabled,
-            requireToolApproval: toolApprovalEnabled,
-          }),
-        });
-
-        // Handle quota exceeded (429)
-        if (response.status === 429) {
-          const errorData = await response.json();
-          
-          // Show quota exceeded alert
-          Alert.alert(
-            'Quota Exceeded',
-            errorData.message || 'You have exceeded your monthly token limit.',
-            [
-              { text: 'OK', style: 'cancel' },
-              { text: 'View Usage', onPress: () => {
-                // Navigate to settings to see usage
-                // @ts-ignore - navigation exists in tab context
-                navigation?.navigate?.('settings');
-              }},
-              { text: 'Upgrade Plan', onPress: () => {
-                // Navigate to pricing
-                // @ts-ignore - navigation exists in tab context
-                navigation?.navigate?.('pricing');
-              }},
-            ]
-          );
-          
-          // Update messages to show error
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.id === aiMessageId
-                ? { ...msg, text: `⚠️ ${errorData.message}\n\nYou've used ${errorData.usage?.percentage || '100'}% of your ${errorData.usage?.plan || 'free'} plan.\n\nPlease upgrade or wait until next month.` }
-                : msg
-            )
-          );
-          
-          setIsLoading(false);
-          return;
+        // Get access token for WebSocket authentication
+        const { getAccessToken } = require('@/utils/api');
+        const token = await getAccessToken();
+        
+        if (!token) {
+          throw new Error('No access token available. Please log in again.');
         }
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('Response error:', errorText);
-          throw new Error(`Server error: ${response.status}`);
-        }
+        // Create WebSocket connection
+        const ws = new WebSocket(API_ENDPOINTS.CHAT_WS);
+        activeWebSocketRef.current = ws;
+        
+        let accumulatedContent = '';
+        let accumulatedThinking = '';
+        let currentThinkingIndex = -1;
+        let authenticated = false;
 
-        // Check if response is streaming (SSE)
-        const contentType = response.headers.get('content-type');
-        const isStreaming = contentType?.includes('text/event-stream');
+        ws.onopen = () => {
+          // Authenticate first
+          ws.send(JSON.stringify({ type: 'auth', token }));
+        };
 
-        if (isStreaming) {
-          // Handle streaming response (Server-Sent Events)
-          // React Native compatibility: check if getReader exists, otherwise use text() stream
-          let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-          
+        ws.onmessage = (event) => {
           try {
-            // Try to get reader (works in browsers and some React Native versions)
-            if (response.body && typeof response.body.getReader === 'function') {
-              reader = response.body.getReader();
-            } else {
-              // Fallback: React Native might not support getReader, use text() instead
-              const text = await response.text();
-              // Parse SSE manually
-              const lines = text.split('\n');
-              let accumulatedContent = '';
-              
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  try {
-                    const data = JSON.parse(line.slice(6));
-                    
-                    if (data.type === 'start') {
-                      if (data.conversationId && !currentChatId) {
-                        setCurrentChatId(data.conversationId);
-                        await loadConversations();
-                      }
-                    } else if (data.type === 'chunk') {
-                      accumulatedContent += data.content;
-                      setMessages(prev =>
-                        prev.map(msg =>
-                          msg.id === aiMessageId
-                            ? { ...msg, text: accumulatedContent }
-                            : msg
-                        )
-                      );
-                    } else if (data.type === 'thinking') {
-                      // Add thinking event to the array
-                      setMessages(prev =>
-                        prev.map(msg => {
-                          if (msg.id === aiMessageId) {
-                            const currentThinking = msg.thinking || [];
-                            const newThinking = [...currentThinking, data.thinking];
-                            return { 
-                              ...msg, 
-                              thinking: newThinking
-                            };
-                          }
-                          return msg;
-                        })
-                      );
-                    } else if (data.type === 'tool_confirmation') {
-                      setPendingToolApproval({
-                        approvalId: data.approvalId,
-                        tools: data.tools || [],
-                      });
-                      setApprovalExpiresAt(Date.now() + TOOL_APPROVAL_TIMEOUT_MS);
-                    } else if (data.type === 'done') {
-                      const finalContent = data.message !== undefined ? data.message : accumulatedContent;
-                      setMessages(prev =>
-                        prev.map(msg =>
-                          msg.id === aiMessageId
-                            ? { 
-                                ...msg, 
-                                text: finalContent,
-                                thinking: data.thinking 
-                                  ? [...(msg.thinking || []), data.thinking]
-                                  : msg.thinking,
-                                tokenUsage: normalizeTokenUsage(data.usage)
-                              }
-                            : msg
-                        )
-                      );
-                      
-                      if (data.conversationId && !currentChatId) {
-                        setCurrentChatId(data.conversationId);
-                        await loadConversations();
-                      }
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'authenticated') {
+              authenticated = true;
+              // Send chat message after authentication
+              ws.send(JSON.stringify({
+                type: 'chat',
+                message: userMessage.text,
+                model: selectedModel,
+                conversationId: currentChatId,
+                requireToolApproval: toolApprovalEnabled,
+              }));
+              return;
+            }
+            
+            if (data.type === 'start') {
+              if (data.conversationId && !currentChatId) {
+                setCurrentChatId(data.conversationId);
+                loadConversations();
+              }
+            } else if (data.type === 'chunk') {
+              accumulatedContent += data.content;
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.id === aiMessageId
+                    ? { ...msg, text: accumulatedContent }
+                    : msg
+                )
+              );
+            } else if (data.type === 'thinking_chunk') {
+              accumulatedThinking += data.content;
+              setMessages(prev =>
+                prev.map(msg => {
+                  if (msg.id === aiMessageId) {
+                    const thinking = msg.thinking || [];
+                    if (currentThinkingIndex === -1) {
+                      currentThinkingIndex = thinking.length;
+                      return {
+                        ...msg,
+                        thinking: [...thinking, { 
+                          isInternal: true,
+                          thinking: accumulatedThinking, 
+                          action: '', 
+                          toolCalls: [],
+                          data: null
+                        }]
+                      };
                     }
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, line);
+                    const updatedThinking = [...thinking];
+                    updatedThinking[currentThinkingIndex] = {
+                      ...updatedThinking[currentThinkingIndex],
+                      thinking: accumulatedThinking
+                    };
+                    return { ...msg, thinking: updatedThinking };
                   }
-                }
+                  return msg;
+                })
+              );
+            } else if (data.type === 'thinking_done') {
+              setMessages(prev =>
+                prev.map(msg => {
+                  if (msg.id === aiMessageId && currentThinkingIndex !== -1) {
+                    const thinking = msg.thinking || [];
+                    const updatedThinking = [...thinking];
+                    updatedThinking[currentThinkingIndex] = {
+                      ...data.thinking,
+                      thinking: accumulatedThinking
+                    };
+                    return { ...msg, thinking: updatedThinking };
+                  }
+                  return msg;
+                })
+              );
+              accumulatedThinking = '';
+              currentThinkingIndex = -1;
+            } else if (data.type === 'thinking') {
+              setMessages(prev =>
+                prev.map(msg => {
+                  if (msg.id === aiMessageId) {
+                    const currentThinking = msg.thinking || [];
+                    const newThinking = [...currentThinking, data.thinking];
+                    return { 
+                      ...msg, 
+                      thinking: newThinking
+                    };
+                  }
+                  return msg;
+                })
+              );
+            } else if (data.type === 'tool_confirmation') {
+              setPendingToolApproval({
+                approvalId: data.approvalId,
+                tools: data.tools || [],
+              });
+              setApprovalExpiresAt(Date.now() + TOOL_APPROVAL_TIMEOUT_MS);
+            } else if (data.type === 'done') {
+              const finalContent = data.message !== undefined ? data.message : accumulatedContent || '';
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.id === aiMessageId
+                    ? { 
+                        ...msg, 
+                        text: finalContent,
+                        thinking: data.thinking 
+                          ? [...(msg.thinking || []), data.thinking]
+                          : msg.thinking,
+                        tokenUsage: normalizeTokenUsage(data.usage)
+                      }
+                    : msg
+                )
+              );
+              
+              if (data.conversationId && !currentChatId) {
+                setCurrentChatId(data.conversationId);
+                loadConversations();
               }
               
               setIsLoading(false);
-              return;
+              ws.close();
+              activeWebSocketRef.current = null;
+            } else if (data.type === 'error') {
+              throw new Error(data.error || 'WebSocket error');
             }
-          } catch (readerError) {
-            console.error('Error getting reader:', readerError);
-            // Fall back to non-streaming
-            const data = await response.json();
-            const aiMessage = data.message || data.content;
-            setMessages(prev =>
-              prev.map(msg =>
-                msg.id === aiMessageId
-                  ? { 
-                      ...msg, 
-                      text: aiMessage, 
-                      thinking: data.thinking || undefined,
-                      tokenUsage: normalizeTokenUsage(data.usage)
-                    }
-                  : msg
-              )
-            );
-            setIsLoading(false);
-            return;
+          } catch (error) {
+            console.error('Error parsing WebSocket message:', error);
           }
+        };
 
-          if (!reader) {
-            throw new Error('No response body reader available');
-          }
-
-          const decoder = new TextDecoder();
-          let buffer = '';
-          let accumulatedContent = '';
-          let accumulatedThinking = '';
-          let currentThinkingIndex = -1;
-
-          while (true) {
-            const { done, value } = await reader.read();
-            
-            if (done) {
-              break;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                try {
-                  const data = JSON.parse(line.slice(6)); // Remove 'data: ' prefix
-                  
-                  if (data.type === 'start') {
-                    // Stream started
-                    if (data.conversationId && !currentChatId) {
-                      setCurrentChatId(data.conversationId);
-                      await loadConversations();
-                    }
-                  } else if (data.type === 'chunk') {
-                    // Content chunk - update message incrementally
-                    accumulatedContent += data.content;
-                    
-                    setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { ...msg, text: accumulatedContent }
-                          : msg
-                      )
-                    );
-                  } else if (data.type === 'thinking_chunk') {
-                    // Stream thinking text incrementally
-                    accumulatedThinking += data.content;
-                    
-                    setMessages(prev =>
-                      prev.map(msg => {
-                        if (msg.id === aiMessageId) {
-                          const thinking = msg.thinking || [];
-                          
-                          // If we don't have a current thinking item, create one
-                          if (currentThinkingIndex === -1) {
-                            currentThinkingIndex = thinking.length;
-                            return {
-                              ...msg,
-                              thinking: [...thinking, { 
-                              isInternal: true,
-                              thinking: accumulatedThinking, 
-                              action: '', 
-                              toolCalls: [],
-                              data: null
-                            }]
-                            };
-                          }
-                          
-                          // Update the current thinking item
-                          const updatedThinking = [...thinking];
-                          updatedThinking[currentThinkingIndex] = {
-                            ...updatedThinking[currentThinkingIndex],
-                            thinking: accumulatedThinking
-                          };
-                          
-                          return { ...msg, thinking: updatedThinking };
-                        }
-                        return msg;
-                      })
-                    );
-                  } else if (data.type === 'thinking_done') {
-                    // Finalize the current thinking item with tool calls
-                    setMessages(prev =>
-                      prev.map(msg => {
-                        if (msg.id === aiMessageId && currentThinkingIndex !== -1) {
-                          const thinking = msg.thinking || [];
-                          const updatedThinking = [...thinking];
-                          updatedThinking[currentThinkingIndex] = {
-                            ...data.thinking,
-                            thinking: accumulatedThinking
-                          };
-                          return { ...msg, thinking: updatedThinking };
-                        }
-                        return msg;
-                      })
-                    );
-                    
-                    // Reset for next thinking round
-                    accumulatedThinking = '';
-                    currentThinkingIndex = -1;
-                  } else if (data.type === 'thinking') {
-                    // Legacy: Add complete thinking event (for non-streaming rounds)
-                    setMessages(prev =>
-                      prev.map(msg => {
-                        if (msg.id === aiMessageId) {
-                          const currentThinking = msg.thinking || [];
-                          const newThinking = [...currentThinking, data.thinking];
-                          return { 
-                            ...msg, 
-                            thinking: newThinking
-                          };
-                        }
-                        return msg;
-                      })
-                    );
-                  } else if (data.type === 'tool_confirmation') {
-                    setPendingToolApproval({
-                      approvalId: data.approvalId,
-                      tools: data.tools || [],
-                    });
-                    setApprovalExpiresAt(Date.now() + TOOL_APPROVAL_TIMEOUT_MS);
-                  } else if (data.type === 'done') {
-                    // Stream complete - use accumulated content (which was built from chunks) or fallback to message
-                    // Prefer accumulatedContent since it's the clean streamed text
-                    const finalContent = data.message !== undefined ? data.message : accumulatedContent || '';
-                    setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { 
-                              ...msg, 
-                              text: finalContent, // Use accumulated content from chunks
-                              thinking: data.thinking 
-                                ? [...(msg.thinking || []), data.thinking]
-                                : msg.thinking,
-                              tokenUsage: normalizeTokenUsage(data.usage)
-                            }
-                          : msg
-                      )
-                    );
-                    
-                    if (data.conversationId && !currentChatId) {
-                      setCurrentChatId(data.conversationId);
-                      await loadConversations();
-                    }
-                  } else if (data.type === 'error') {
-                    throw new Error(data.error || 'Streaming error');
-                  }
-                } catch (e) {
-                  console.error('Error parsing SSE data:', e, line);
-                }
-              }
-            }
-          }
-          
-          setIsLoading(false);
-          return;
-        } else {
-          // Handle non-streaming response (fallback)
-          const data = await response.json();
-
-          const aiMessage = data.message || data.content;
-          
-          if (!aiMessage) {
-            console.error('No message in response:', data);
-            throw new Error('No response received from AI');
-          }
-
-          // Update AI message with actual response (including thinking data)
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
           setMessages(prev =>
             prev.map(msg =>
               msg.id === aiMessageId
-                ? { 
-                    ...msg, 
-                    text: aiMessage, 
-                    thinking: data.thinking ? [data.thinking] : undefined,
-                    tokenUsage: normalizeTokenUsage(data.usage)
-                  }
+                ? { ...msg, text: 'Connection error. Please try again.' }
                 : msg
             )
           );
-          
-          // Update conversationId if this was a new conversation
-          if (data.conversationId && !currentChatId) {
-            setCurrentChatId(data.conversationId);
-            // Reload conversations list to show the new one
-            await loadConversations();
+          setIsLoading(false);
+          activeWebSocketRef.current = null;
+        };
+
+        ws.onclose = () => {
+          if (isLoading) {
+            setIsLoading(false);
           }
-        }
+          if (activeWebSocketRef.current === ws) {
+            activeWebSocketRef.current = null;
+          }
+        };
 
       } catch (error) {
         console.error('Chat error:', error);
@@ -1254,10 +1088,13 @@ export default function HomeScreen() {
               : msg
           )
         );
-      } finally {
         setIsLoading(false);
       }
     }
+  };
+
+  const handleSend = async () => {
+    await handleSendWithWebSocket(inputText);
   };
 
   const isDark = colorScheme === 'dark';
