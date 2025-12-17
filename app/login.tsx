@@ -9,10 +9,11 @@ import { setAccessToken } from '@/utils/api';
 import { secureStorage, storage, STORAGE_KEYS } from '@/utils/storage';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Image,
   Linking,
   Platform,
@@ -36,6 +37,42 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
   const router = useRouter();
   const { login: authLogin } = useAuth();
   const { paddingStyle } = useSafeAreaPadding({ top: 24, bottom: 24 });
+  
+  // Animation values for glowing "Bridge AI" text
+  const bridgeGlow = useRef(new Animated.Value(0)).current;
+  const bridgeTranslateY = useRef(new Animated.Value(0)).current;
+  
+  useEffect(() => {
+    // Glow and up/down animation for "Bridge AI"
+    Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(bridgeGlow, {
+            toValue: 1,
+            duration: 1500,
+            useNativeDriver: false, // shadowRadius can't use native driver
+          }),
+          Animated.timing(bridgeTranslateY, {
+            toValue: -8,
+            duration: 1500,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(bridgeGlow, {
+            toValue: 0,
+            duration: 1500,
+            useNativeDriver: false,
+          }),
+          Animated.timing(bridgeTranslateY, {
+            toValue: 8,
+            duration: 1500,
+            useNativeDriver: true,
+          }),
+        ]),
+      ])
+    ).start();
+  }, []);
   
   // Use provided callback or auth hook, with web reload wrapper
   const handleLoginSuccess = async (userData: { id: string; email: string; name: string; picture?: string; plan?: string }) => {
@@ -534,12 +571,41 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
           </View>
           <View style={styles.titleContainer}>
             <ThemedText style={styles.titleLine1}>Welcome to</ThemedText>
-            <Text style={[
-              styles.titleLine2,
-              { color: isDark ? '#4A9EFF' : '#007AFF' }
-            ]}>
-              Bridge AI
-            </Text>
+            <Animated.View
+              style={[
+                {
+                  transform: [{ translateY: bridgeTranslateY }],
+                },
+              ]}
+            >
+              <Animated.View
+                style={[
+                  {
+                    shadowColor: isDark ? '#4A9EFF' : '#007AFF',
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: bridgeGlow.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.3, 1],
+                    }),
+                    shadowRadius: bridgeGlow.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [10, 25],
+                    }),
+                    elevation: bridgeGlow.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [5, 15],
+                    }),
+                  },
+                ]}
+              >
+                <Text style={[
+                  styles.titleLine2,
+                  { color: isDark ? '#4A9EFF' : '#007AFF' }
+                ]}>
+                  Bridge AI
+                </Text>
+              </Animated.View>
+            </Animated.View>
           </View>
           <ThemedText style={styles.subtitle}>
             Sign in with Google to get started
