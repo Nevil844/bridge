@@ -126,10 +126,6 @@ export function OnboardingScreen({ visible, onComplete }: OnboardingScreenProps)
     }
   };
 
-  if (!visible) {
-    return null;
-  }
-
   return (
     <Modal
       visible={visible}
@@ -137,6 +133,7 @@ export function OnboardingScreen({ visible, onComplete }: OnboardingScreenProps)
       animationType="none"
       statusBarTranslucent={true}
       onRequestClose={() => {}} // Prevent back button from closing
+      hardwareAccelerated={true}
     >
       <Animated.View style={[styles.container, { 
         opacity: screenOpacity,

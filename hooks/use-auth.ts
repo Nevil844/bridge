@@ -143,8 +143,10 @@ export function useAuth() {
       // Clear access token
       const { clearAccessToken } = require('@/utils/api');
       await clearAccessToken();
-      // Reset AI disclaimer acknowledgment so it shows again next login
-      await storage.removeItem(STORAGE_KEYS.AI_DISCLAIMER_ACKNOWLEDGED);
+      
+      // Clear onboarding flag so it shows again on next login
+      await storage.removeItem(STORAGE_KEYS.ONBOARDING_COMPLETED);
+      
       // Persist logout flag so test mode doesn't auto-login again
       await AsyncStorage.setItem('hasLoggedOut', 'true');
       setUser(null);

@@ -31,8 +31,8 @@ export const STORAGE_KEYS = {
   OAUTH_STATE: 'oauth_state',
   // Preferences
   TOOL_APPROVAL: 'preference_tool_approval',
-  // Disclaimer
-  AI_DISCLAIMER_ACKNOWLEDGED: 'ai_disclaimer_acknowledged',
+  // Onboarding flow (includes onboarding + disclaimer)
+  ONBOARDING_COMPLETED: 'onboarding_completed',
 } as const;
 
 /**

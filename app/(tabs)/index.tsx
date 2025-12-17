@@ -101,16 +101,11 @@ export default function HomeScreen() {
   const [approvalRemainingMs, setApprovalRemainingMs] = useState<number>(0);
   const TOOL_APPROVAL_TIMEOUT_MS = 45000;
   const [isApprovingTool, setIsApprovingTool] = useState(false);
-  const [showAIDisclaimer, setShowAIDisclaimer] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  // Single boolean for onboarding flow (includes disclaimer)
+  const [showOnboardingFlow, setShowOnboardingFlow] = useState(true);
+  const [onboardingStep, setOnboardingStep] = useState<'onboarding' | 'disclaimer' | 'complete'>('onboarding');
   const [isCheckingOnboarding, setIsCheckingOnboarding] = useState(true);
-  
-  // Initialize checking state immediately
-  useEffect(() => {
-    if (!user || !isAuthenticated) {
-      setIsCheckingOnboarding(false);
-    }
-  }, []);
+  const hasCheckedOnboarding = useRef(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const activeWebSocketRef = useRef<WebSocket | null>(null);
   const { topInset, bottomInset } = useSafeAreaPadding({ top: 12, bottom: 16 });
@@ -138,56 +133,64 @@ export default function HomeScreen() {
     cleanupOldData(); // Remove old AsyncStorage data
   }, []);
 
-  // Initialize checking state immediately
+  // Check if user has completed onboarding
   useEffect(() => {
-    if (!user || !isAuthenticated) {
-      setIsCheckingOnboarding(false);
-      setShowOnboarding(false);
-    }
-  }, []);
-
-  // Show onboarding and disclaimer after login succeeds (when user becomes authenticated)
-  useEffect(() => {
-    const checkFirstTime = async () => {
+    const checkOnboardingStatus = async () => {
+      // Wait for user to be loaded
       if (!user || !isAuthenticated) {
-        setIsCheckingOnboarding(false);
-        setShowOnboarding(false);
+        setIsCheckingOnboarding(true);
+        setShowOnboardingFlow(true);
         return;
       }
       
+      // Only check once per user
+      if (hasCheckedOnboarding.current) {
+        return;
+      }
+      
+      hasCheckedOnboarding.current = true;
+      
       try {
-        const hasAcknowledged = await storage.getItem(STORAGE_KEYS.AI_DISCLAIMER_ACKNOWLEDGED);
-        if (!hasAcknowledged || hasAcknowledged !== 'true') {
-          // First time user - show onboarding first
-          setIsCheckingOnboarding(false);
-          setShowOnboarding(true);
+        // Simple check: has user completed onboarding?
+        const hasCompletedOnboarding = await storage.getItem(STORAGE_KEYS.ONBOARDING_COMPLETED);
+        
+        if (hasCompletedOnboarding === 'true') {
+          // Already completed - skip onboarding
+          setShowOnboardingFlow(false);
+          setOnboardingStep('complete');
         } else {
-          setIsCheckingOnboarding(false);
-          setShowOnboarding(false);
+          // Not completed - show onboarding
+          setShowOnboardingFlow(true);
+          setOnboardingStep('onboarding');
         }
       } catch (error) {
-        console.error('Error checking first time status:', error);
+        console.error('Error checking onboarding status:', error);
+        // On error, show onboarding to be safe
+        setShowOnboardingFlow(true);
+        setOnboardingStep('onboarding');
+      } finally {
         setIsCheckingOnboarding(false);
-        setShowOnboarding(false);
       }
     };
 
-    checkFirstTime();
+    checkOnboardingStatus();
   }, [user, isAuthenticated]);
 
   const handleOnboardingComplete = () => {
-    setShowOnboarding(false);
-    // After onboarding completes, show disclaimer
-    setShowAIDisclaimer(true);
+    // Move to disclaimer step
+    setOnboardingStep('disclaimer');
   };
 
   const handleAIDisclaimerAcknowledge = async () => {
+    // Mark onboarding as completed
     try {
-      await storage.setItem(STORAGE_KEYS.AI_DISCLAIMER_ACKNOWLEDGED, 'true');
-      setShowAIDisclaimer(false);
+      await storage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETED, 'true');
+      setOnboardingStep('complete');
+      setShowOnboardingFlow(false);
     } catch (error) {
-      console.error('Error saving AI disclaimer acknowledgment:', error);
-      setShowAIDisclaimer(false);
+      console.error('Error saving onboarding completion:', error);
+      setOnboardingStep('complete');
+      setShowOnboardingFlow(false);
     }
   };
 
@@ -1165,14 +1168,33 @@ export default function HomeScreen() {
 
   const isDark = colorScheme === 'dark';
 
+  // While checking onboarding status or showing onboarding flow, hide main content
+  // This prevents any flash of the main screen
+  const shouldHideMainContent = isCheckingOnboarding || showOnboardingFlow;
+
+  // Show loading screen while checking onboarding (before user loads)
+  if (isCheckingOnboarding && (!user || !isAuthenticated)) {
+    return (
+      <ThemedView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={isDark ? '#4A9EFF' : '#007AFF'} />
+      </ThemedView>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
       style={styles.container}
       keyboardVerticalOffset={0}>
       <ThemedView style={styles.container}>
-        {/* Header - Hide when onboarding is shown */}
-        {!showOnboarding && !isCheckingOnboarding && (
+        {/* Onboarding Screen - Shows immediately on first load to prevent flash */}
+        <OnboardingScreen
+          visible={onboardingStep === 'onboarding'}
+          onComplete={handleOnboardingComplete}
+        />
+
+        {/* Header - Hide when onboarding is shown or checking */}
+        {!shouldHideMainContent && (
         <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
           <TouchableOpacity
             style={styles.headerIconButton}
@@ -1561,18 +1583,13 @@ export default function HomeScreen() {
           isApproving={isApprovingTool}
         />
 
-        <OnboardingScreen
-          visible={showOnboarding}
-          onComplete={handleOnboardingComplete}
-        />
-
         <AIDisclaimerModal
-          visible={showAIDisclaimer}
+          visible={onboardingStep === 'disclaimer'}
           onUnderstand={handleAIDisclaimerAcknowledge}
         />
 
-        {/* Main Content - Hide when onboarding is shown */}
-        {!showOnboarding && !isCheckingOnboarding && (
+        {/* Main Content - Hide when onboarding is shown or checking */}
+        {!shouldHideMainContent && (
         <>
         {/* Messages Area */}
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -1687,12 +1704,12 @@ export default function HomeScreen() {
         </TouchableWithoutFeedback>
 
         {/* Sample Questions Button - Only shown when chat is new */}
-        {messages.length === 0 && !showOnboarding && !isCheckingOnboarding && (
+        {messages.length === 0 && !shouldHideMainContent && (
           <SampleQuestions userId={userId} onQuestionSelect={handleQuestionSelect} />
         )}
 
         {/* Input Area */}
-        {!showOnboarding && !isCheckingOnboarding && (
+        {!shouldHideMainContent && (
         <View
           style={[
             styles.inputContainer,
