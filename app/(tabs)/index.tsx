@@ -1,6 +1,7 @@
 import AIDisclaimerModal from '@/components/ai-disclaimer-modal';
 import { GlowingOrb } from '@/components/glowing-orb';
 import { MarkdownText } from '@/components/markdown-text';
+import { OnboardingScreen } from '@/components/onboarding-screen';
 import { SampleQuestions } from '@/components/sample-questions';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -101,6 +102,15 @@ export default function HomeScreen() {
   const TOOL_APPROVAL_TIMEOUT_MS = 45000;
   const [isApprovingTool, setIsApprovingTool] = useState(false);
   const [showAIDisclaimer, setShowAIDisclaimer] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [isCheckingOnboarding, setIsCheckingOnboarding] = useState(true);
+  
+  // Initialize checking state immediately
+  useEffect(() => {
+    if (!user || !isAuthenticated) {
+      setIsCheckingOnboarding(false);
+    }
+  }, []);
   const scrollViewRef = useRef<ScrollView>(null);
   const activeWebSocketRef = useRef<WebSocket | null>(null);
   const { topInset, bottomInset } = useSafeAreaPadding({ top: 12, bottom: 16 });
@@ -128,24 +138,48 @@ export default function HomeScreen() {
     cleanupOldData(); // Remove old AsyncStorage data
   }, []);
 
-  // Show disclaimer after login succeeds (when user becomes authenticated)
+  // Initialize checking state immediately
   useEffect(() => {
-    const checkAIDisclaimer = async () => {
-      if (!user || !isAuthenticated) return;
+    if (!user || !isAuthenticated) {
+      setIsCheckingOnboarding(false);
+      setShowOnboarding(false);
+    }
+  }, []);
+
+  // Show onboarding and disclaimer after login succeeds (when user becomes authenticated)
+  useEffect(() => {
+    const checkFirstTime = async () => {
+      if (!user || !isAuthenticated) {
+        setIsCheckingOnboarding(false);
+        setShowOnboarding(false);
+        return;
+      }
       
       try {
         const hasAcknowledged = await storage.getItem(STORAGE_KEYS.AI_DISCLAIMER_ACKNOWLEDGED);
         if (!hasAcknowledged || hasAcknowledged !== 'true') {
-          // Show disclaimer if user hasn't acknowledged it yet
-          setShowAIDisclaimer(true);
+          // First time user - show onboarding first
+          setIsCheckingOnboarding(false);
+          setShowOnboarding(true);
+        } else {
+          setIsCheckingOnboarding(false);
+          setShowOnboarding(false);
         }
       } catch (error) {
-        console.error('Error checking AI disclaimer:', error);
+        console.error('Error checking first time status:', error);
+        setIsCheckingOnboarding(false);
+        setShowOnboarding(false);
       }
     };
 
-    checkAIDisclaimer();
+    checkFirstTime();
   }, [user, isAuthenticated]);
+
+  const handleOnboardingComplete = () => {
+    setShowOnboarding(false);
+    // After onboarding completes, show disclaimer
+    setShowAIDisclaimer(true);
+  };
 
   const handleAIDisclaimerAcknowledge = async () => {
     try {
@@ -1137,7 +1171,8 @@ export default function HomeScreen() {
       style={styles.container}
       keyboardVerticalOffset={0}>
       <ThemedView style={styles.container}>
-        {/* Header */}
+        {/* Header - Hide when onboarding is shown */}
+        {!showOnboarding && !isCheckingOnboarding && (
         <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
           <TouchableOpacity
             style={styles.headerIconButton}
@@ -1193,6 +1228,7 @@ export default function HomeScreen() {
             />
           </TouchableOpacity>
         </View>
+        )}
 
         {/* Sidebar Modal for Chat History */}
         <Modal
@@ -1525,11 +1561,19 @@ export default function HomeScreen() {
           isApproving={isApprovingTool}
         />
 
+        <OnboardingScreen
+          visible={showOnboarding}
+          onComplete={handleOnboardingComplete}
+        />
+
         <AIDisclaimerModal
           visible={showAIDisclaimer}
           onUnderstand={handleAIDisclaimerAcknowledge}
         />
 
+        {/* Main Content - Hide when onboarding is shown */}
+        {!showOnboarding && !isCheckingOnboarding && (
+        <>
         {/* Messages Area */}
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           {messages.length === 0 ? (
@@ -1643,11 +1687,12 @@ export default function HomeScreen() {
         </TouchableWithoutFeedback>
 
         {/* Sample Questions Button - Only shown when chat is new */}
-        {messages.length === 0 && (
+        {messages.length === 0 && !showOnboarding && !isCheckingOnboarding && (
           <SampleQuestions userId={userId} onQuestionSelect={handleQuestionSelect} />
         )}
 
         {/* Input Area */}
+        {!showOnboarding && !isCheckingOnboarding && (
         <View
           style={[
             styles.inputContainer,
@@ -1792,16 +1837,19 @@ export default function HomeScreen() {
               color={isDark ? '#FFFFFF' : '#000000'} 
             />
           </TouchableOpacity>
+          
+          {/* Recording/Transcribing Indicator */}
+          {(isRecording || isTranscribing) && (
+            <View style={styles.recordingIndicator}>
+              <View style={styles.recordingDot} />
+              <ThemedText style={styles.recordingText}>
+                {isTranscribing ? transcriptionText : (transcriptionText ? `🎤 ${transcriptionText}` : 'Recording...')}
+              </ThemedText>
+            </View>
+          )}
         </View>
-        
-        {/* Recording/Transcribing Indicator */}
-        {(isRecording || isTranscribing) && (
-          <View style={styles.recordingIndicator}>
-            <View style={styles.recordingDot} />
-            <ThemedText style={styles.recordingText}>
-              {isTranscribing ? transcriptionText : (transcriptionText ? `🎤 ${transcriptionText}` : 'Recording...')}
-            </ThemedText>
-          </View>
+        )}
+        </>
         )}
       </ThemedView>
     </KeyboardAvoidingView>
