@@ -1,22 +1,30 @@
 import { storage } from '@/utils/storage';
+import { getHapticsEnabled, setHapticsEnabled as setHapticsEnabledUtil, initializeHapticsPreference } from '@/utils/haptics';
 import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
 const STORAGE_KEY_TOOL_APPROVAL = 'preference_tool_approval';
 const STORAGE_KEY_THEME = 'preference_theme';
+const STORAGE_KEY_HAPTICS = 'preference_haptics_enabled';
 
 export function usePreferences() {
   const [toolApprovalEnabled, setToolApprovalEnabledState] = useState(false);
+  const [hapticsEnabled, setHapticsEnabledState] = useState(true);
   const [themePreference, setThemePreferenceState] = useState<'light' | 'dark' | 'system' | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
   const loadPreferences = async () => {
     try {
-      const [savedApproval, savedTheme] = await Promise.all([
+      // Initialize haptics preference first
+      await initializeHapticsPreference();
+      
+      const [savedApproval, savedTheme, savedHaptics] = await Promise.all([
         storage.getItem(STORAGE_KEY_TOOL_APPROVAL),
         storage.getItem(STORAGE_KEY_THEME),
+        storage.getItem(STORAGE_KEY_HAPTICS),
       ]);
       setToolApprovalEnabledState(savedApproval === 'true');
+      setHapticsEnabledState(savedHaptics !== 'false'); // Default to true
       if (savedTheme && (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system')) {
         setThemePreferenceState(savedTheme);
       }
@@ -115,9 +123,29 @@ export function usePreferences() {
     }
   };
 
+  const setHapticsEnabled = async (enabled: boolean) => {
+    try {
+      setHapticsEnabledState(enabled);
+      await setHapticsEnabledUtil(enabled);
+      
+      // Dispatch custom event for immediate updates (web)
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('preferenceChanged', {
+          detail: { key: STORAGE_KEY_HAPTICS, value: enabled ? 'true' : 'false' }
+        }));
+      }
+    } catch (error) {
+      console.error('Error saving haptics preference:', error);
+      // Revert on error
+      setHapticsEnabledState(!enabled);
+    }
+  };
+
   return {
     toolApprovalEnabled: isLoaded ? toolApprovalEnabled : false,
     setToolApprovalEnabled,
+    hapticsEnabled: isLoaded ? hapticsEnabled : true,
+    setHapticsEnabled,
     themePreference: isLoaded ? themePreference : null,
     setThemePreference,
     isLoaded,

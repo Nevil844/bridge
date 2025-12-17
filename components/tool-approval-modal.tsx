@@ -1,6 +1,7 @@
 import { ThemedText } from '@/components/themed-text';
 import { getIntegrationTypeForTool } from '@/components/ui/integrations/metadata';
 import { getIntegrationDisplay } from '@/config/integrationCatalog';
+import { mediumImpact, errorFeedback } from '@/utils/haptics';
 import React from 'react';
 import { Image, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -135,7 +136,10 @@ export function ToolApprovalModal({
                   borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
                 },
               ]}
-              onPress={onReject}
+              onPress={() => {
+                errorFeedback();
+                onReject();
+              }}
               disabled={isApproving}>
               <ThemedText style={styles.rejectButtonText}>
                 {isApproving ? 'Processing...' : 'Reject'}
@@ -146,7 +150,10 @@ export function ToolApprovalModal({
                 styles.approveButton,
                 { backgroundColor: isDark ? '#0A84FF' : '#007AFF' },
               ]}
-              onPress={onApprove}
+              onPress={() => {
+                mediumImpact();
+                onApprove();
+              }}
               disabled={isApproving}>
               <ThemedText style={styles.approveButtonText}>
                 {isApproving ? 'Processing...' : 'Approve'}
