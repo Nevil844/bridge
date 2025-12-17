@@ -93,18 +93,21 @@ export default function RootLayout() {
           <Stack
             screenOptions={{
               headerShown: false,
+              title: '',
             }}
           >
             <Stack.Screen 
               name="login"
               options={{ 
                 headerShown: false,
+                title: '',
               }} 
             />
             <Stack.Screen 
               name="terms" 
               options={{ 
                 headerShown: false,
+                title: '',
                 presentation: 'card',
               }} 
             />
@@ -112,6 +115,7 @@ export default function RootLayout() {
               name="privacy" 
               options={{ 
                 headerShown: false,
+                title: '',
                 presentation: 'card',
               }} 
             />
@@ -124,12 +128,18 @@ export default function RootLayout() {
     // Show main app (auth disabled for testing or authenticated)
     return (
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            title: '',
+          }}
+        >
+          <Stack.Screen name="(tabs)" options={{ headerShown: false, title: '' }} />
           <Stack.Screen 
             name="landing" 
             options={{ 
               headerShown: false,
+              title: '',
               presentation: 'fullScreenModal',
             }} 
           />
@@ -137,6 +147,7 @@ export default function RootLayout() {
             name="preferences" 
             options={{ 
               headerShown: false,
+              title: '',
               presentation: 'card',
             }} 
           />
@@ -144,6 +155,7 @@ export default function RootLayout() {
             name="usage" 
             options={{ 
               headerShown: false,
+              title: '',
               presentation: 'card',
             }} 
           />
@@ -151,6 +163,7 @@ export default function RootLayout() {
             name="about" 
             options={{ 
               headerShown: false,
+              title: '',
               presentation: 'card',
             }} 
           />
@@ -158,6 +171,7 @@ export default function RootLayout() {
             name="profile" 
             options={{ 
               headerShown: false,
+              title: '',
               presentation: 'card',
             }} 
           />
@@ -165,6 +179,7 @@ export default function RootLayout() {
             name="terms" 
             options={{ 
               headerShown: false,
+              title: '',
               presentation: 'card',
             }} 
           />
@@ -172,10 +187,11 @@ export default function RootLayout() {
             name="privacy" 
             options={{ 
               headerShown: false,
+              title: '',
               presentation: 'card',
             }} 
           />
-          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+          <Stack.Screen name="modal" options={{ headerShown: false, title: '', presentation: 'modal' }} />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
