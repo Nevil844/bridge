@@ -1,6 +1,7 @@
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { authenticatedFetch } from '@/utils/api';
+import { lightImpact } from '@/utils/haptics';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -106,7 +107,10 @@ export function SampleQuestions({ userId, onQuestionSelect }: SampleQuestionsPro
     <View style={styles.container}>
       <TouchableOpacity
         activeOpacity={0.7}
-        onPress={() => onQuestionSelect(currentQuestion)}
+        onPress={() => {
+          lightImpact();
+          onQuestionSelect(currentQuestion);
+        }}
         style={[
           styles.questionContainer,
           {

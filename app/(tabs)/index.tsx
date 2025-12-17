@@ -13,6 +13,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePreferences } from '@/hooks/use-preferences';
 import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
+import { errorFeedback, lightImpact, mediumImpact, successFeedback } from '@/utils/haptics';
 import { storage, STORAGE_KEYS } from '@/utils/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
@@ -178,17 +179,20 @@ export default function HomeScreen() {
 
   const handleOnboardingComplete = () => {
     // Move to disclaimer step
+    lightImpact();
     setOnboardingStep('disclaimer');
   };
 
   const handleAIDisclaimerAcknowledge = async () => {
     // Mark onboarding as completed
     try {
+      successFeedback();
       await storage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETED, 'true');
       setOnboardingStep('complete');
       setShowOnboardingFlow(false);
     } catch (error) {
       console.error('Error saving onboarding completion:', error);
+      errorFeedback();
       setOnboardingStep('complete');
       setShowOnboardingFlow(false);
     }
@@ -289,6 +293,7 @@ export default function HomeScreen() {
   };
 
   const startNewChat = () => {
+    lightImpact(); // Haptic feedback for new chat
     setCurrentChatId(null);
     setMessages([]);
     setShowSidebar(false);
@@ -450,6 +455,7 @@ export default function HomeScreen() {
 
   const startRecording = async () => {
     try {
+      mediumImpact(); // Haptic feedback when starting recording
       const permission = await Audio.requestPermissionsAsync();
       
       if (permission.status !== 'granted') {
@@ -688,6 +694,7 @@ export default function HomeScreen() {
   const stopRecording = async () => {
     if (!recording) return;
 
+    mediumImpact(); // Haptic feedback when stopping recording
     // Store reference to recording before we potentially clear it
     const recordingToStop = recording;
     let recordingUri: string | null = null;
@@ -907,6 +914,7 @@ export default function HomeScreen() {
 
   const handleSendWithWebSocket = async (text: string) => {
     if (text.trim() && !isLoading) {
+      lightImpact(); // Haptic feedback when sending message
       setShowWebSearchMenu(false);
       const userMessage: Message = {
         id: Date.now().toString(),

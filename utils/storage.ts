@@ -31,6 +31,7 @@ export const STORAGE_KEYS = {
   OAUTH_STATE: 'oauth_state',
   // Preferences
   TOOL_APPROVAL: 'preference_tool_approval',
+  HAPTICS_ENABLED: 'preference_haptics_enabled',
   // Onboarding flow (includes onboarding + disclaimer)
   ONBOARDING_COMPLETED: 'onboarding_completed',
 } as const;

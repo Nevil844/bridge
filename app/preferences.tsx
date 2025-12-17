@@ -4,6 +4,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { usePreferences } from '@/hooks/use-preferences';
+import { selectionFeedback, lightImpact } from '@/utils/haptics';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import { Appearance, Platform, ScrollView, StyleSheet, TouchableOpacity, View, useColorScheme as useRNColorScheme } from 'react-native';
@@ -13,7 +14,7 @@ export default function PreferencesScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const router = useRouter();
-  const { toolApprovalEnabled, setToolApprovalEnabled, themePreference, setThemePreference } = usePreferences();
+  const { toolApprovalEnabled, setToolApprovalEnabled, hapticsEnabled, setHapticsEnabled, themePreference, setThemePreference } = usePreferences();
   const systemColorScheme = useRNColorScheme();
 
   const handleThemeChange = async (theme: 'light' | 'dark' | 'system') => {
@@ -110,7 +111,10 @@ export default function PreferencesScreen() {
                       backgroundColor: isDark ? '#0A84FF' : '#007AFF',
                     },
                   ]}
-                  onPress={() => handleThemeChange('light')}>
+                  onPress={() => {
+                    lightImpact();
+                    handleThemeChange('light');
+                  }}>
                   <ThemedText
                     style={[
                       styles.themeOptionText,
@@ -128,7 +132,10 @@ export default function PreferencesScreen() {
                       backgroundColor: isDark ? '#0A84FF' : '#007AFF',
                     },
                   ]}
-                  onPress={() => handleThemeChange('dark')}>
+                  onPress={() => {
+                    lightImpact();
+                    handleThemeChange('dark');
+                  }}>
                   <ThemedText
                     style={[
                       styles.themeOptionText,
@@ -174,11 +181,61 @@ export default function PreferencesScreen() {
                       : 'rgba(0, 0, 0, 0.1)',
                   },
                 ]}
-                onPress={() => setToolApprovalEnabled(!toolApprovalEnabled)}>
+                onPress={() => {
+                  selectionFeedback();
+                  setToolApprovalEnabled(!toolApprovalEnabled);
+                }}>
                 <View
                   style={[
                     styles.toggleKnob,
                     toolApprovalEnabled && styles.toggleKnobOn,
+                  ]}
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
+        {/* Interaction Section */}
+        <View style={styles.section}>
+          <ThemedText style={styles.sectionTitle}>Interaction</ThemedText>
+          <View
+            style={[
+              styles.preferenceCard,
+              { 
+                backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                borderWidth: 1,
+              },
+            ]}>
+            <View style={styles.preferenceRow}>
+              <View style={styles.preferenceInfo}>
+                <ThemedText style={styles.preferenceLabel}>
+                  Haptic Feedback
+                </ThemedText>
+                <ThemedText style={styles.preferenceDescription}>
+                  Vibrate on button taps and interactions
+                </ThemedText>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.toggle,
+                  {
+                    backgroundColor: hapticsEnabled
+                      ? '#34C759'
+                      : isDark
+                      ? 'rgba(255, 255, 255, 0.1)'
+                      : 'rgba(0, 0, 0, 0.1)',
+                  },
+                ]}
+                onPress={() => {
+                  selectionFeedback();
+                  setHapticsEnabled(!hapticsEnabled);
+                }}>
+                <View
+                  style={[
+                    styles.toggleKnob,
+                    hapticsEnabled && styles.toggleKnobOn,
                   ]}
                 />
               </TouchableOpacity>
