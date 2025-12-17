@@ -6,9 +6,11 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { LinearGradient } from 'expo-linear-gradient';
+import Constants from 'expo-constants';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated as RNAnimated,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -18,23 +20,65 @@ import {
   useWindowDimensions,
   View
 } from 'react-native';
-import Animated, {
-  cancelAnimation,
-  Easing,
-  Extrapolation,
-  FadeIn,
-  FadeInDown,
-  FadeInUp,
-  interpolate,
-  useAnimatedScrollHandler,
-  useAnimatedStyle,
-  useSharedValue,
-  withDelay,
-  withRepeat,
-  withSequence,
-  withSpring,
-  withTiming
-} from 'react-native-reanimated';
+
+// Check if we're in Expo Go (Reanimated doesn't work in Expo Go)
+const isExpoGo = Constants.executionEnvironment === 'storeClient';
+
+// Lazy check for Reanimated
+let reanimatedCache: any = null;
+let reanimatedChecked = false;
+
+function getReanimated() {
+  if (isExpoGo) {
+    return null;
+  }
+  
+  if (reanimatedChecked) {
+    return reanimatedCache;
+  }
+  
+  reanimatedChecked = true;
+  try {
+    reanimatedCache = require('react-native-reanimated');
+    return reanimatedCache;
+  } catch (e) {
+    reanimatedCache = null;
+    return null;
+  }
+}
+
+// Get Reanimated exports with fallbacks
+const reanimated = getReanimated();
+const Animated = reanimated?.default || RNAnimated;
+
+// Fallback hooks that work in Expo Go (animations will be static)
+const useSharedValue = reanimated?.useSharedValue || ((val: number) => {
+  // Use React's useRef as a fallback so it works as a hook and is mutable
+  return React.useRef({ value: val }).current;
+});
+const useAnimatedStyle = reanimated?.useAnimatedStyle || (() => ({}));
+const useAnimatedScrollHandler = reanimated?.useAnimatedScrollHandler || (() => () => {});
+const cancelAnimation = reanimated?.cancelAnimation || (() => {});
+const Easing = reanimated?.Easing || RNAnimated.Easing;
+const Extrapolation = reanimated?.Extrapolation || { CLAMP: 'clamp', EXTEND: 'extend', IDENTITY: 'identity' };
+// Create fallback animation presets that match the API
+const createFallbackPreset = () => ({
+  duration: (ms: number) => createFallbackPreset(),
+  delay: (ms: number) => createFallbackPreset(),
+});
+
+const FadeIn = reanimated?.FadeIn || createFallbackPreset();
+const FadeInDown = reanimated?.FadeInDown || createFallbackPreset();
+const FadeInUp = reanimated?.FadeInUp || createFallbackPreset();
+const interpolate = reanimated?.interpolate || ((val: number, input: number[], output: number[]) => {
+  const ratio = (val - input[0]) / (input[1] - input[0]);
+  return output[0] + (output[1] - output[0]) * ratio;
+});
+const withDelay = reanimated?.withDelay || ((delay: number, animation: any) => animation);
+const withRepeat = reanimated?.withRepeat || ((animation: any) => animation);
+const withSequence = reanimated?.withSequence || ((...animations: any[]) => animations[0]);
+const withSpring = reanimated?.withSpring || ((toValue: number) => toValue);
+const withTiming = reanimated?.withTiming || ((toValue: number) => toValue);
 
 /**
  * Bridge AI — LandingScreen (Premium UI)

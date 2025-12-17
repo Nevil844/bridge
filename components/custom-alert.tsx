@@ -2,15 +2,46 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
-    Modal,
-    StyleSheet,
-    TouchableOpacity,
-    View,
+  Modal,
+  Animated as RNAnimated,
+  StyleSheet,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+
+// Check if we're in Expo Go (Reanimated doesn't work in Expo Go)
+const isExpoGo = Constants.executionEnvironment === 'storeClient';
+
+// Lazy check for Reanimated - only check when component is used, not at module load
+let reanimatedCache: any = null;
+let reanimatedChecked = false;
+
+function getReanimated() {
+  // Skip Reanimated entirely in Expo Go
+  if (isExpoGo) {
+    return null;
+  }
+  
+  if (reanimatedChecked) {
+    return reanimatedCache;
+  }
+  
+  reanimatedChecked = true;
+  try {
+    // Use a function to delay the require until component render
+    // This will only work in development builds, not Expo Go
+    reanimatedCache = require('react-native-reanimated');
+    return reanimatedCache;
+  } catch (e) {
+    // Reanimated not available (not properly configured)
+    reanimatedCache = null;
+    return null;
+  }
+}
 
 interface CustomAlertProps {
   visible: boolean;
@@ -23,6 +54,23 @@ interface CustomAlertProps {
 export function CustomAlert({ visible, title, message, onClose, type = 'info' }: CustomAlertProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  
+  // Lazy check for Reanimated
+  const reanimated = getReanimated();
+  const useReanimated = reanimated !== null;
+  
+  // Fallback animation using RN Animated API
+  const fadeAnim = useRef(new RNAnimated.Value(visible ? 1 : 0)).current;
+  
+  useEffect(() => {
+    if (!useReanimated) {
+      RNAnimated.timing(fadeAnim, {
+        toValue: visible ? 1 : 0,
+        duration: visible ? 200 : 150,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [visible, fadeAnim, useReanimated]);
 
   const getIcon = () => {
     switch (type) {
@@ -46,6 +94,8 @@ export function CustomAlert({ visible, title, message, onClose, type = 'info' }:
     }
   };
 
+  const AnimatedView = useReanimated && reanimated ? reanimated.default.View : RNAnimated.View;
+
   return (
     <Modal
       visible={visible}
@@ -58,72 +108,139 @@ export function CustomAlert({ visible, title, message, onClose, type = 'info' }:
         activeOpacity={1}
         onPress={onClose}
       >
-        <Animated.View
-          entering={FadeIn.duration(200)}
-          exiting={FadeOut.duration(150)}
-          style={styles.container}
-        >
-          <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
-            <ThemedView
-              style={[
-                styles.alertBox,
-                {
-                  backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
-                  borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-                },
-              ]}
-            >
-              <View style={styles.iconContainer}>
-                <LinearGradient
-                  colors={getColors()}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.iconGradient}
-                >
-                  <IconSymbol name={getIcon() as any} size={32} color="#FFFFFF" />
-                </LinearGradient>
-              </View>
-
-              <ThemedText
-                type="title"
+        {useReanimated && reanimated ? (
+          <AnimatedView
+            entering={reanimated.FadeIn.duration(200)}
+            exiting={reanimated.FadeOut.duration(150)}
+            style={styles.container}
+          >
+            <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+              <ThemedView
                 style={[
-                  styles.title,
-                  { color: isDark ? '#FFFFFF' : '#0F172A' },
-                ]}
-              >
-                {title}
-              </ThemedText>
-
-              <ThemedText
-                style={[
-                  styles.message,
-                  { color: isDark ? '#A1A1AA' : '#64748B' },
-                ]}
-              >
-                {message}
-              </ThemedText>
-
-              <TouchableOpacity
-                style={[
-                  styles.button,
+                  styles.alertBox,
                   {
-                    backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
+                    backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                    borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
                   },
                 ]}
-                onPress={onClose}
               >
-                <LinearGradient
-                  colors={getColors()}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.buttonGradient}
+                <View style={styles.iconContainer}>
+                  <LinearGradient
+                    colors={getColors() as [string, string]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.iconGradient}
+                  >
+                    <IconSymbol name={getIcon() as any} size={32} color="#FFFFFF" />
+                  </LinearGradient>
+                </View>
+
+                <ThemedText
+                  type="title"
+                  style={[
+                    styles.title,
+                    { color: isDark ? '#FFFFFF' : '#0F172A' },
+                  ]}
                 >
-                  <ThemedText style={styles.buttonText}>OK</ThemedText>
-                </LinearGradient>
-              </TouchableOpacity>
-            </ThemedView>
-          </TouchableOpacity>
-        </Animated.View>
+                  {title}
+                </ThemedText>
+
+                <ThemedText
+                  style={[
+                    styles.message,
+                    { color: isDark ? '#A1A1AA' : '#64748B' },
+                  ]}
+                >
+                  {message}
+                </ThemedText>
+
+                <TouchableOpacity
+                  style={[
+                    styles.button,
+                    {
+                      backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
+                    },
+                  ]}
+                  onPress={onClose}
+                >
+                  <LinearGradient
+                    colors={getColors() as [string, string]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.buttonGradient}
+                  >
+                    <ThemedText style={styles.buttonText}>OK</ThemedText>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </ThemedView>
+            </TouchableOpacity>
+          </AnimatedView>
+        ) : (
+          <AnimatedView
+            style={[styles.container, { opacity: fadeAnim }]}
+          >
+            <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+              <ThemedView
+                style={[
+                  styles.alertBox,
+                  {
+                    backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                    borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                  },
+                ]}
+              >
+                <View style={styles.iconContainer}>
+                  <LinearGradient
+                    colors={getColors() as [string, string]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.iconGradient}
+                  >
+                    <IconSymbol name={getIcon() as any} size={32} color="#FFFFFF" />
+                  </LinearGradient>
+                </View>
+
+                <ThemedText
+                  type="title"
+                  style={[
+                    styles.title,
+                    { color: isDark ? '#FFFFFF' : '#0F172A' },
+                  ]}
+                >
+                  {title}
+                </ThemedText>
+
+                <ThemedText
+                  style={[
+                    styles.message,
+                    { color: isDark ? '#A1A1AA' : '#64748B' },
+                  ]}
+                >
+                  {message}
+                </ThemedText>
+
+                <TouchableOpacity
+                  style={[
+                    styles.button,
+                    {
+                      backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
+                    },
+                  ]}
+                  onPress={onClose}
+                >
+                  <LinearGradient
+                    colors={getColors() as [string, string]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.buttonGradient}
+                  >
+                    <ThemedText style={styles.buttonText}>OK</ThemedText>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </ThemedView>
+            </TouchableOpacity>
+          </AnimatedView>
+        )}
       </TouchableOpacity>
     </Modal>
   );

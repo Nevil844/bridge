@@ -110,8 +110,8 @@ export function SampleQuestions({ userId, onQuestionSelect }: SampleQuestionsPro
         style={[
           styles.questionContainer,
           {
-            backgroundColor: isDark ? '#151718' : '#FFFFFF',
-            borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+            backgroundColor: 'transparent',
+            borderColor: isDark ? 'rgba(0, 122, 255, 0.3)' : 'rgba(0, 122, 255, 0.2)',
           },
         ]}>
         <Animated.View
@@ -125,7 +125,7 @@ export function SampleQuestions({ userId, onQuestionSelect }: SampleQuestionsPro
           <Text
             style={[
               styles.questionText,
-              { color: isDark ? '#FFFFFF' : '#000000' },
+              { color: isDark ? '#5AC8FA' : '#007AFF' },
             ]}>
             {currentQuestion}
           </Text>

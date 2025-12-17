@@ -106,7 +106,9 @@ export default function HomeScreen() {
   const { topInset, bottomInset } = useSafeAreaPadding({ top: 12, bottom: 16 });
   const headerPaddingTop = topInset + 20;
   const headerButtonTop = topInset + 24;
-  const inputBottomPadding = bottomInset;
+  // Use minimal bottom padding - KeyboardAvoidingView will handle keyboard spacing automatically
+  // Only add safe area padding when keyboard is closed (handled by KeyboardAvoidingView)
+  const inputBottomPadding = Platform.OS === 'ios' ? Math.max(bottomInset, 8) : 8;
   const normalizeTokenUsage = (usage?: { input_tokens?: number; output_tokens?: number }) => {
     if (!usage) return undefined;
     const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined;
@@ -182,7 +184,7 @@ export default function HomeScreen() {
   }, [messages.length]);
 
   useEffect(() => {
-    // Listen to keyboard events
+    // Listen to keyboard events to scroll when keyboard appears
     const keyboardWillShow = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       () => {
@@ -445,6 +447,8 @@ export default function HomeScreen() {
       // Create WebSocket connection for real-time transcription
       const ws = new WebSocket(API_ENDPOINTS.TRANSCRIBE_WS);
       transcribeWebSocketRef.current = ws;
+      
+      let transcriptionCompleted = false; // Track if transcription completed successfully
 
       ws.onopen = () => {
         // Authenticate first
@@ -476,15 +480,18 @@ export default function HomeScreen() {
               console.warn('⚠️ Received empty transcript');
             }
             
-            // If final transcript, we can auto-send or let user review
+            // If final transcript, mark as completed
             if (!data.isPartial && transcriptText.trim()) {
+              transcriptionCompleted = true; // Mark transcription as successfully completed
               console.log('✅ Final transcript ready:', transcriptText);
               // Optionally auto-send final transcript
               // handleSendWithText(transcriptText);
             }
           } else if (data.type === 'error') {
             console.error('Transcription error:', data.message);
-            Alert.alert('Transcription Error', data.message);
+            if (!transcriptionCompleted) {
+              Alert.alert('Transcription Error', data.message);
+            }
             setIsTranscribing(false); // Reset on error
           } else if (data.type === 'stopped') {
             console.log('Transcription stopped');
@@ -502,8 +509,19 @@ export default function HomeScreen() {
       (ws as any)._transcribeMessageHandler = messageHandler;
 
       ws.onerror = (error) => {
-        console.error('Transcription WebSocket error:', error);
-        Alert.alert('Error', 'Failed to connect to transcription service');
+        // Only show error if transcription hasn't completed successfully
+        if (!transcriptionCompleted) {
+          const wsState = ws.readyState;
+          // Only treat as real error if WebSocket is in a bad state (not CLOSED or CLOSING)
+          if (wsState !== 2 && wsState !== 3) { // Not CLOSING (2) or CLOSED (3)
+            console.error('Transcription WebSocket error (state:', wsState, '):', error);
+            Alert.alert('Error', 'Failed to connect to transcription service');
+          } else {
+            console.log('Transcription WebSocket closing/closed (normal):', wsState);
+          }
+        } else {
+          console.log('Transcription WebSocket error after successful completion (ignored)');
+        }
       };
 
       ws.onclose = () => {
@@ -539,27 +557,39 @@ export default function HomeScreen() {
 
       console.log(`📁 Reading audio file from: ${uri}`);
 
-      // Read the entire audio file using XMLHttpRequest (React Native compatible)
-      const audioData = await new Promise<Uint8Array>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', uri, true);
-        xhr.responseType = 'arraybuffer';
-        
-        xhr.onload = () => {
-          if (xhr.status === 200) {
-            const arrayBuffer = xhr.response as ArrayBuffer;
-            resolve(new Uint8Array(arrayBuffer));
-          } else {
-            reject(new Error(`Failed to read audio file: ${xhr.statusText}`));
-          }
-        };
-        
-        xhr.onerror = () => {
-          reject(new Error('Failed to read audio file: network error'));
-        };
-        
-        xhr.send();
-      });
+      // Read the entire audio file using fetch (works better with local file URIs on Android/Expo Go)
+      let audioData: Uint8Array;
+      try {
+        const response = await fetch(uri);
+        if (!response.ok) {
+          throw new Error(`Failed to read audio file: ${response.status} ${response.statusText}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        audioData = new Uint8Array(arrayBuffer);
+      } catch (fetchError: any) {
+        // Fallback to XMLHttpRequest if fetch fails (for older React Native versions)
+        console.log('⚠️ Fetch failed, trying XMLHttpRequest fallback...');
+        audioData = await new Promise<Uint8Array>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('GET', uri, true);
+          xhr.responseType = 'arraybuffer';
+          
+          xhr.onload = () => {
+            if (xhr.status === 200 || xhr.status === 0) { // Status 0 is OK for local files
+              const arrayBuffer = xhr.response as ArrayBuffer;
+              resolve(new Uint8Array(arrayBuffer));
+            } else {
+              reject(new Error(`Failed to read audio file: ${xhr.status} ${xhr.statusText}`));
+            }
+          };
+          
+          xhr.onerror = () => {
+            reject(new Error(`Failed to read audio file: ${fetchError?.message || 'network error'}`));
+          };
+          
+          xhr.send();
+        });
+      }
 
       const fileSize = audioData.length;
       console.log(`📦 Audio file size: ${fileSize} bytes`);
@@ -621,6 +651,10 @@ export default function HomeScreen() {
   const stopRecording = async () => {
     if (!recording) return;
 
+    // Store reference to recording before we potentially clear it
+    const recordingToStop = recording;
+    let recordingUri: string | null = null;
+
     try {
       setIsRecording(false);
       setIsTranscribing(true); // Disable buttons during transcription
@@ -628,7 +662,53 @@ export default function HomeScreen() {
       
       // Stop the recording first to get the URI
       console.log('🛑 Stopping recording...');
-      await recording.stopAndUnloadAsync();
+      
+      try {
+        // Check if recording is still valid before stopping
+        const status = await recordingToStop.getStatusAsync();
+        console.log('📊 Recording status:', status);
+        
+        // Try to stop the recording
+        if (status.isRecording) {
+          try {
+            await recordingToStop.stopAndUnloadAsync();
+            console.log('✅ Recording stopped successfully');
+          } catch (stopError: any) {
+            console.warn('⚠️ Error during stopAndUnloadAsync, but continuing:', stopError);
+            // Continue anyway - might still be able to get URI
+          }
+        } else {
+          console.log('⚠️ Recording already stopped');
+        }
+        
+        // Get URI after stopping (getURI() should work after stopAndUnloadAsync)
+        try {
+          recordingUri = recordingToStop.getURI();
+          if (!recordingUri) {
+            // On Android, sometimes getURI() returns null even after stopping
+            // Try waiting a bit and checking status
+            console.log('⚠️ URI is null, waiting and retrying...');
+            await new Promise(resolve => setTimeout(resolve, 200));
+            recordingUri = recordingToStop.getURI();
+          }
+          
+          if (!recordingUri) {
+            throw new Error('Recording URI not available after stopping');
+          }
+          console.log('✅ Got recording URI:', recordingUri);
+        } catch (uriError: any) {
+          console.error('❌ Failed to get recording URI:', uriError);
+          throw new Error(`Failed to get recording URI: ${uriError.message || 'Unknown error'}`);
+        }
+      } catch (error: any) {
+        console.error('❌ Error in stop recording process:', error);
+        // Re-throw with more context
+        throw error;
+      }
+      
+      if (!recordingUri) {
+        throw new Error('Recording URI not available after stopping');
+      }
       
       // Now get the URI and stream the file
       const ws = transcribeWebSocketRef.current;
@@ -674,8 +754,12 @@ export default function HomeScreen() {
           });
         }
         
-        // Now stream the audio file
-        await streamAudioFile(recording, ws);
+        // Now stream the audio file - create a mock recording object with the URI
+        // Since we already have the URI, we can pass it directly
+        const mockRecording = {
+          getURI: () => recordingUri,
+        } as Audio.Recording;
+        await streamAudioFile(mockRecording, ws);
         
         // Stop transcription stream (triggers batch processing)
         console.log('🛑 Stopping transcription stream...');
@@ -720,10 +804,17 @@ export default function HomeScreen() {
         transcribeWebSocketRef.current = null;
       }
 
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-      });
+      // Clean up audio mode
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+        });
+      } catch (audioModeError) {
+        console.warn('⚠️ Failed to reset audio mode:', audioModeError);
+        // Non-critical error, continue
+      }
 
+      // Clean up recording reference
       setRecording(null);
       setIsTranscribing(false); // Re-enable buttons after transcription
 
@@ -731,10 +822,17 @@ export default function HomeScreen() {
       if (transcriptionText.trim()) {
         setInputText(transcriptionText);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to stop recording', err);
-      Alert.alert('Error', 'Failed to stop recording');
-      setIsTranscribing(false); // Reset transcription state on error
+      
+      // Clean up state even on error
+      setRecording(null);
+      setIsRecording(false);
+      setIsTranscribing(false);
+      
+      // Show user-friendly error message
+      const errorMessage = err?.message || 'Unknown error occurred';
+      Alert.alert('Error', `Failed to stop recording: ${errorMessage}`);
     }
   };
 
@@ -802,6 +900,22 @@ export default function HomeScreen() {
           throw new Error('No access token available. Please log in again.');
         }
 
+        // Read tool approval preference directly from storage to ensure we have the latest value
+        // This is important on Android where AsyncStorage might be slower to load in the hook
+        let requireToolApproval = toolApprovalEnabled;
+        try {
+          const savedApproval = await storage.getItem(STORAGE_KEYS.TOOL_APPROVAL);
+          if (savedApproval !== null) {
+            requireToolApproval = savedApproval === 'true';
+            console.log(`🔧 Tool approval: ${requireToolApproval} (read from storage)`);
+          } else {
+            // Storage not set yet, use hook value
+            console.log(`🔧 Tool approval: ${requireToolApproval} (using hook value, storage not set)`);
+          }
+        } catch (error) {
+          console.warn('⚠️ Failed to read tool approval from storage, using hook value:', error);
+        }
+
         // Create WebSocket connection
         const ws = new WebSocket(API_ENDPOINTS.CHAT_WS);
         activeWebSocketRef.current = ws;
@@ -810,6 +924,7 @@ export default function HomeScreen() {
         let accumulatedThinking = '';
         let currentThinkingIndex = -1;
         let authenticated = false;
+        let responseCompleted = false; // Track if we successfully received a 'done' message
 
         ws.onopen = () => {
           // Authenticate first
@@ -828,7 +943,7 @@ export default function HomeScreen() {
                 message: userMessage.text,
                 model: selectedModel,
                 conversationId: currentChatId,
-                requireToolApproval: toolApprovalEnabled,
+                requireToolApproval: requireToolApproval,
               }));
               return;
             }
@@ -914,6 +1029,7 @@ export default function HomeScreen() {
               });
               setApprovalExpiresAt(Date.now() + TOOL_APPROVAL_TIMEOUT_MS);
             } else if (data.type === 'done') {
+              responseCompleted = true; // Mark response as successfully completed
               const finalContent = data.message !== undefined ? data.message : accumulatedContent || '';
               setMessages(prev =>
                 prev.map(msg =>
@@ -936,8 +1052,13 @@ export default function HomeScreen() {
               }
               
               setIsLoading(false);
-              ws.close();
-              activeWebSocketRef.current = null;
+              // Close WebSocket after a small delay to ensure state updates complete
+              setTimeout(() => {
+                if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+                  ws.close();
+                }
+                activeWebSocketRef.current = null;
+              }, 100);
             } else if (data.type === 'error') {
               throw new Error(data.error || 'WebSocket error');
             }
@@ -947,20 +1068,39 @@ export default function HomeScreen() {
         };
 
         ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.id === aiMessageId
-                ? { ...msg, text: 'Connection error. Please try again.' }
-                : msg
-            )
-          );
-          setIsLoading(false);
+          // Only log and handle errors if we haven't successfully completed
+          // In Expo Go, WebSocket errors can sometimes be false positives from normal closures
+          if (!responseCompleted) {
+            const wsState = ws.readyState;
+            // WebSocket states: CONNECTING=0, OPEN=1, CLOSING=2, CLOSED=3
+            // Only treat as real error if WebSocket is in a bad state (not CLOSED or CLOSING)
+            const isClosingOrClosed = wsState === 2 || wsState === 3; // CLOSING or CLOSED
+            if (!isClosingOrClosed) {
+              console.error('WebSocket error (state:', wsState, '):', error);
+              setMessages(prev =>
+                prev.map(msg => {
+                  // Only update if message is still empty or doesn't have meaningful content
+                  if (msg.id === aiMessageId && (!msg.text || msg.text.trim() === '')) {
+                    return { ...msg, text: 'Connection error. Please try again.' };
+                  }
+                  return msg;
+                })
+              );
+              setIsLoading(false);
+            } else {
+              // WebSocket is closing/closed - this is likely normal, just log for debugging
+              console.log('WebSocket closing/closed (normal):', wsState);
+            }
+          } else {
+            // Response completed successfully, ignore error (likely from normal close)
+            console.log('WebSocket error after successful completion (ignored)');
+          }
           activeWebSocketRef.current = null;
         };
 
         ws.onclose = () => {
-          if (isLoading) {
+          // Only update loading state if response wasn't completed
+          if (!responseCompleted && isLoading) {
             setIsLoading(false);
           }
           if (activeWebSocketRef.current === ws) {
@@ -993,9 +1133,9 @@ export default function HomeScreen() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
       style={styles.container}
-      keyboardVerticalOffset={topInset}>
+      keyboardVerticalOffset={0}>
       <ThemedView style={styles.container}>
         {/* Header */}
         <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
@@ -1065,8 +1205,8 @@ export default function HomeScreen() {
               styles.sidebar,
               { 
                 backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
-                paddingTop: topInset + 12,
-                paddingBottom: bottomInset,
+                paddingTop: headerPaddingTop,
+                paddingBottom: inputBottomPadding,
               },
             ]}>
               <View style={styles.sidebarContent}>
@@ -1076,7 +1216,7 @@ export default function HomeScreen() {
                     <TouchableOpacity 
                       style={styles.closeIcon}
                       onPress={() => setShowSidebar(false)}>
-                      <IconSymbol name="chevron.left" size={20} color={isDark ? '#FFFFFF' : '#000000'} />
+                      <IconSymbol name="chevron.left" size={24} color={isDark ? '#FFFFFF' : '#000000'} />
                     </TouchableOpacity>
                     <Text style={[
                       styles.sidebarTitle,
@@ -1101,7 +1241,7 @@ export default function HomeScreen() {
                 {/* Chat History List */}
                 <ScrollView
                   style={styles.chatList}
-                  contentContainerStyle={{ paddingBottom: bottomInset + 16 }}
+                  contentContainerStyle={{ paddingBottom: 8 }}
                 >
                   <ThemedText style={styles.chatListTitle}>Recent Chats</ThemedText>
                   
@@ -1170,7 +1310,7 @@ export default function HomeScreen() {
                 styles.profileSection,
                 {
                   borderTopColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-                  paddingBottom: bottomInset + 12,
+                  paddingBottom: 8,
                 },
               ]}>
                 <TouchableOpacity
@@ -1865,7 +2005,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 16,
+    paddingBottom: 8,
     borderTopWidth: 1,
   },
   input: {
@@ -2019,8 +2159,8 @@ const styles = StyleSheet.create({
   },
   sidebarHeader: {
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 16,
+    paddingTop: 0,
+    paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(128, 128, 128, 0.2)',
   },
@@ -2029,9 +2169,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
     gap: 12,
+    paddingTop: 0,
   },
   closeIcon: {
-    padding: 4,
+    padding: 8,
   },
   sidebarTitle: {
     fontSize: 20,
@@ -2052,7 +2193,7 @@ const styles = StyleSheet.create({
   },
   chatList: {
     flex: 1,
-    paddingTop: 16,
+    paddingTop: 8,
   },
   chatListTitle: {
     fontSize: 12,

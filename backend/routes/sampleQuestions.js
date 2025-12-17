@@ -149,11 +149,11 @@ router.get('/', verifyUser, async (req, res) => {
     
     let questions = [];
     
-    if (integrationTypes.length === 0) {
-      // No integrations - return generic questions
-      questions = GENERIC_QUESTIONS;
-    } else {
-      // Build questions from connected integrations
+    // Always include generic questions
+    questions = [...GENERIC_QUESTIONS];
+    
+    if (integrationTypes.length > 0) {
+      // Add integration-specific questions when integrations are connected
       const integrationQuestions = [];
       
       integrationTypes.forEach(type => {
@@ -162,8 +162,8 @@ router.get('/', verifyUser, async (req, res) => {
         }
       });
       
-      // Only use integration-specific questions when integrations are connected
-      questions = integrationQuestions;
+      // Combine generic and integration-specific questions
+      questions = [...questions, ...integrationQuestions];
     }
     
     // Shuffle questions for variety

@@ -1,15 +1,34 @@
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
-import Animated, {
-    Easing,
-    useAnimatedStyle,
-    useSharedValue,
-    withRepeat,
-    withSequence,
-    withTiming,
-} from 'react-native-reanimated';
+import React, { useEffect, useState } from 'react';
+import { Animated as RNAnimated, StyleSheet, View } from 'react-native';
+
+// Check if we're in Expo Go (Reanimated doesn't work in Expo Go)
+const isExpoGo = Constants.executionEnvironment === 'storeClient';
+
+// Lazy import Reanimated - only when not in Expo Go
+let ReanimatedModule: any = null;
+let reanimatedChecked = false;
+
+function getReanimatedModule() {
+  if (isExpoGo) {
+    return null;
+  }
+  
+  if (reanimatedChecked) {
+    return ReanimatedModule;
+  }
+  
+  reanimatedChecked = true;
+  try {
+    ReanimatedModule = require('react-native-reanimated');
+    return ReanimatedModule;
+  } catch (e) {
+    ReanimatedModule = null;
+    return null;
+  }
+}
 
 interface GlowingOrbProps {
   isActive?: boolean;
@@ -17,6 +36,22 @@ interface GlowingOrbProps {
 
 export function GlowingOrb({ isActive = false }: GlowingOrbProps) {
   const colorScheme = useColorScheme();
+  const reanimated = getReanimatedModule();
+  
+  if (reanimated) {
+    return <ReanimatedOrb isActive={isActive} colorScheme={colorScheme} />;
+  } else {
+    return <FallbackOrb isActive={isActive} colorScheme={colorScheme} />;
+  }
+}
+
+// Reanimated 3.19.4 implementation
+function ReanimatedOrb({ isActive, colorScheme }: { isActive: boolean; colorScheme: string | null | undefined }) {
+  const reanimated = getReanimatedModule();
+  if (!reanimated) return null;
+  
+  const Animated = reanimated.default;
+  const { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming, Easing } = reanimated;
   
   // Multiple wave layers with different speeds and scales
   const wave1 = useSharedValue(1);
@@ -260,6 +295,150 @@ export function GlowingOrb({ isActive = false }: GlowingOrbProps) {
   );
 }
 
+// Fallback component using React Native Animated (for Expo Go)
+function FallbackOrb({ isActive, colorScheme }: { isActive: boolean; colorScheme: string | null | undefined }) {
+  const wave1 = useState(new RNAnimated.Value(1))[0];
+  const wave2 = useState(new RNAnimated.Value(1))[0];
+  const wave3 = useState(new RNAnimated.Value(1))[0];
+  const rotate1 = useState(new RNAnimated.Value(0))[0];
+  const rotate2 = useState(new RNAnimated.Value(0))[0];
+  const opacity1 = useState(new RNAnimated.Value(0.3))[0];
+
+  useEffect(() => {
+    // Simplified animations for fallback
+    const createPulse = (animValue: RNAnimated.Value, min: number, max: number, duration: number) => {
+      return RNAnimated.loop(
+        RNAnimated.sequence([
+          RNAnimated.timing(animValue, {
+            toValue: max,
+            duration,
+            useNativeDriver: true,
+          }),
+          RNAnimated.timing(animValue, {
+            toValue: min,
+            duration,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+    };
+
+    createPulse(wave1, 0.9, 1.4, 1800).start();
+    createPulse(wave2, 0.85, 1.35, 2100).start();
+    createPulse(wave3, 0.95, 1.25, 2400).start();
+    
+    RNAnimated.loop(
+      RNAnimated.timing(rotate1, {
+        toValue: 360,
+        duration: 12000,
+        useNativeDriver: true,
+      })
+    ).start();
+    
+    RNAnimated.loop(
+      RNAnimated.timing(rotate2, {
+        toValue: -360,
+        duration: 15000,
+        useNativeDriver: true,
+      })
+    ).start();
+    
+    createPulse(opacity1, 0.2, 0.6, 2000).start();
+  }, []);
+
+  const isDark = colorScheme === 'dark';
+
+  const wave1Style = {
+    transform: [{ scale: wave1 }],
+    opacity: opacity1,
+  };
+
+  const wave2Style = {
+    transform: [{ scale: wave2 }],
+    opacity: opacity1,
+  };
+
+  const wave3Style = {
+    transform: [{ scale: wave3 }],
+    opacity: opacity1,
+  };
+
+  const rotate1Style = {
+    transform: [{ rotate: rotate1.interpolate({
+      inputRange: [0, 360],
+      outputRange: ['0deg', '360deg'],
+    }) }],
+  };
+
+  const rotate2Style = {
+    transform: [{ rotate: rotate2.interpolate({
+      inputRange: [-360, 0],
+      outputRange: ['-360deg', '0deg'],
+    }) }],
+  };
+
+  return (
+    <View style={styles.container}>
+      <RNAnimated.View style={[styles.glowLayer, styles.glowOuter, wave1Style]}>
+        <View style={[styles.glowCircle, { 
+          backgroundColor: isDark ? 'rgba(74, 158, 255, 0.12)' : 'rgba(0, 122, 255, 0.12)' 
+        }]} />
+      </RNAnimated.View>
+
+      <RNAnimated.View style={[styles.glowLayer, styles.glowOuter2, wave2Style]}>
+        <View style={[styles.glowCircle, { 
+          backgroundColor: isDark ? 'rgba(107, 179, 255, 0.15)' : 'rgba(10, 132, 255, 0.15)' 
+        }]} />
+      </RNAnimated.View>
+
+      <RNAnimated.View style={[styles.glowLayer, styles.glowMiddle, wave3Style]}>
+        <View style={[styles.glowCircle, { 
+          backgroundColor: isDark ? 'rgba(135, 199, 255, 0.18)' : 'rgba(52, 152, 255, 0.18)' 
+        }]} />
+      </RNAnimated.View>
+
+      <RNAnimated.View style={[styles.gradientRing, rotate1Style]}>
+        <LinearGradient
+          colors={isDark 
+            ? ['rgba(74, 158, 255, 0.5)', 'rgba(135, 199, 255, 0.2)', 'rgba(74, 158, 255, 0.5)']
+            : ['rgba(0, 122, 255, 0.5)', 'rgba(52, 152, 255, 0.2)', 'rgba(0, 122, 255, 0.5)']
+          }
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.gradientFill}
+        />
+      </RNAnimated.View>
+
+      <RNAnimated.View style={[styles.gradientRing2, rotate2Style]}>
+        <LinearGradient
+          colors={isDark 
+            ? ['rgba(135, 199, 255, 0.4)', 'rgba(74, 158, 255, 0.15)', 'rgba(135, 199, 255, 0.4)']
+            : ['rgba(52, 152, 255, 0.4)', 'rgba(0, 122, 255, 0.15)', 'rgba(52, 152, 255, 0.4)']
+          }
+          start={{ x: 1, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={styles.gradientFill}
+        />
+      </RNAnimated.View>
+
+      <View style={styles.coreContainer}>
+        <LinearGradient
+          colors={isDark 
+            ? ['#C0DBFF', '#87C7FF', '#B8D6FF']
+            : ['#D0E7FF', '#A8D0FF', '#C8E0FF']
+          }
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.core}
+        />
+        <View style={[styles.shine, { 
+          backgroundColor: isDark ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.3)' 
+        }]} />
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     width: 200,
@@ -344,4 +523,3 @@ const styles = StyleSheet.create({
     borderRadius: 15,
   },
 });
-
