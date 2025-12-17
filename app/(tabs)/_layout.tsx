@@ -30,11 +30,13 @@ export default function TabLayout() {
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
         tabBarButton: HapticTab,
+        title: '',
       }}>
       <Tabs.Screen
         name="index"
         options={{
           title: 'Chat',
+          headerShown: false,
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="message.fill" color={color} />,
         }}
       />
@@ -42,6 +44,7 @@ export default function TabLayout() {
         name="integrations"
         options={{
           title: 'Integrations',
+          headerShown: false,
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="link" color={color} />,
         }}
       />
@@ -49,6 +52,7 @@ export default function TabLayout() {
         name="settings"
         options={{
           title: 'Settings',
+          headerShown: false,
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="gearshape.fill" color={color} />,
         }}
       />
@@ -56,6 +60,8 @@ export default function TabLayout() {
         name="pricing"
         options={{
           href: null, // Hide from tab bar
+          headerShown: false,
+          title: '',
         }}
       />
     </Tabs>
