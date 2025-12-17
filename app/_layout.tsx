@@ -1,10 +1,18 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import Constants from 'expo-constants';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo } from 'react';
 import { ActivityIndicator, Platform, View } from 'react-native';
-import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+// Only import Reanimated if not in Expo Go (it doesn't work in Expo Go)
+if (Constants.executionEnvironment !== 'storeClient') {
+  try {
+    require('react-native-reanimated');
+  } catch (e) {
+    // Reanimated not available, continue without it
+  }
+}
 
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
