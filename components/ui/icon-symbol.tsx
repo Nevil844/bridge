@@ -52,6 +52,9 @@ const MAPPING = {
   'doc.on.doc': 'copy',
   'xmark.circle.fill': 'close-circle',
   'person.circle.fill': 'person-circle',
+  
+  // Search
+  'magnifyingglass': 'search',
 
   // Landing / marketing
   'shield.fill': 'shield',
