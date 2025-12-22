@@ -1,5 +1,6 @@
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { getIntegrationMetadata } from '@/components/ui/integrations/metadata';
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -15,6 +16,7 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
@@ -271,6 +273,7 @@ export default function IntegrationsScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [detailsIntegration, setDetailsIntegration] = useState<Integration | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const isDark = colorScheme === 'dark';
 
@@ -519,15 +522,39 @@ export default function IntegrationsScreen() {
     }
   };
 
+  // Filter integrations based on search query
+  const filteredIntegrations = useMemo(() => {
+    if (!searchQuery.trim()) return integrations;
+    
+    const query = searchQuery.toLowerCase();
+    return integrations.filter(integration =>
+      integration.name.toLowerCase().includes(query) ||
+      integration.description.toLowerCase().includes(query) ||
+      integration.type.toLowerCase().includes(query)
+    );
+  }, [integrations, searchQuery]);
+
+  // Filter upcoming integrations based on search query
+  const filteredUpcomingIntegrations = useMemo(() => {
+    if (!searchQuery.trim()) return upcomingIntegrations;
+    
+    const query = searchQuery.toLowerCase();
+    return upcomingIntegrations.filter(integration =>
+      integration.name.toLowerCase().includes(query) ||
+      integration.description.toLowerCase().includes(query) ||
+      integration.type.toLowerCase().includes(query)
+    );
+  }, [upcomingIntegrations, searchQuery]);
+
   const sortedIntegrations = useMemo(() => {
     // Connected integrations go first, fall back to name sorting within groups
-    return [...integrations].sort((a, b) => {
+    return [...filteredIntegrations].sort((a, b) => {
       if (a.connected === b.connected) {
         return a.name.localeCompare(b.name);
       }
       return a.connected ? -1 : 1;
     });
-  }, [integrations]);
+  }, [filteredIntegrations]);
 
   // Full-screen details "screen" instead of popup when an integration is selected
   if (detailsIntegration) {
@@ -705,13 +732,50 @@ export default function IntegrationsScreen() {
         <View style={[styles.header, { paddingTop: topInset + 20 }]}>
           <ThemedText style={styles.title}>Integrations</ThemedText>
           <ThemedText style={styles.subtitle}>
-            Connect your tools to Bridge AI for powerful integrations
+            Connect your apps to Bridge AI
           </ThemedText>
+          
+          {/* Search Bar */}
+          <View style={[
+            styles.searchContainer,
+            { 
+              backgroundColor: isDark ? '#1C1C1E' : '#F2F2F7',
+              borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+            }
+          ]}>
+            <IconSymbol
+              name="magnifyingglass"
+              size={18}
+              color={isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'}
+              style={styles.searchIcon}
+            />
+            <TextInput
+              style={[
+                styles.searchInput,
+                { color: isDark ? '#FFFFFF' : '#000000' }
+              ]}
+              placeholder="Search integrations..."
+              placeholderTextColor={isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)'}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
+                <IconSymbol
+                  name="xmark.circle.fill"
+                  size={18}
+                  color={isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'}
+                />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         <View style={styles.section}>
           <ThemedText style={styles.sectionTitle}>
-            Available Integrations ({integrations.length})
+            Available Integrations ({sortedIntegrations.length})
           </ThemedText>
 
           {sortedIntegrations.map((integration) => (
@@ -781,13 +845,13 @@ export default function IntegrationsScreen() {
         {/* Upcoming Integrations */}
         <View style={styles.section}>
           <ThemedText style={styles.sectionTitle}>
-            Upcoming Integrations ({upcomingIntegrations.length})
+            Upcoming Integrations ({filteredUpcomingIntegrations.length})
           </ThemedText>
           <ThemedText style={[styles.subtitle, { marginBottom: 16 }]}>
             These integrations are under development
           </ThemedText>
 
-          {upcomingIntegrations.map((integration) => {
+          {filteredUpcomingIntegrations.map((integration) => {
             // Zomato works locally - show connect button
             const isFunctional = integration.type === 'zomato';
             
@@ -901,6 +965,27 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     opacity: 0.6,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 16,
+    borderWidth: 1,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    padding: 0,
+  },
+  clearButton: {
+    padding: 4,
+    marginLeft: 8,
   },
   section: {
     paddingHorizontal: 20,
