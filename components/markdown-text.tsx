@@ -69,7 +69,13 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
         // Process text content line by line
         const lines = segment.content.split('\n');
         const processedLines: React.ReactNode[] = [];
-        let currentList: string[] = [];
+        let currentList: Array<string | { 
+          type: 'ordered' | 'unordered' | 'checkbox'; 
+          content: string; 
+          number?: string; 
+          checkbox?: string;
+          indent?: number;
+        }> = [];
 
         const flushList = () => {
           if (currentList.length === 0) return;
@@ -77,16 +83,68 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
           const listKey = getKey();
           processedLines.push(
             <View key={listKey} style={styles.listContainer}>
-              {currentList.map((item, idx) => (
-                <View key={`${listKey}-item-${idx}`} style={styles.listItemRow}>
-                  <Text style={[styles.bullet, { color: textColor }]}>•</Text>
-                  <View style={styles.listItemTextContainer}>
-                    <Text style={[styles.listItemText, { color: textColor }]}>
-                      {parseInlineFormatting(item, `${listKey}-${idx}`, textColor, codeBg, codeText)}
-                    </Text>
+              {currentList.map((item, idx) => {
+                if (typeof item === 'string') {
+                  // Legacy support for plain strings
+                  return (
+                    <View key={`${listKey}-item-${idx}`} style={styles.listItemRow}>
+                      <View style={styles.unorderedMarkerContainer}>
+                        <Text style={[styles.unorderedMarker, { color: textColor }]}>•</Text>
+                      </View>
+                      <View style={styles.listItemTextContainer}>
+                        <Text style={[styles.listItemText, { color: textColor }]}>
+                          {parseInlineFormatting(item, `${listKey}-${idx}`, textColor, codeBg, codeText)}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                }
+
+                const isOrdered = item.type === 'ordered';
+                const isCheckbox = item.type === 'checkbox';
+                const content = item.content;
+                const indent = item.indent || 0;
+                
+                const marker = isOrdered 
+                  ? `${item.number}.`
+                  : isCheckbox
+                  ? (item.checkbox || '☐')
+                  : '•';
+                
+                return (
+                  <View 
+                    key={`${listKey}-item-${idx}`} 
+                    style={[styles.listItemRow, indent > 0 && { paddingLeft: indent * 20 }]}
+                  >
+                    {isOrdered && (
+                      <View style={styles.orderedMarkerContainer}>
+                        <Text style={[styles.orderedMarker, { color: textColor }]}>
+                          {marker}
+                        </Text>
+                      </View>
+                    )}
+                    {isCheckbox && (
+                      <View style={styles.checkboxMarkerContainer}>
+                        <Text style={[styles.checkboxMarker, { color: textColor }]}>
+                          {marker}
+                        </Text>
+                      </View>
+                    )}
+                    {!isOrdered && !isCheckbox && (
+                      <View style={styles.unorderedMarkerContainer}>
+                        <Text style={[styles.unorderedMarker, { color: textColor }]}>
+                          {marker}
+                        </Text>
+                      </View>
+                    )}
+                    <View style={styles.listItemTextContainer}>
+                      <Text style={[styles.listItemText, { color: textColor }]}>
+                        {parseInlineFormatting(content, `${listKey}-${idx}`, textColor, codeBg, codeText)}
+                      </Text>
+                    </View>
                   </View>
-                </View>
-              ))}
+                );
+              })}
             </View>
           );
           currentList = [];
@@ -94,17 +152,92 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
 
         lines.forEach((line, lineIndex) => {
           const trimmedLine = line.trim();
+          const originalLine = line;
           
-          // Check for list items
-          const listMatch = trimmedLine.match(/^[-*•]\s+(.+)$/);
-          if (listMatch) {
-            currentList.push(listMatch[1]);
+          // Check for unordered list items (-, *, •)
+          const unorderedListMatch = trimmedLine.match(/^[-*•]\s+(.+)$/);
+          if (unorderedListMatch) {
+            // Check if indented (nested)
+            const indent = originalLine.search(/\S/);
+            currentList.push({ 
+              type: 'unordered', 
+              content: unorderedListMatch[1],
+              indent: indent > 0 ? Math.floor(indent / 2) : 0
+            });
             // Flush at end or when next line is not a list item
             if (lineIndex === lines.length - 1) {
               flushList();
             } else {
               const nextLine = lines[lineIndex + 1].trim();
-              if (!nextLine.match(/^[-*•]\s+/)) {
+              if (!nextLine.match(/^[-*•☐□✓✔]\s+/) && !nextLine.match(/^\d+\.\s+/)) {
+                flushList();
+              }
+            }
+            return;
+          }
+
+          // Check for checkbox list items (☐, □, ✓, ✔) - with or without bullet prefix
+          const checkboxMatch = trimmedLine.match(/^[☐□✓✔]\s+(.+)$/);
+          const bulletCheckboxMatch = trimmedLine.match(/^[-*•]\s+[☐□✓✔]\s+(.+)$/);
+          
+          if (bulletCheckboxMatch) {
+            // Handle bullet + checkbox format (• ☐ text)
+            const indent = originalLine.search(/\S/);
+            const checkbox = trimmedLine.match(/[☐□✓✔]/)?.[0] || '☐';
+            currentList.push({ 
+              type: 'checkbox', 
+              content: bulletCheckboxMatch[1],
+              checkbox: checkbox,
+              indent: indent > 0 ? Math.floor(indent / 2) : 0
+            });
+            // Flush at end or when next line is not a list item
+            if (lineIndex === lines.length - 1) {
+              flushList();
+            } else {
+              const nextLine = lines[lineIndex + 1].trim();
+              if (!nextLine.match(/^[-*•☐□✓✔]\s+/) && !nextLine.match(/^\d+\.\s+/)) {
+                flushList();
+              }
+            }
+            return;
+          } else if (checkboxMatch) {
+            // Handle standalone checkbox format (☐ text)
+            const indent = originalLine.search(/\S/);
+            const checkbox = trimmedLine[0];
+            currentList.push({ 
+              type: 'checkbox', 
+              content: checkboxMatch[1],
+              checkbox: checkbox,
+              indent: indent > 0 ? Math.floor(indent / 2) : 0
+            });
+            // Flush at end or when next line is not a list item
+            if (lineIndex === lines.length - 1) {
+              flushList();
+            } else {
+              const nextLine = lines[lineIndex + 1].trim();
+              if (!nextLine.match(/^[-*•☐□✓✔]\s+/) && !nextLine.match(/^\d+\.\s+/)) {
+                flushList();
+              }
+            }
+            return;
+          }
+
+          // Check for ordered list items (1., 2., etc.)
+          const orderedListMatch = trimmedLine.match(/^(\d+)\.\s+(.+)$/);
+          if (orderedListMatch) {
+            const indent = originalLine.search(/\S/);
+            currentList.push({ 
+              type: 'ordered', 
+              number: orderedListMatch[1], 
+              content: orderedListMatch[2],
+              indent: indent > 0 ? Math.floor(indent / 2) : 0
+            });
+            // Flush at end or when next line is not a list item
+            if (lineIndex === lines.length - 1) {
+              flushList();
+            } else {
+              const nextLine = lines[lineIndex + 1].trim();
+              if (!nextLine.match(/^[-*•☐□✓✔]\s+/) && !nextLine.match(/^\d+\.\s+/)) {
                 flushList();
               }
             }
@@ -114,13 +247,24 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
           // Flush any pending list
           flushList();
 
-          // Check for headers
+          // Check for headers with # syntax
           const headerMatch = trimmedLine.match(/^(#{1,3})\s+(.+)$/);
           if (headerMatch) {
             const level = headerMatch[1].length;
             processedLines.push(
               <Text key={getKey()} style={[styles[`h${level}` as keyof typeof styles], { color: textColor }]}>
-                {headerMatch[2]}
+                {parseInlineFormatting(headerMatch[2], getKey(), textColor, codeBg, codeText)}
+              </Text>
+            );
+            return;
+          }
+
+          // Check for bold text as heading (entire line is **text**)
+          const boldHeadingMatch = trimmedLine.match(/^\*\*(.+)\*\*$/);
+          if (boldHeadingMatch) {
+            processedLines.push(
+              <Text key={getKey()} style={[styles.boldHeading, { color: textColor }]}>
+                {boldHeadingMatch[1]}
               </Text>
             );
             return;
@@ -200,7 +344,7 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
     }
 
     // Find bold (**text**)
-    const boldRegex = /\*\*([^*]+)\*\*/g;
+    const boldRegex = /\*\*(.+?)\*\*/g;
     while ((match = boldRegex.exec(text)) !== null) {
       tokens.push({
         type: 'bold',
@@ -211,14 +355,9 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
     }
 
     // Find italic (*text* but not **text**)
-    const italicRegex = /\*([^*\n]+)\*/g;
+    // Use negative lookbehind and lookahead to avoid matching bold markers
+    const italicRegex = /(?<!\*)\*([^*]+?)\*(?!\*)/g;
     while ((match = italicRegex.exec(text)) !== null) {
-      const before = text[match.index - 1];
-      const after = text[match.index + match[0].length];
-      
-      // Skip if part of bold
-      if (before === '*' || after === '*') continue;
-      
       // Skip if overlaps with bold token
       const overlapsBold = tokens.some(t => 
         t.type === 'bold' && match!.index >= t.start && match!.index < t.end
@@ -359,7 +498,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     marginBottom: 6,
-    paddingLeft: 4,
+    paddingLeft: 0,
+  },
+  orderedMarkerContainer: {
+    minWidth: 30,
+    marginRight: 6,
+    alignItems: 'flex-end',
+  },
+  unorderedMarkerContainer: {
+    width: 20,
+    marginRight: 6,
+    alignItems: 'center',
+  },
+  checkboxMarkerContainer: {
+    width: 20,
+    marginRight: 6,
+    alignItems: 'flex-start',
+  },
+  orderedMarker: {
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 1,
+    fontWeight: '600',
+  },
+  unorderedMarker: {
+    fontSize: 16,
+    lineHeight: 22,
+    marginTop: 1,
+  },
+  checkboxMarker: {
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 1,
   },
   bullet: {
     fontSize: 18,
@@ -391,6 +561,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginTop: 10,
+    marginBottom: 4,
+  },
+  boldHeading: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 8,
     marginBottom: 4,
   },
 });
