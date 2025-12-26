@@ -65,6 +65,30 @@ const MAPPING = {
 
   // Pricing
   'checkmark.circle.fill': 'checkmark-circle',
+  
+  // Experts and Characters
+  'person.fill': 'person',
+  'theatermasks.fill': 'people',
+  'cross.case.fill': 'medical',
+  'chart.bar.fill': 'bar-chart',
+  'scale.3d': 'scale',
+  'laptopcomputer': 'laptop',
+  'cpu.fill': 'hardware-chip',
+  'doc.text.fill': 'document-text',
+  'rocket.fill': 'rocket',
+  'figure.run': 'fitness',
+  'book.fill': 'library',
+  'heart.fill': 'heart',
+  'figure.yoga': 'leaf',
+  'star.fill': 'star',
+  'atom': 'nuclear',
+  'scroll.fill': 'document',
+  'peace.fill': 'flower',
+  'airplane': 'airplane',
+  'hands.sparkles.fill': 'sparkles',
+  'sportscourt.fill': 'basketball',
+  'leaf.fill': 'leaf',
+  'hand.raised.fill': 'hand-left',
 } as const;
 
 type IconName = keyof typeof MAPPING;
