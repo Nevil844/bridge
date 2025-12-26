@@ -1239,6 +1239,11 @@ export default function HomeScreen() {
       'virat-kohli': 'sportscourt.fill',
       'osho': 'leaf.fill',
       'bhagat-singh': 'hand.raised.fill',
+      'leo-messi': 'sportscourt.fill',
+      'ronaldo': 'sportscourt.fill',
+      'ms-dhoni': 'sportscourt.fill',
+      'djokovic': 'sportscourt.fill',
+      'federer': 'sportscourt.fill',
     };
     return iconMap[item.id] || (item.type === 'expert' ? 'person.fill' : 'theatermasks.fill');
   };
