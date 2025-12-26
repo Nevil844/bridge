@@ -9,6 +9,7 @@ import { ThinkingProcess } from '@/components/thinking-process';
 import ToolApprovalModal, { PendingTool } from '@/components/tool-approval-modal';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { API_ENDPOINTS } from '@/config/api';
+import { ExpertOrCharacter } from '@/config/expertsAndCharacters';
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePreferences } from '@/hooks/use-preferences';
@@ -22,6 +23,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
   Image,
   Keyboard,
@@ -107,7 +109,13 @@ export default function HomeScreen() {
   const [onboardingStep, setOnboardingStep] = useState<'onboarding' | 'disclaimer' | 'complete'>('onboarding');
   const [isCheckingOnboarding, setIsCheckingOnboarding] = useState(true);
   const hasCheckedOnboarding = useRef(false);
+  const [selectedExpertOrCharacter, setSelectedExpertOrCharacter] = useState<ExpertOrCharacter | null>(null);
+  const [showExpertCharacterModal, setShowExpertCharacterModal] = useState(false);
+  const [expertCharacterModalType, setExpertCharacterModalType] = useState<'expert' | 'character'>('expert');
+  const [expertsAndCharacters, setExpertsAndCharacters] = useState<ExpertOrCharacter[]>([]);
+  const [isLoadingExpertsCharacters, setIsLoadingExpertsCharacters] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const slideAnim = useRef(new Animated.Value(0)).current;
   const activeWebSocketRef = useRef<WebSocket | null>(null);
   const { topInset, bottomInset } = useSafeAreaPadding({ top: 12, bottom: 16 });
   const headerPaddingTop = topInset + 20;
@@ -272,12 +280,30 @@ export default function HomeScreen() {
     }
   }, [userId]);
 
+  // Load experts and characters from backend (without system prompts)
+  const loadExpertsAndCharacters = useCallback(async () => {
+    try {
+      setIsLoadingExpertsCharacters(true);
+      const { authenticatedFetch } = require('@/utils/api');
+      const response = await authenticatedFetch(`${API_ENDPOINTS.CHAT}/experts-characters`);
+      if (response.ok) {
+        const data = await response.json();
+        setExpertsAndCharacters(data);
+      }
+    } catch (error) {
+      console.error('Error loading experts and characters:', error);
+    } finally {
+      setIsLoadingExpertsCharacters(false);
+    }
+  }, []);
+
   // Load conversations when userId changes
   useEffect(() => {
     if (userId) {
       loadConversations();
+      loadExpertsAndCharacters();
     }
-  }, [userId, loadConversations]);
+  }, [userId, loadConversations, loadExpertsAndCharacters]);
 
   // Load messages for a conversation
   const loadConversationMessages = async (conversationId: string) => {
@@ -299,15 +325,17 @@ export default function HomeScreen() {
     }
   };
 
-  const startNewChat = () => {
+  const startNewChat = (expertOrCharacter?: ExpertOrCharacter | null) => {
     lightImpact(); // Haptic feedback for new chat
     setCurrentChatId(null);
     setMessages([]);
+    setSelectedExpertOrCharacter(expertOrCharacter ?? null);
     setShowSidebar(false);
   };
 
   const loadChat = async (chatId: string) => {
     setCurrentChatId(chatId);
+    setSelectedExpertOrCharacter(null); // Clear selected expert/character when loading existing chat
     await loadConversationMessages(chatId);
     setShowSidebar(false);
   };
@@ -996,6 +1024,7 @@ export default function HomeScreen() {
                 model: selectedModel,
                 conversationId: currentChatId,
                 requireToolApproval: requireToolApproval,
+                expertOrCharacterId: selectedExpertOrCharacter?.id || undefined,
               }));
               return;
             }
@@ -1183,6 +1212,37 @@ export default function HomeScreen() {
 
   const isDark = colorScheme === 'dark';
 
+  // Get icon name for expert/character
+  const getExpertCharacterIcon = (item: ExpertOrCharacter) => {
+    const iconMap: Record<string, string> = {
+      // Experts
+      'health-advisor': 'cross.case.fill',
+      'ca-tax-expert': 'chart.bar.fill',
+      'legal-assistant': 'scale.3d',
+      'software-engineer': 'laptopcomputer',
+      'ai-data-science': 'cpu.fill',
+      'career-resume-coach': 'doc.text.fill',
+      'startup-mentor': 'rocket.fill',
+      'fitness-nutrition': 'figure.run',
+      'academic-research': 'book.fill',
+      'mental-wellbeing': 'heart.fill',
+      'yoga-guru': 'figure.yoga',
+      'motivational-coach': 'star.fill',
+      // Characters
+      'sherlock-holmes': 'magnifyingglass',
+      'albert-einstein': 'atom',
+      'chanakya': 'scroll.fill',
+      'tony-stark': 'bolt.fill',
+      'mahatma-gandhi': 'peace.fill',
+      'apj-abdul-kalam': 'airplane',
+      'bhagavad-gita-ai': 'hands.sparkles.fill',
+      'virat-kohli': 'sportscourt.fill',
+      'osho': 'leaf.fill',
+      'bhagat-singh': 'hand.raised.fill',
+    };
+    return iconMap[item.id] || (item.type === 'expert' ? 'person.fill' : 'theatermasks.fill');
+  };
+
   // While checking onboarding status or showing onboarding flow, hide main content
   // This prevents any flash of the main screen
   const shouldHideMainContent = isCheckingOnboarding || showOnboardingFlow;
@@ -1234,6 +1294,35 @@ export default function HomeScreen() {
             >
               Bridge AI
             </Text>
+            
+            {/* Show selected expert/character below Bridge AI */}
+            {selectedExpertOrCharacter && (
+              <View style={[
+                styles.headerExpertCharacter,
+                {
+                  backgroundColor: isDark ? 'rgba(74, 158, 255, 0.12)' : 'rgba(0, 122, 255, 0.08)',
+                  borderColor: isDark ? 'rgba(74, 158, 255, 0.25)' : 'rgba(0, 122, 255, 0.2)',
+                }
+              ]}>
+                <IconSymbol 
+                  name={getExpertCharacterIcon(selectedExpertOrCharacter) as any} 
+                  size={16} 
+                  color={isDark ? '#4A9EFF' : '#007AFF'} 
+                />
+                <ThemedText style={styles.headerExpertCharacterText} numberOfLines={1}>
+                  {selectedExpertOrCharacter.name}
+                </ThemedText>
+                <TouchableOpacity
+                  onPress={() => {
+                    lightImpact();
+                    setSelectedExpertOrCharacter(null);
+                  }}
+                  style={styles.headerClearButton}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <IconSymbol name="xmark.circle.fill" size={16} color={isDark ? '#888' : '#666'} />
+                </TouchableOpacity>
+              </View>
+            )}
 
             {/* Model Selector temporarily disabled
             <TouchableOpacity
@@ -1256,7 +1345,7 @@ export default function HomeScreen() {
 
           <TouchableOpacity
             style={styles.headerIconButton}
-            onPress={startNewChat}
+            onPress={() => startNewChat()}
           >
             <IconSymbol
               name="square.and.pencil"
@@ -1305,10 +1394,85 @@ export default function HomeScreen() {
                         borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
                       },
                     ]}
-                    onPress={startNewChat}>
+                    onPress={() => startNewChat()}>
                     <IconSymbol name="square.and.pencil" size={18} color={isDark ? '#FFFFFF' : '#000000'} />
                     <ThemedText style={styles.newChatText}>New Chat</ThemedText>
                   </TouchableOpacity>
+                  
+                  {/* Experts and Characters Buttons */}
+                  <View style={styles.expertCharacterButtons}>
+                    <TouchableOpacity 
+                      style={[
+                        styles.expertCharacterButton,
+                        {
+                          backgroundColor: 'transparent',
+                          borderWidth: 1,
+                          borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                        },
+                      ]}
+                      onPress={() => {
+                        lightImpact();
+                        setExpertCharacterModalType('expert');
+                        // Close sidebar first, then open modal after animation completes
+                        setShowSidebar(false);
+                        setTimeout(() => {
+                          setShowExpertCharacterModal(true);
+                        }, 300);
+                      }}>
+                      <IconSymbol name={"person.fill" as any} size={16} color={isDark ? '#FFFFFF' : '#000000'} />
+                      <ThemedText style={styles.expertCharacterButtonText}>Experts</ThemedText>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity 
+                      style={[
+                        styles.expertCharacterButton,
+                        {
+                          backgroundColor: 'transparent',
+                          borderWidth: 1,
+                          borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                        },
+                      ]}
+                      onPress={() => {
+                        lightImpact();
+                        setExpertCharacterModalType('character');
+                        // Close sidebar first, then open modal after animation completes
+                        setShowSidebar(false);
+                        setTimeout(() => {
+                          setShowExpertCharacterModal(true);
+                        }, 300);
+                      }}>
+                      <IconSymbol name={"theatermasks.fill" as any} size={16} color={isDark ? '#FFFFFF' : '#000000'} />
+                      <ThemedText style={styles.expertCharacterButtonText}>Characters</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                  
+                  {/* Show selected expert/character */}
+                  {selectedExpertOrCharacter && (
+                    <View style={[
+                      styles.selectedExpertCharacter,
+                      {
+                        backgroundColor: isDark ? 'rgba(74, 158, 255, 0.1)' : 'rgba(0, 122, 255, 0.1)',
+                        borderColor: isDark ? 'rgba(74, 158, 255, 0.3)' : 'rgba(0, 122, 255, 0.3)',
+                      }
+                    ]}>
+                      <IconSymbol 
+                        name={getExpertCharacterIcon(selectedExpertOrCharacter) as any} 
+                        size={16} 
+                        color={isDark ? '#4A9EFF' : '#007AFF'} 
+                      />
+                      <ThemedText style={styles.selectedExpertCharacterText} numberOfLines={1}>
+                        {selectedExpertOrCharacter.name}
+                      </ThemedText>
+                      <TouchableOpacity
+                        onPress={() => {
+                          lightImpact();
+                          setSelectedExpertOrCharacter(null);
+                        }}
+                        style={styles.clearExpertCharacterButton}>
+                        <IconSymbol name="xmark.circle.fill" size={18} color={isDark ? '#FFFFFF' : '#000000'} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
 
                 {/* Chat History List */}
@@ -1585,6 +1749,167 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </Modal>
 
+        {/* Expert/Character Selection Modal */}
+        <Modal
+          visible={showExpertCharacterModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowExpertCharacterModal(false)}>
+          <View style={styles.centeredModalOverlay}>
+            <TouchableOpacity 
+              style={StyleSheet.absoluteFill} 
+              activeOpacity={1}
+              onPress={() => setShowExpertCharacterModal(false)} 
+            />
+            <View
+              style={[
+                styles.centeredModalContent,
+                { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' },
+              ]}>
+              {/* Close button */}
+              <TouchableOpacity
+                style={styles.centeredModalClose}
+                onPress={() => setShowExpertCharacterModal(false)}>
+                <IconSymbol name="xmark.circle.fill" size={24} color={isDark ? '#555' : '#999'} />
+              </TouchableOpacity>
+              
+              {/* Tab Switch */}
+              <View style={styles.tabSwitchContainer}>
+                <View style={[
+                  styles.tabSwitchBackground,
+                  { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }
+                ]}>
+                  <TouchableOpacity
+                    style={[
+                      styles.tabSwitchButton,
+                      expertCharacterModalType === 'expert' && [
+                        styles.tabSwitchButtonActive,
+                        { backgroundColor: isDark ? '#3A3A3C' : '#FFFFFF' }
+                      ]
+                    ]}
+                    onPress={() => setExpertCharacterModalType('expert')}>
+                    <IconSymbol 
+                      name={"person.fill" as any} 
+                      size={16} 
+                      color={expertCharacterModalType === 'expert' 
+                        ? (isDark ? '#4A9EFF' : '#007AFF')
+                        : (isDark ? '#888' : '#666')} 
+                    />
+                    <ThemedText style={[
+                      styles.tabSwitchText,
+                      expertCharacterModalType === 'expert' && { 
+                        color: isDark ? '#4A9EFF' : '#007AFF',
+                        fontWeight: '600' 
+                      }
+                    ]}>
+                      Experts
+                    </ThemedText>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[
+                      styles.tabSwitchButton,
+                      expertCharacterModalType === 'character' && [
+                        styles.tabSwitchButtonActive,
+                        { backgroundColor: isDark ? '#3A3A3C' : '#FFFFFF' }
+                      ]
+                    ]}
+                    onPress={() => setExpertCharacterModalType('character')}>
+                    <IconSymbol 
+                      name={"theatermasks.fill" as any} 
+                      size={16} 
+                      color={expertCharacterModalType === 'character' 
+                        ? (isDark ? '#4A9EFF' : '#007AFF')
+                        : (isDark ? '#888' : '#666')} 
+                    />
+                    <ThemedText style={[
+                      styles.tabSwitchText,
+                      expertCharacterModalType === 'character' && { 
+                        color: isDark ? '#4A9EFF' : '#007AFF',
+                        fontWeight: '600' 
+                      }
+                    ]}>
+                      Characters
+                    </ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              {/* Grid */}
+              <ScrollView 
+                style={styles.centeredModalScroll}
+                contentContainerStyle={styles.centeredModalGrid}
+                showsVerticalScrollIndicator={false}>
+                {expertsAndCharacters
+                  .filter(item => item.type === expertCharacterModalType)
+                  .map((item) => {
+                    const isSelected = selectedExpertOrCharacter?.id === item.id;
+                    return (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={[
+                          styles.centeredModalCard,
+                          { 
+                            backgroundColor: isSelected 
+                              ? (isDark ? 'rgba(74, 158, 255, 0.15)' : 'rgba(0, 122, 255, 0.08)')
+                              : (isDark ? '#2C2C2E' : '#F5F5F7'),
+                            borderColor: isSelected 
+                              ? (isDark ? '#4A9EFF' : '#007AFF')
+                              : 'transparent',
+                          },
+                        ]}
+                        activeOpacity={0.7}
+                        onPress={() => {
+                          lightImpact();
+                          // If selecting a different expert/character, start a new chat
+                          if (selectedExpertOrCharacter?.id !== item.id) {
+                            startNewChat(item);
+                          } else {
+                            // Same one selected, just close modal
+                            setSelectedExpertOrCharacter(item);
+                          }
+                          setShowExpertCharacterModal(false);
+                        }}>
+                        <View style={[
+                          styles.centeredModalCardIcon,
+                          { 
+                            backgroundColor: isSelected
+                              ? (isDark ? 'rgba(74, 158, 255, 0.2)' : 'rgba(0, 122, 255, 0.12)')
+                              : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'),
+                          }
+                        ]}>
+                          <IconSymbol 
+                            name={getExpertCharacterIcon(item) as any} 
+                            size={22} 
+                            color={isSelected 
+                              ? (isDark ? '#4A9EFF' : '#007AFF')
+                              : (isDark ? '#FFFFFF' : '#333333')} 
+                          />
+                        </View>
+                        <ThemedText 
+                          style={[
+                            styles.centeredModalCardName,
+                            isSelected && { color: isDark ? '#4A9EFF' : '#007AFF', fontWeight: '600' }
+                          ]}
+                          numberOfLines={1}>
+                          {item.name}
+                        </ThemedText>
+                        {isSelected && (
+                          <IconSymbol 
+                            name="checkmark.circle.fill" 
+                            size={16} 
+                            color={isDark ? '#4A9EFF' : '#007AFF'} 
+                            style={{ marginLeft: 4 }}
+                          />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
         <ToolApprovalModal
           visible={!!pendingToolApproval}
           isDark={isDark}
@@ -1718,8 +2043,8 @@ export default function HomeScreen() {
           )}
         </TouchableWithoutFeedback>
 
-        {/* Sample Questions Button - Only shown when chat is new */}
-        {messages.length === 0 && !shouldHideMainContent && (
+        {/* Sample Questions Button - Only shown when chat is new and no expert/character selected */}
+        {messages.length === 0 && !shouldHideMainContent && !selectedExpertOrCharacter && (
           <SampleQuestions userId={userId} onQuestionSelect={handleQuestionSelect} />
         )}
 
@@ -1913,11 +2238,33 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
   },
   title: {
     fontSize: 30,
     fontWeight: '600',
     letterSpacing: 0.5,
+  },
+  headerExpertCharacter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 6,
+    marginTop: 6,
+    maxWidth: '80%',
+  },
+  headerExpertCharacterText: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginRight: 2,
+  },
+  headerClearButton: {
+    padding: 0,
+    marginLeft: 2,
   },
   modelSelector: {
     flexDirection: 'row',
@@ -1951,8 +2298,6 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: '600',
-    paddingHorizontal: 20,
-    marginBottom: 16,
   },
   modalScroll: {
     paddingHorizontal: 20,
@@ -2269,6 +2614,149 @@ const styles = StyleSheet.create({
   },
   newChatText: {
     fontSize: 16,
+    fontWeight: '500',
+  },
+  expertCharacterButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  expertCharacterButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    gap: 6,
+  },
+  expertCharacterButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  selectedExpertCharacter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    gap: 8,
+  },
+  selectedExpertCharacterText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  clearExpertCharacterButton: {
+    padding: 4,
+  },
+  centeredModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  centeredModalContent: {
+    width: '100%',
+    maxWidth: 400,
+    maxHeight: '80%',
+    borderRadius: 20,
+    paddingTop: 20,
+    paddingBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  centeredModalClose: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  centeredModalHeader: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+  expertModalIconBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  centeredModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  centeredModalScroll: {
+    flexGrow: 0,
+  },
+  centeredModalGrid: {
+    paddingHorizontal: 16,
+  },
+  centeredModalCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    marginBottom: 8,
+    borderWidth: 2,
+  },
+  centeredModalCardIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  centeredModalCardName: {
+    fontSize: 15,
+    fontWeight: '500',
+    flex: 1,
+  },
+  tabSwitchContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  tabSwitchBackground: {
+    flexDirection: 'row',
+    borderRadius: 10,
+    padding: 3,
+  },
+  tabSwitchButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    gap: 6,
+  },
+  tabSwitchButtonActive: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  tabSwitchText: {
+    fontSize: 14,
     fontWeight: '500',
   },
   chatList: {
