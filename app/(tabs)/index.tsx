@@ -160,13 +160,20 @@ export default function HomeScreen() {
           setShowOnboardingFlow(false);
           setOnboardingStep('complete');
         } else {
-          // Not completed - show onboarding
+          // Not completed - show onboarding and mark as seen immediately
+          // This prevents the onboarding from appearing twice
+          await storage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETED, 'true');
           setShowOnboardingFlow(true);
           setOnboardingStep('onboarding');
         }
       } catch (error) {
         console.error('Error checking onboarding status:', error);
-        // On error, show onboarding to be safe
+        // On error, show onboarding to be safe and mark as seen immediately
+        try {
+          await storage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETED, 'true');
+        } catch (saveError) {
+          console.error('Error saving onboarding completion:', saveError);
+        }
         setShowOnboardingFlow(true);
         setOnboardingStep('onboarding');
       } finally {
@@ -184,14 +191,14 @@ export default function HomeScreen() {
   };
 
   const handleAIDisclaimerAcknowledge = async () => {
-    // Mark onboarding as completed
+    // Onboarding is already marked as completed when it first appears
+    // Just close the disclaimer and complete the flow
     try {
       successFeedback();
-      await storage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETED, 'true');
       setOnboardingStep('complete');
       setShowOnboardingFlow(false);
     } catch (error) {
-      console.error('Error saving onboarding completion:', error);
+      console.error('Error completing disclaimer:', error);
       errorFeedback();
       setOnboardingStep('complete');
       setShowOnboardingFlow(false);
