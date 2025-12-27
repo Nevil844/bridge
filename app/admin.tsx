@@ -130,16 +130,21 @@ export default function AdminScreen() {
       const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.APPROVALS);
       if (response.ok) {
         const approvalsData = await response.json();
-        setApprovals(approvalsData);
+        setApprovals(Array.isArray(approvalsData) ? approvalsData : []);
       } else {
-        throw new Error('Failed to load approvals');
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('Approvals API error:', response.status, errorData);
+        throw new Error(errorData.error || `Failed to load approvals: ${response.status}`);
       }
     } catch (error) {
       console.error('Error loading approvals:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load approvals';
+      // Set empty array on error so UI doesn't break
+      setApprovals([]);
       if (Platform.OS === 'web') {
-        alert('Failed to load approvals');
+        console.warn(`Failed to load approvals: ${errorMessage}`);
       } else {
-        Alert.alert('Error', 'Failed to load approvals');
+        Alert.alert('Warning', `Approvals not available: ${errorMessage}`);
       }
     } finally {
       setIsLoading(false);
@@ -293,10 +298,10 @@ export default function AdminScreen() {
                 <View style={[styles.card, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
                   <ThemedText style={styles.cardTitle}>Total Monthly Cost</ThemedText>
                   <ThemedText style={[styles.cardValue, { color: '#FF9500' }]}>
-                    ${dashboardStats.totalCost}
+                    ${dashboardStats?.totalCost || '0.00'}
                   </ThemedText>
                   <ThemedText style={styles.cardSubtitle}>
-                    {dashboardStats.totalCredits} credits ({dashboardStats.currentMonth})
+                    {dashboardStats?.totalCredits || '0.00'} credits ({dashboardStats?.currentMonth || 'N/A'})
                   </ThemedText>
                 </View>
 
