@@ -78,6 +78,7 @@ export default function HomeScreen() {
   const { toolApprovalEnabled } = usePreferences();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
+  const [inputHeight, setInputHeight] = useState(44);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState('anthropic.claude-sonnet-4-5-20250929-v1:0'); // Default to Claude Sonnet 4.5
   const [showModelPicker, setShowModelPicker] = useState(false);
@@ -118,6 +119,7 @@ export default function HomeScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const activeWebSocketRef = useRef<WebSocket | null>(null);
+  const inputRef = useRef<TextInput>(null);
   const { topInset, bottomInset } = useSafeAreaPadding({ top: 12, bottom: 16 });
   const headerPaddingTop = topInset + 20;
   const headerButtonTop = topInset + 24;
@@ -972,6 +974,7 @@ export default function HomeScreen() {
       const newMessages = [...messages, userMessage];
       setMessages(newMessages);
       setInputText('');
+      setInputHeight(44);
       setIsLoading(true);
 
       // Create placeholder for AI response
@@ -2073,147 +2076,10 @@ export default function HomeScreen() {
           style={[
             styles.inputContainer,
             { 
-              borderTopColor: isDark ? '#2C2C2E' : '#E5E5EA',
               backgroundColor: isDark ? '#000000' : '#FFFFFF',
               paddingBottom: inputBottomPadding,
             },
           ]}>
-          <View style={styles.webSearchWrapper}>
-            <TouchableOpacity
-              style={[
-                styles.webSearchButton,
-                {
-                  borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-                  backgroundColor: showWebSearchMenu
-                    ? (isDark ? 'rgba(0, 122, 255, 0.2)' : 'rgba(0, 122, 255, 0.1)')
-                    : 'transparent',
-                },
-                showWebSearchMenu && styles.webSearchButtonActive,
-              ]}
-              onPress={() => setShowWebSearchMenu(prev => !prev)}
-              accessibilityLabel="Toggle web search menu"
-              accessibilityRole="button"
-            >
-              <Text
-                style={[
-                  styles.webSearchPlus,
-                  { color: isDark ? '#FFFFFF' : '#000000' },
-                ]}
-              >
-                +
-              </Text>
-            </TouchableOpacity>
-
-            {showWebSearchMenu && (
-              <View
-                style={[
-                  styles.webSearchMenu,
-                  {
-                    backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
-                    borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-                  },
-                ]}
-              >
-                <TouchableOpacity
-                  style={styles.webSearchToggleRow}
-                  onPress={() => {
-                    setWebSearchEnabled(prev => !prev);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <ThemedText style={styles.webSearchLabel}>Web Search</ThemedText>
-                  <View
-                    style={[
-                      styles.webSearchSwitch,
-                      {
-                        backgroundColor: webSearchEnabled
-                          ? '#34C759'
-                          : (isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'),
-                      },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.webSearchSwitchKnob,
-                        webSearchEnabled && styles.webSearchSwitchKnobOn,
-                      ]}
-                    />
-                  </View>
-                </TouchableOpacity>
-                <ThemedText style={styles.webSearchHint}>
-                  Coming soon
-                </ThemedText>
-              </View>
-            )}
-          </View>
-
-          <TextInput
-            style={[
-              styles.input,
-              {
-                backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
-                color: isDark ? '#FFFFFF' : '#000000',
-              },
-            ]}
-            placeholder="Type a message..."
-            placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
-            value={inputText}
-            onChangeText={setInputText}
-            onSubmitEditing={() => {
-              handleSend();
-              Keyboard.dismiss();
-            }}
-            returnKeyType="send"
-            blurOnSubmit={false}
-            multiline={false}
-            onFocus={() => {
-              // Scroll to bottom when input is focused (keyboard opens)
-              setTimeout(() => {
-                scrollViewRef.current?.scrollToEnd({ animated: true });
-              }, 300);
-            }}
-          />
-          
-          {/* Microphone Button */}
-          <TouchableOpacity 
-            style={[
-              styles.micButton,
-              isRecording && styles.micButtonRecording,
-              (isTranscribing || isLoading) && styles.sendButtonDisabled,
-              {
-                borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-              },
-            ]} 
-            onPress={isRecording ? stopRecording : startRecording}
-            disabled={isLoading || isTranscribing}>
-            <IconSymbol 
-              name={isRecording ? 'stop.circle.fill' : 'mic.fill'} 
-              size={20} 
-              color={isDark ? '#FFFFFF' : '#000000'} 
-            />
-          </TouchableOpacity>
-
-          {/* Send Button */}
-          <TouchableOpacity 
-            style={[
-              styles.sendButton, 
-              (isLoading || isRecording || isTranscribing) && styles.sendButtonDisabled,
-              {
-                borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-              },
-            ]} 
-            onPress={() => {
-              handleSend();
-              Keyboard.dismiss();
-            }}
-            disabled={isLoading || isRecording || isTranscribing}>
-            <IconSymbol 
-              name="arrow.up" 
-              size={18} 
-              color={isDark ? '#FFFFFF' : '#000000'} 
-            />
-          </TouchableOpacity>
-          
           {/* Recording/Transcribing Indicator */}
           {(isRecording || isTranscribing) && (
             <View style={styles.recordingIndicator}>
@@ -2223,6 +2089,211 @@ export default function HomeScreen() {
               </ThemedText>
             </View>
           )}
+
+          {/* Main Input Row */}
+          <View style={styles.inputRow}>
+            {/* Plus/Attachments Button */}
+            <View style={styles.webSearchWrapper}>
+              <TouchableOpacity
+                style={[
+                  styles.webSearchButton,
+                  {
+                    borderColor: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)',
+                    backgroundColor: showWebSearchMenu
+                      ? (isDark ? 'rgba(0, 122, 255, 0.2)' : 'rgba(0, 122, 255, 0.1)')
+                      : 'transparent',
+                  },
+                  showWebSearchMenu && styles.webSearchButtonActive,
+                ]}
+                onPress={() => setShowWebSearchMenu(prev => !prev)}
+                accessibilityLabel="Toggle web search menu"
+                accessibilityRole="button"
+              >
+                <Text
+                  style={[
+                    styles.webSearchPlus,
+                    { color: isDark ? '#FFFFFF' : '#000000' },
+                  ]}
+                >
+                  +
+                </Text>
+              </TouchableOpacity>
+
+              {showWebSearchMenu && (
+                <View
+                  style={[
+                    styles.webSearchMenu,
+                    {
+                      backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                      borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                    },
+                  ]}
+                >
+                  <TouchableOpacity
+                    style={styles.webSearchToggleRow}
+                    onPress={() => {
+                      setWebSearchEnabled(prev => !prev);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <ThemedText style={styles.webSearchLabel}>Web Search</ThemedText>
+                    <View
+                      style={[
+                        styles.webSearchSwitch,
+                        {
+                          backgroundColor: webSearchEnabled
+                            ? '#34C759'
+                            : (isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'),
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.webSearchSwitchKnob,
+                          webSearchEnabled && styles.webSearchSwitchKnobOn,
+                        ]}
+                      />
+                    </View>
+                  </TouchableOpacity>
+                  <ThemedText style={styles.webSearchHint}>
+                    Coming soon
+                  </ThemedText>
+                </View>
+              )}
+            </View>
+
+            {/* Input Box with embedded buttons */}
+            <View
+              style={[
+                styles.inputWrapper,
+                {
+                  backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
+                  minHeight: 44,
+                  height: Math.max(44, inputHeight),
+                  maxHeight: 140,
+                },
+              ]}
+            >
+              <TextInput
+                ref={inputRef}
+                style={[
+                  styles.input,
+                  {
+                    color: isDark ? '#FFFFFF' : '#000000',
+                    textAlignVertical: 'top',
+                    height: '100%' as unknown as number,
+                  },
+                  // @ts-ignore - web-specific styles
+                  Platform.OS === 'web' && {
+                    overflow: 'auto',
+                    resize: 'none',
+                    outline: 'none',
+                    border: 'none',
+                  },
+                ]}
+                placeholder="Message..."
+                placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
+                value={inputText}
+                onChangeText={(text) => {
+                  setInputText(text);
+                  // For web, calculate height after a brief delay
+                  if (Platform.OS === 'web') {
+                    requestAnimationFrame(() => {
+                      const element = inputRef.current as unknown as HTMLTextAreaElement | null;
+                      if (element) {
+                        // Temporarily reset height to get accurate scrollHeight
+                        const prevHeight = element.style.height;
+                        element.style.height = '0px';
+                        const scrollHeight = element.scrollHeight;
+                        element.style.height = prevHeight;
+                        const newHeight = Math.min(Math.max(44, scrollHeight + 16), 140);
+                        setInputHeight(newHeight);
+                      }
+                    });
+                  }
+                }}
+                onSubmitEditing={() => {
+                  handleSend();
+                  Keyboard.dismiss();
+                }}
+                returnKeyType="send"
+                blurOnSubmit={false}
+                multiline={true}
+                onContentSizeChange={(e) => {
+                  if (Platform.OS !== 'web') {
+                    const contentHeight = e.nativeEvent.contentSize.height;
+                    const newHeight = Math.min(Math.max(44, contentHeight + 22), 140);
+                    setInputHeight(newHeight);
+                  }
+                }}
+                onFocus={() => {
+                  setTimeout(() => {
+                    scrollViewRef.current?.scrollToEnd({ animated: true });
+                  }, 300);
+                }}
+              />
+
+              {/* Buttons inside input box */}
+              <View style={styles.inputButtons}>
+                {/* Microphone Button - only show when no text */}
+                {inputText.trim().length === 0 && !isRecording && (
+                  <TouchableOpacity 
+                    style={[
+                      styles.inputInnerButton,
+                      (isTranscribing || isLoading) && styles.sendButtonDisabled,
+                    ]} 
+                    onPress={startRecording}
+                    disabled={isLoading || isTranscribing}>
+                    <IconSymbol 
+                      name="mic.fill" 
+                      size={18} 
+                      color={isDark ? '#8E8E93' : '#8E8E93'} 
+                    />
+                  </TouchableOpacity>
+                )}
+
+                {/* Stop Recording Button */}
+                {isRecording && (
+                  <TouchableOpacity 
+                    style={[
+                      styles.inputInnerButton,
+                      styles.stopRecordingButton,
+                    ]} 
+                    onPress={stopRecording}>
+                    <IconSymbol 
+                      name="stop.circle.fill" 
+                      size={20} 
+                      color="#FF3B30" 
+                    />
+                  </TouchableOpacity>
+                )}
+
+                {/* Send Button */}
+                <TouchableOpacity 
+                  style={[
+                    styles.sendButtonInner, 
+                    (inputText.trim().length === 0 || isLoading || isRecording || isTranscribing) && styles.sendButtonInnerDisabled,
+                    inputText.trim().length > 0 && !isLoading && !isRecording && !isTranscribing && {
+                      backgroundColor: isDark ? '#FFFFFF' : '#000000',
+                    },
+                  ]} 
+                  onPress={() => {
+                    handleSend();
+                    Keyboard.dismiss();
+                  }}
+                  disabled={inputText.trim().length === 0 || isLoading || isRecording || isTranscribing}>
+                  <IconSymbol 
+                    name="arrow.up" 
+                    size={16} 
+                    color={inputText.trim().length > 0 && !isLoading && !isRecording && !isTranscribing 
+                      ? (isDark ? '#000000' : '#FFFFFF')
+                      : (isDark ? '#555555' : '#AAAAAA')
+                    } 
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
         </View>
         )}
         </>
@@ -2445,25 +2516,62 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 8,
-    borderTopWidth: 1,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  inputWrapper: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    borderRadius: 24,
+    paddingLeft: 16,
+    paddingRight: 6,
+    paddingTop: 10,
+    paddingBottom: 6,
   },
   input: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 24,
     fontSize: 16,
-    minWidth: 0,
+    lineHeight: 22,
+    paddingVertical: 0,
+    paddingRight: 8,
+  },
+  inputButtons: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 4,
+    paddingBottom: 2,
+  },
+  inputInnerButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stopRecordingButton: {
+    backgroundColor: 'rgba(255, 59, 48, 0.1)',
+  },
+  sendButtonInner: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  sendButtonInnerDisabled: {
+    opacity: 0.4,
   },
   webSearchWrapper: {
     position: 'relative',
-    marginRight: 8,
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     alignItems: 'center',
     zIndex: 5,
   },
@@ -2529,42 +2637,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     opacity: 0.6,
   },
-  micButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 8,
-  },
-  micButtonRecording: {
-    borderColor: 'rgba(255, 59, 48, 0.3)',
-    backgroundColor: 'rgba(255, 59, 48, 0.1)',
-  },
-  sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 8,
-  },
   sendButtonDisabled: {
     opacity: 0.3,
   },
   recordingIndicator: {
-    position: 'absolute',
-    top: -40,
-    left: 0,
-    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
+    paddingVertical: 8,
   },
   recordingDot: {
     width: 12,
