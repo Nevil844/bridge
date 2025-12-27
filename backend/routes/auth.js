@@ -173,7 +173,8 @@ router.get('/google/callback', async (req, res) => {
     if (!waitlistEntry || !waitlistEntry.isInvited) {
       return res.status(403).send(createErrorPage(
         'Access Restricted',
-        'This app is currently invite-only. Please join the waitlist and wait for an invitation.'
+        'This app is currently invite-only. Please join the waitlist and wait for an invitation.',
+        'https://join.bridge.neviljobanputra.com'
       ));
     }
 
@@ -568,23 +569,126 @@ function createSuccessPage(userInfo, userId, state) {
 /**
  * Helper: Create error page HTML
  */
-function createErrorPage(title, message) {
+function createErrorPage(title, message, registrationUrl = null) {
   return `
     <!DOCTYPE html>
     <html>
       <head>
-        <title>${title}</title>
+        <title>${title} – Bridge AI</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          body { font-family: -apple-system, sans-serif; text-align: center; padding: 50px; }
-          .error { color: #ff3b30; font-size: 48px; }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background:
+              radial-gradient(circle at top left, rgba(74, 158, 255, 0.4), transparent 55%),
+              radial-gradient(circle at bottom right, rgba(124, 58, 237, 0.4), transparent 55%),
+              #050816;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+          }
+          .container {
+            text-align: center;
+            background: rgba(15, 23, 42, 0.96);
+            padding: 40px 32px;
+            border-radius: 24px;
+            box-shadow:
+              0 18px 60px rgba(15, 23, 42, 0.9),
+              0 0 0 1px rgba(148, 163, 184, 0.12);
+            max-width: 480px;
+            width: 90%;
+            backdrop-filter: blur(22px);
+          }
+          .icon {
+            width: 72px;
+            height: 72px;
+            border-radius: 36px;
+            margin: 0 auto 24px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at top, rgba(255, 59, 48, 0.2), rgba(220, 38, 38, 0.3));
+            box-shadow: 0 12px 35px rgba(220, 38, 38, 0.4);
+            color: #FCA5A5;
+            font-size: 36px;
+            border: 1px solid rgba(220, 38, 38, 0.3);
+          }
+          h1 {
+            color: #E5E7EB;
+            margin: 0 0 12px 0;
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+          }
+          p {
+            color: #9CA3AF;
+            margin: 0 0 28px 0;
+            font-size: 15px;
+            line-height: 1.6;
+          }
+          .button {
+            display: inline-block;
+            padding: 14px 28px;
+            background: linear-gradient(135deg, #4A9EFF 0%, #2563EB 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            box-shadow: 0 8px 24px rgba(37, 99, 235, 0.4);
+            margin-top: 8px;
+          }
+          .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 32px rgba(37, 99, 235, 0.5);
+          }
+          .button:active {
+            transform: translateY(0);
+          }
+          .footer {
+            margin-top: 32px;
+            padding-top: 24px;
+            border-top: 1px solid rgba(148, 163, 184, 0.15);
+            color: #6B7280;
+            font-size: 13px;
+          }
+          .logo {
+            color: #4A9EFF;
+            font-weight: 700;
+            font-size: 18px;
+            margin-bottom: 8px;
+            letter-spacing: 0.05em;
+          }
         </style>
       </head>
       <body>
-        <div class="error">❌</div>
-        <h1>${title}</h1>
-        <p>${message}</p>
-        <script>setTimeout(() => window.close(), 3000);</script>
+        <div class="container">
+          <div class="logo">BRIDGE AI</div>
+          <div class="icon">⚠️</div>
+          <h1>${title}</h1>
+          <p>${message}</p>
+          ${registrationUrl ? `
+            <a href="${registrationUrl}" target="_blank" class="button">
+              Join Waitlist →
+            </a>
+          ` : ''}
+          <div class="footer">
+            <p style="margin: 0; font-size: 12px;">You can close this window</p>
+          </div>
+          <script>
+            setTimeout(() => {
+              try {
+                window.close();
+              } catch (e) {
+                // Window might not be closable
+              }
+            }, 5000);
+          </script>
+        </div>
       </body>
     </html>
   `;
