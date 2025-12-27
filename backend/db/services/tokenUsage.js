@@ -5,7 +5,7 @@
 
 const { getPrismaClient } = require('../index');
 const userService = require('./user');
-const { calculateCredits } = require('../config/creditSystem');
+const { calculateCredits } = require('../../config/creditSystem');
 
 class TokenUsageService {
   constructor() {
