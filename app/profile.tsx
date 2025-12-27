@@ -17,7 +17,6 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { user, logout } = useAuth();
   const [isDeletingChats, setIsDeletingChats] = useState(false);
-  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   const handleDeleteAllChats = async () => {
     // Show confirmation
@@ -97,78 +96,6 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleDeleteAccount = async () => {
-    // Show strong warning
-    const confirmed = Platform.OS === 'web' 
-      ? window.confirm(
-          '⚠️ WARNING: This will permanently delete your account and ALL data!\n\n' +
-          'This includes:\n' +
-          '• All your chats and messages\n' +
-          '• All integrations\n' +
-          '• All memories\n' +
-          '• Your account information\n\n' +
-          'This action CANNOT be undone!\n\n' +
-          'Are you absolutely sure?'
-        )
-      : await new Promise(resolve => {
-          Alert.alert(
-            '⚠️ Delete Account',
-            'This will permanently delete your account and ALL data including chats, integrations, and memories. This action CANNOT be undone!',
-            [
-              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-              { 
-                text: 'Delete Account', 
-                style: 'destructive', 
-                onPress: () => {
-                  // Double confirmation
-                  Alert.alert(
-                    'Final Confirmation',
-                    'Are you absolutely sure? This cannot be undone!',
-                    [
-                      { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-                      { text: 'Yes, Delete', style: 'destructive', onPress: () => resolve(true) },
-                    ]
-                  );
-                }
-              },
-            ]
-          );
-        });
-    
-    if (!confirmed) return;
-
-    try {
-      setIsDeletingAccount(true);
-      const response = await authenticatedFetch(API_ENDPOINTS.AUTH.DELETE_ACCOUNT, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to delete account: ${response.status}`);
-      }
-
-      // Logout and clear local data
-      await logout();
-      
-      if (Platform.OS === 'web') {
-        alert('Your account has been deleted successfully.');
-        window.location.reload();
-      } else {
-        Alert.alert('Account Deleted', 'Your account has been deleted successfully.');
-        // Don't navigate - let the auth system handle the redirect to login
-      }
-    } catch (error) {
-      console.error('Error deleting account:', error);
-      const message = error instanceof Error ? error.message : 'Failed to delete account';
-      if (Platform.OS === 'web') {
-        alert(`Error: ${message}`);
-      } else {
-        Alert.alert('Error', message);
-      }
-    } finally {
-      setIsDeletingAccount(false);
-    }
-  };
 
   return (
     <ThemedView style={styles.container}>
@@ -247,7 +174,7 @@ export default function ProfileScreen() {
               },
             ]}
             onPress={handleDeleteAllChats}
-            disabled={isDeletingChats || isDeletingAccount}>
+            disabled={isDeletingChats}>
             <IconSymbol
               name="trash"
               size={24}
@@ -273,7 +200,7 @@ export default function ProfileScreen() {
               },
             ]}
             onPress={handleLogout}
-            disabled={isDeletingChats || isDeletingAccount}>
+            disabled={isDeletingChats}>
             <IconSymbol
               name="arrow.right.square"
               size={24}
@@ -289,32 +216,6 @@ export default function ProfileScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              styles.dangerButton,
-              { 
-                backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
-                borderColor: '#FF3B30',
-                borderWidth: 1,
-              },
-            ]}
-            onPress={handleDeleteAccount}
-            disabled={isDeletingChats || isDeletingAccount}>
-            <IconSymbol
-              name="exclamationmark.triangle.fill"
-              size={24}
-              color="#FF3B30"
-            />
-            <View style={styles.actionButtonText}>
-              <ThemedText style={[styles.actionButtonTitle, styles.dangerText]}>
-                Delete My Account
-              </ThemedText>
-              <ThemedText style={styles.actionButtonSubtitle}>
-                {isDeletingAccount ? 'Deleting...' : 'Permanently delete my account'}
-              </ThemedText>
-            </View>
-          </TouchableOpacity>
         </View>
       </ScrollView>
     </ThemedView>
