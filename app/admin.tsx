@@ -293,12 +293,22 @@ export default function AdminScreen() {
   const openConversationDetails = async (conversation: any) => {
     try {
       setIsLoading(true);
+      // Close user details modal first
+      setShowUserModal(false);
       setSelectedConversation(conversation);
       
+      const endpoint = API_ENDPOINTS.ADMIN.CONVERSATION(conversation.id);
+      
       // Fetch conversation with messages using admin endpoint
-      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.CONVERSATION(conversation.id));
+      const response = await authenticatedFetch(endpoint);
+      
       if (response.ok) {
         const convData = await response.json();
+        // Update selectedConversation with full data from API
+        setSelectedConversation({
+          ...conversation,
+          ...convData,
+        });
         setConversationMessages(convData.messages || []);
         setShowConversationModal(true);
       } else {
@@ -324,6 +334,10 @@ export default function AdminScreen() {
     setShowConversationModal(false);
     setSelectedConversation(null);
     setConversationMessages([]);
+    // Reopen user details modal if we had a selected user
+    if (selectedUser) {
+      setShowUserModal(true);
+    }
   };
 
   // Update user plan
@@ -703,7 +717,7 @@ export default function AdminScreen() {
             </View>
           </View>
 
-          {selectedConversation && (
+          {selectedConversation ? (
             <ScrollView style={styles.modalContent} contentContainerStyle={{ paddingBottom: bottomInset + 24 }}>
               {/* Conversation Info */}
               <View style={[styles.modalCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
@@ -754,6 +768,11 @@ export default function AdminScreen() {
                 )}
               </View>
             </ScrollView>
+          ) : (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#FF9500" />
+              <ThemedText style={styles.emptyText}>Loading conversation...</ThemedText>
+            </View>
           )}
         </ThemedView>
       </Modal>
