@@ -14,10 +14,7 @@
  * - No fallbacks or bypasses
  */
 
-// No longer need integrationService - we use req.user.email directly
-
-// Admin email - hardcoded for security
-const ADMIN_EMAIL = 'neviljobanputra34@gmail.com';
+const adminService = require('../db/services/admin');
 
 /**
  * Middleware to verify admin access
@@ -36,23 +33,13 @@ async function verifyAdmin(req, res, next) {
       });
     }
 
-    // Get user's email directly from the user object (set by verifyUser)
-    const userEmail = req.user.email;
+    // Check if user is admin in database
+    const isUserAdmin = await adminService.isAdmin(req.userId);
 
-    if (!userEmail) {
-      return res.status(403).json({ 
-        error: 'Forbidden', 
-        message: 'User email not found. Admin access requires a valid email address.' 
-      });
-    }
-
-    // Verify email matches admin email (case-sensitive exact match)
-    if (userEmail !== ADMIN_EMAIL) {
+    if (!isUserAdmin) {
       console.log('Admin access denied:', {
-        userEmail,
-        adminEmail: ADMIN_EMAIL,
-        match: userEmail === ADMIN_EMAIL,
         userId: req.userId,
+        email: req.user.email,
       });
       return res.status(403).json({ 
         error: 'Forbidden', 
@@ -62,7 +49,7 @@ async function verifyAdmin(req, res, next) {
 
     // Admin verified - attach admin flag to request
     req.isAdmin = true;
-    req.adminEmail = userEmail;
+    req.adminEmail = req.user.email;
     
     next();
   } catch (error) {
@@ -76,18 +63,11 @@ async function verifyAdmin(req, res, next) {
 
 /**
  * Helper function to check if a user is admin (for use in services)
- * Returns true if user email matches admin email
+ * Returns true if user is in admins table
  */
 async function isAdmin(userId) {
   try {
-    const userService = require('../db/services/user');
-    const user = await userService.getUserById(userId);
-    
-    if (!user || !user.email) {
-      return false;
-    }
-
-    return user.email === ADMIN_EMAIL;
+    return await adminService.isAdmin(userId);
   } catch (error) {
     console.error('Error checking admin status:', error);
     return false;
@@ -97,6 +77,5 @@ async function isAdmin(userId) {
 module.exports = {
   verifyAdmin,
   isAdmin,
-  ADMIN_EMAIL,
 };
 

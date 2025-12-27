@@ -75,6 +75,7 @@ export default function AdminScreen() {
   const [showConversationModal, setShowConversationModal] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<any>(null);
   const [conversationMessages, setConversationMessages] = useState<any[]>([]);
+  const [userIsAdmin, setUserIsAdmin] = useState<boolean>(false);
 
   // Redirect if not admin
   useEffect(() => {
@@ -261,6 +262,14 @@ export default function AdminScreen() {
         const details = await response.json();
         setUserDetails(details);
         setShowUserModal(true);
+        
+        // Check if this user is an admin
+        const adminCheckResponse = await authenticatedFetch(API_ENDPOINTS.ADMIN.ADMINS);
+        if (adminCheckResponse.ok) {
+          const admins = await adminCheckResponse.json();
+          const isAdmin = admins.some((admin: any) => admin.userId === userId);
+          setUserIsAdmin(isAdmin);
+        }
       } else {
         throw new Error('Failed to load user details');
       }
@@ -273,6 +282,121 @@ export default function AdminScreen() {
       }
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Make user admin
+  const makeUserAdmin = async (userId: string) => {
+    try {
+      setIsLoading(true);
+      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.ADD_ADMIN, {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      });
+
+      if (response.ok) {
+        setUserIsAdmin(true);
+        if (Platform.OS === 'web') {
+          alert('User has been made an admin');
+        } else {
+          Alert.alert('Success', 'User has been made an admin');
+        }
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || 'Failed to make user admin');
+      }
+    } catch (error) {
+      console.error('Error making user admin:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to make user admin';
+      if (Platform.OS === 'web') {
+        alert(errorMessage);
+      } else {
+        Alert.alert('Error', errorMessage);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Remove admin privileges
+  const removeUserAdmin = async (userId: string) => {
+    try {
+      setIsLoading(true);
+      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.REMOVE_ADMIN(userId), {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        setUserIsAdmin(false);
+        if (Platform.OS === 'web') {
+          alert('Admin privileges removed');
+        } else {
+          Alert.alert('Success', 'Admin privileges removed');
+        }
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || 'Failed to remove admin privileges');
+      }
+    } catch (error) {
+      console.error('Error removing admin:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to remove admin privileges';
+      if (Platform.OS === 'web') {
+        alert(errorMessage);
+      } else {
+        Alert.alert('Error', errorMessage);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle make admin with confirmation
+  const handleMakeAdmin = (userId: string, username: string, email: string) => {
+    const userName = username || email || 'this user';
+    
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(
+        `Make ${userName} an admin?\n\n` +
+        `This will give them full access to the admin dashboard, including the ability to manage users, view all data, and add other admins.`
+      );
+      if (confirmed) {
+        makeUserAdmin(userId);
+      }
+    } else {
+      Alert.alert(
+        'Make Admin',
+        `Make ${userName} an admin?\n\n` +
+        `This will give them full access to the admin dashboard, including the ability to manage users, view all data, and add other admins.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Make Admin', style: 'default', onPress: () => makeUserAdmin(userId) },
+        ]
+      );
+    }
+  };
+
+  // Handle remove admin with confirmation
+  const handleRemoveAdmin = (userId: string, username: string, email: string) => {
+    const userName = username || email || 'this user';
+    
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(
+        `Remove admin privileges from ${userName}?\n\n` +
+        `This will revoke their access to the admin dashboard.`
+      );
+      if (confirmed) {
+        removeUserAdmin(userId);
+      }
+    } else {
+      Alert.alert(
+        'Remove Admin',
+        `Remove admin privileges from ${userName}?\n\n` +
+        `This will revoke their access to the admin dashboard.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Remove Admin', style: 'destructive', onPress: () => removeUserAdmin(userId) },
+        ]
+      );
     }
   };
 
@@ -635,6 +759,40 @@ export default function AdminScreen() {
                   <ThemedText style={styles.modalInfoLabel}>Last Chat:</ThemedText>
                   <ThemedText style={styles.modalInfoValue}>{formatIST(selectedUser.lastChatTimeIST)}</ThemedText>
                 </View>
+              </View>
+
+              {/* Admin Status */}
+              <View style={[styles.modalCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+                <ThemedText style={styles.modalCardTitle}>Admin Status</ThemedText>
+                <View style={styles.modalInfoRow}>
+                  <ThemedText style={styles.modalInfoLabel}>Status:</ThemedText>
+                  <View style={[styles.planBadgeSmall, { backgroundColor: userIsAdmin ? '#34C759' : '#8E8E93' }]}>
+                    <ThemedText style={styles.planBadgeSmallText}>
+                      {userIsAdmin ? 'ADMIN' : 'USER'}
+                    </ThemedText>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.approvalBadgeButton,
+                    { 
+                      backgroundColor: userIsAdmin ? '#FF3B30' : '#34C759',
+                      marginTop: 12,
+                      opacity: isLoading ? 0.6 : 1,
+                    },
+                  ]}
+                  onPress={() => {
+                    if (userIsAdmin) {
+                      handleRemoveAdmin(selectedUser.id, selectedUser.username, selectedUser.email);
+                    } else {
+                      handleMakeAdmin(selectedUser.id, selectedUser.username, selectedUser.email);
+                    }
+                  }}
+                  disabled={isLoading}>
+                  <ThemedText style={styles.approvalBadgeText}>
+                    {userIsAdmin ? 'Remove Admin' : 'Make Admin'}
+                  </ThemedText>
+                </TouchableOpacity>
               </View>
 
               {/* Change Plan */}

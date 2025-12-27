@@ -155,5 +155,111 @@ router.get('/conversations/:conversationId', verifyUser, verifyAdmin, async (req
   }
 });
 
+/**
+ * POST /api/admin/admins
+ * Add a user as admin
+ * Body: { userId: string }
+ */
+router.post('/admins', verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    // Don't allow adding yourself (shouldn't happen, but safety check)
+    if (userId === req.userId) {
+      return res.status(400).json({ error: 'Cannot add yourself as admin' });
+    }
+
+    const admin = await adminService.addAdmin(userId, req.userId);
+    res.json(admin);
+  } catch (error) {
+    console.error('Error adding admin:', error);
+    if (error.message === 'User not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    if (error.message === 'User is already an admin') {
+      return res.status(400).json({ error: error.message });
+    }
+    res.status(500).json({ error: 'Failed to add admin' });
+  }
+});
+
+/**
+ * DELETE /api/admin/admins/:userId
+ * Remove admin privileges from a user
+ */
+router.delete('/admins/:userId', verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Don't allow removing yourself
+    if (userId === req.userId) {
+      return res.status(400).json({ error: 'Cannot remove your own admin privileges' });
+    }
+
+    await adminService.removeAdmin(userId);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error removing admin:', error);
+    if (error.message === 'User is not an admin') {
+      return res.status(404).json({ error: error.message });
+    }
+    res.status(500).json({ error: 'Failed to remove admin' });
+  }
+});
+
+/**
+ * GET /api/admin/admins
+ * Get all admins
+ */
+router.get('/admins', verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const admins = await adminService.getAllAdmins();
+    res.json(admins);
+  } catch (error) {
+    console.error('Error fetching admins:', error);
+    res.status(500).json({ error: 'Failed to fetch admins' });
+  }
+});
+
+/**
+ * GET /api/admin/integrations
+ * Get all integration settings
+ */
+router.get('/integrations', verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const settings = await adminService.getIntegrationSettings();
+    res.json(settings);
+  } catch (error) {
+    console.error('Error fetching integration settings:', error);
+    res.status(500).json({ error: 'Failed to fetch integration settings' });
+  }
+});
+
+/**
+ * PATCH /api/admin/integrations/:provider
+ * Update integration setting (enable/disable)
+ * Body: { isEnabled: boolean }
+ */
+router.patch('/integrations/:provider', verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const { provider } = req.params;
+    const { isEnabled } = req.body;
+
+    if (typeof isEnabled !== 'boolean') {
+      return res.status(400).json({ error: 'isEnabled must be a boolean' });
+    }
+
+    const setting = await adminService.updateIntegrationSetting(provider, isEnabled);
+    res.json(setting);
+  } catch (error) {
+    console.error('Error updating integration setting:', error);
+    res.status(500).json({ error: 'Failed to update integration setting' });
+  }
+});
+
 module.exports = router;
 

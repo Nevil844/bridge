@@ -42,6 +42,7 @@ export const API_ENDPOINTS = {
   MODELS: `${API_CONFIG.BASE_URL}/api/models`,
   MCP_STATUS: `${API_CONFIG.BASE_URL}/api/mcp/status`,
   INTEGRATIONS: `${API_CONFIG.BASE_URL}/api/integrations`,
+  AVAILABLE_INTEGRATIONS: `${API_CONFIG.BASE_URL}/api/integrations/available`,
   CONVERSATIONS: `${API_CONFIG.BASE_URL}/api/conversations`,
   USER_INTEGRATIONS: `${API_CONFIG.BASE_URL}/api/user-integrations`,
   USAGE: `${API_CONFIG.BASE_URL}/api/usage`,
@@ -64,6 +65,11 @@ export const API_ENDPOINTS = {
     APPROVE: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/approvals/${userId}/approve`,
     REMOVE_APPROVAL: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/approvals/${userId}`,
     CONVERSATION: (conversationId: string) => `${API_CONFIG.BASE_URL}/api/admin/conversations/${conversationId}`,
+    INTEGRATIONS: `${API_CONFIG.BASE_URL}/api/admin/integrations`,
+    UPDATE_INTEGRATION: (provider: string) => `${API_CONFIG.BASE_URL}/api/admin/integrations/${provider}`,
+    ADMINS: `${API_CONFIG.BASE_URL}/api/admin/admins`,
+    ADD_ADMIN: `${API_CONFIG.BASE_URL}/api/admin/admins`,
+    REMOVE_ADMIN: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/admins/${userId}`,
   },
 };
 
