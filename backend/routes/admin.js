@@ -16,12 +16,10 @@ const adminService = require('../db/services/admin');
  */
 router.get('/dashboard', verifyUser, verifyAdmin, async (req, res) => {
   try {
-    console.log('Admin dashboard request from:', req.adminEmail);
     const stats = await adminService.getDashboardStats();
     res.json(stats);
   } catch (error) {
     console.error('Error fetching admin dashboard:', error);
-    console.error('Error stack:', error.stack);
     res.status(500).json({ 
       error: 'Failed to fetch dashboard statistics',
       message: error.message || 'Unknown error',
@@ -43,7 +41,6 @@ router.get('/users', verifyUser, verifyAdmin, async (req, res) => {
     res.json(users);
   } catch (error) {
     console.error('Error fetching users:', error);
-    console.error('Error stack:', error.stack);
     res.status(500).json({ 
       error: 'Failed to fetch users',
       message: error.message || 'Unknown error',
