@@ -332,7 +332,7 @@ class AdminService {
       });
 
       // Combine user data with waitlist status
-      return users.map(user => ({
+      const approvalsList = users.map(user => ({
         id: user.id,
         userId: user.id, // For compatibility
         username: user.username,
@@ -341,6 +341,16 @@ class AdminService {
         createdAt: user.createdAt,
         isApproved: user.email ? (waitlistMap[user.email.toLowerCase()] || false) : false,
       }));
+
+      // Sort: ignored users (isApproved: false) first, then approved users
+      return approvalsList.sort((a, b) => {
+        // If both have same approval status, sort by creation date (newest first)
+        if (a.isApproved === b.isApproved) {
+          return new Date(b.createdAt) - new Date(a.createdAt);
+        }
+        // Ignored (false) comes before approved (true)
+        return a.isApproved ? 1 : -1;
+      });
     } catch (error) {
       console.error('Error fetching approvals:', error);
       throw new Error('Failed to fetch approvals');

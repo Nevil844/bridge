@@ -72,6 +72,9 @@ export default function AdminScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [approvals, setApprovals] = useState<ApprovalUser[]>([]);
   const [showUserModal, setShowUserModal] = useState(false);
+  const [showConversationModal, setShowConversationModal] = useState(false);
+  const [selectedConversation, setSelectedConversation] = useState<any>(null);
+  const [conversationMessages, setConversationMessages] = useState<any[]>([]);
 
   // Redirect if not admin
   useEffect(() => {
@@ -162,8 +165,46 @@ export default function AdminScreen() {
     }
   };
 
-  // Toggle user approval status
-  const toggleApproval = async (user: ApprovalUser) => {
+  // Toggle user approval status with confirmation
+  const toggleApproval = (user: ApprovalUser) => {
+    const action = user.isApproved ? 'ignore' : 'approve';
+    const actionText = user.isApproved ? 'Ignore' : 'Approve';
+    
+    if (Platform.OS === 'web') {
+      const confirmed = (typeof window !== 'undefined' && window.confirm) 
+        ? window.confirm(
+            `Are you sure you want to ${action} ${user.username || user.email}?\n\n` +
+            `This will ${user.isApproved ? 'revoke' : 'grant'} access to the app.`
+          )
+        : confirm(
+            `Are you sure you want to ${action} ${user.username || user.email}?\n\n` +
+            `This will ${user.isApproved ? 'revoke' : 'grant'} access to the app.`
+          );
+      if (confirmed) {
+        performApprovalToggle(user);
+      }
+    } else {
+      Alert.alert(
+        `${actionText} User`,
+        `Are you sure you want to ${action} ${user.username || user.email}?\n\n` +
+        `This will ${user.isApproved ? 'revoke' : 'grant'} access to the app.`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: actionText,
+            style: user.isApproved ? 'destructive' : 'default',
+            onPress: () => performApprovalToggle(user),
+          },
+        ]
+      );
+    }
+  };
+
+  // Perform the actual approval toggle
+  const performApprovalToggle = async (user: ApprovalUser) => {
     try {
       setIsLoading(true);
       const endpoint = user.isApproved 
@@ -246,6 +287,40 @@ export default function AdminScreen() {
     setShowUserModal(false);
     setSelectedUser(null);
     setUserDetails(null);
+  };
+
+  // Open conversation details
+  const openConversationDetails = async (conversation: any) => {
+    try {
+      setIsLoading(true);
+      setSelectedConversation(conversation);
+      
+      // Fetch conversation with messages
+      const response = await authenticatedFetch(`${API_ENDPOINTS.CONVERSATIONS}/${conversation.id}`);
+      if (response.ok) {
+        const convData = await response.json();
+        setConversationMessages(convData.messages || []);
+        setShowConversationModal(true);
+      } else {
+        throw new Error('Failed to load conversation');
+      }
+    } catch (error) {
+      console.error('Error loading conversation:', error);
+      if (Platform.OS === 'web') {
+        alert('Failed to load conversation');
+      } else {
+        Alert.alert('Error', 'Failed to load conversation');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Close conversation modal
+  const closeConversationModal = () => {
+    setShowConversationModal(false);
+    setSelectedConversation(null);
+    setConversationMessages([]);
   };
 
   // Update user plan
@@ -447,10 +522,9 @@ export default function AdminScreen() {
                   </View>
                 ) : (
                   approvals.map((user) => (
-                    <TouchableOpacity
+                    <View
                       key={user.id}
-                      style={[styles.approvalItem, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}
-                      onPress={() => toggleApproval(user)}>
+                      style={[styles.approvalItem, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
                       <View style={styles.approvalItemContent}>
                         <View style={styles.approvalItemLeft}>
                           <ThemedText style={styles.approvalItemName}>{user.username || user.email}</ThemedText>
@@ -464,23 +538,22 @@ export default function AdminScreen() {
                             </ThemedText>
                           </View>
                         </View>
-                        <View style={styles.approvalItemRight}>
-                          <View style={[
-                            styles.approvalBadge,
-                            { backgroundColor: user.isApproved ? '#34C759' : '#FF9500' }
-                          ]}>
-                            <ThemedText style={styles.approvalBadgeText}>
-                              {user.isApproved ? 'APPROVED' : 'IGNORED'}
-                            </ThemedText>
-                          </View>
-                          <IconSymbol
-                            name="chevron.right"
-                            size={16}
-                            color={isDark ? '#8E8E93' : '#8E8E93'}
-                          />
-                        </View>
+                        <TouchableOpacity
+                          style={[
+                            styles.approvalBadgeButton,
+                            { 
+                              backgroundColor: user.isApproved ? '#34C759' : '#FF9500',
+                              opacity: isLoading ? 0.6 : 1,
+                            }
+                          ]}
+                          onPress={() => toggleApproval(user)}
+                          disabled={isLoading}>
+                          <ThemedText style={styles.approvalBadgeText}>
+                            {user.isApproved ? 'APPROVED' : 'IGNORED'}
+                          </ThemedText>
+                        </TouchableOpacity>
                       </View>
-                    </TouchableOpacity>
+                    </View>
                   ))
                 )}
               </View>
@@ -573,7 +646,13 @@ export default function AdminScreen() {
                 <ThemedText style={styles.modalCardTitle}>All Conversations</ThemedText>
                 {userDetails.conversations && userDetails.conversations.length > 0 ? (
                   userDetails.conversations.map((conv: any) => (
-                    <View key={conv.id} style={[styles.conversationItemSmall, conv.isDeleted && { opacity: 0.5 }]}>
+                    <TouchableOpacity
+                      key={conv.id}
+                      style={[
+                        styles.conversationItemSmall,
+                        conv.isDeleted && styles.conversationItemDeleted,
+                      ]}
+                      onPress={() => openConversationDetails(conv)}>
                       <View style={styles.conversationHeaderSmall}>
                         <ThemedText style={[styles.conversationTitleSmall, conv.isDeleted && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
                           {conv.title}
@@ -587,10 +666,88 @@ export default function AdminScreen() {
                       <ThemedText style={styles.conversationMetaSmall}>
                         {conv.messageCount} messages • {formatIST(conv.lastActive)}
                       </ThemedText>
-                    </View>
+                    </TouchableOpacity>
                   ))
                 ) : (
                   <ThemedText style={styles.emptyText}>No conversations</ThemedText>
+                )}
+              </View>
+            </ScrollView>
+          )}
+        </ThemedView>
+      </Modal>
+
+      {/* Conversation Details Modal */}
+      <Modal
+        visible={showConversationModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={closeConversationModal}>
+        <ThemedView style={styles.modalContainer}>
+          <View style={[styles.modalHeader, { paddingTop: topInset + 20 }]}>
+            <View style={styles.modalHeaderRow}>
+              <TouchableOpacity onPress={closeConversationModal} style={styles.modalBackButton}>
+                <IconSymbol
+                  name="chevron.left"
+                  size={20}
+                  color={isDark ? '#FFFFFF' : '#000000'}
+                />
+              </TouchableOpacity>
+              <ThemedText style={styles.modalTitle} numberOfLines={1}>
+                {selectedConversation?.title || 'Conversation'}
+              </ThemedText>
+              <View style={styles.placeholder} />
+            </View>
+          </View>
+
+          {selectedConversation && (
+            <ScrollView style={styles.modalContent} contentContainerStyle={{ paddingBottom: bottomInset + 24 }}>
+              {/* Conversation Info */}
+              <View style={[styles.modalCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+                <View style={styles.modalInfoRow}>
+                  <ThemedText style={styles.modalInfoLabel}>Title:</ThemedText>
+                  <ThemedText style={styles.modalInfoValue}>{selectedConversation.title}</ThemedText>
+                </View>
+                <View style={styles.modalInfoRow}>
+                  <ThemedText style={styles.modalInfoLabel}>Messages:</ThemedText>
+                  <ThemedText style={styles.modalInfoValue}>{conversationMessages.length}</ThemedText>
+                </View>
+                <View style={styles.modalInfoRow}>
+                  <ThemedText style={styles.modalInfoLabel}>Last Active:</ThemedText>
+                  <ThemedText style={styles.modalInfoValue}>{formatIST(selectedConversation.lastActive)}</ThemedText>
+                </View>
+                {selectedConversation.isDeleted && (
+                  <View style={[styles.deletedBadgeSmall, { alignSelf: 'flex-start', marginTop: 8 }]}>
+                    <ThemedText style={styles.deletedBadgeSmallText}>DELETED</ThemedText>
+                  </View>
+                )}
+              </View>
+
+              {/* Messages */}
+              <View style={[styles.modalCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+                <ThemedText style={styles.modalCardTitle}>Messages</ThemedText>
+                {conversationMessages.length > 0 ? (
+                  conversationMessages.map((message: any, index: number) => (
+                    <View
+                      key={message.id || index}
+                      style={[
+                        styles.messageItem,
+                        message.role === 'user' ? styles.messageItemUser : styles.messageItemAssistant,
+                        { backgroundColor: message.role === 'user' ? (isDark ? '#2C2C2E' : '#F2F2F7') : (isDark ? '#1C1C1E' : '#FFFFFF') }
+                      ]}>
+                      <View style={styles.messageHeader}>
+                        <ThemedText style={styles.messageRole}>
+                          {message.role === 'user' ? '👤 User' : '🤖 Assistant'}
+                        </ThemedText>
+                        <ThemedText style={styles.messageTime}>
+                          {new Date(message.createdAt).toLocaleString()}
+                        </ThemedText>
+                      </View>
+                      <ThemedText style={styles.messageContent}>{message.content}</ThemedText>
+                    </View>
+                  ))
+                ) : (
+                  <ThemedText style={styles.emptyText}>No messages</ThemedText>
                 )}
               </View>
             </ScrollView>
@@ -937,6 +1094,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(128, 128, 128, 0.1)',
     marginBottom: 8,
   },
+  conversationItemDeleted: {
+    borderWidth: 2,
+    borderColor: '#FF3B30',
+  },
   conversationHeaderSmall: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1003,15 +1164,53 @@ const styles = StyleSheet.create({
     fontSize: 11,
     opacity: 0.6,
   },
-  approvalBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
+  approvalBadgeButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    minWidth: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   approvalBadgeText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  // Message styles
+  messageItem: {
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(128, 128, 128, 0.2)',
+  },
+  messageItemUser: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#4a9eff',
+  },
+  messageItemAssistant: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#FF9500',
+  },
+  messageHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  messageRole: {
+    fontSize: 12,
+    fontWeight: '600',
+    opacity: 0.8,
+  },
+  messageTime: {
+    fontSize: 11,
+    opacity: 0.6,
+  },
+  messageContent: {
+    fontSize: 14,
+    lineHeight: 20,
   },
 });
 
