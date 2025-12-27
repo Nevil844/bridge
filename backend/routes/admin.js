@@ -16,11 +16,17 @@ const adminService = require('../db/services/admin');
  */
 router.get('/dashboard', verifyUser, verifyAdmin, async (req, res) => {
   try {
+    console.log('Admin dashboard request from:', req.adminEmail);
     const stats = await adminService.getDashboardStats();
     res.json(stats);
   } catch (error) {
     console.error('Error fetching admin dashboard:', error);
-    res.status(500).json({ error: 'Failed to fetch dashboard statistics' });
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to fetch dashboard statistics',
+      message: error.message || 'Unknown error',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    });
   }
 });
 

@@ -75,43 +75,35 @@ class AdminService {
       .slice(0, 10);
 
     // Get active users (users with conversations)
-    const todayActiveUsers = await this.prisma.conversation.findMany({
+    // Use groupBy for better performance
+    const todayActiveUsers = await this.prisma.conversation.groupBy({
+      by: ['userId'],
       where: {
         lastActive: {
           gte: startOfToday,
         },
         isDeleted: false,
       },
-      select: {
-        userId: true,
-      },
-      distinct: ['userId'],
     });
 
-    const weekActiveUsers = await this.prisma.conversation.findMany({
+    const weekActiveUsers = await this.prisma.conversation.groupBy({
+      by: ['userId'],
       where: {
         lastActive: {
           gte: startOfWeek,
         },
         isDeleted: false,
       },
-      select: {
-        userId: true,
-      },
-      distinct: ['userId'],
     });
 
-    const monthActiveUsers = await this.prisma.conversation.findMany({
+    const monthActiveUsers = await this.prisma.conversation.groupBy({
+      by: ['userId'],
       where: {
         lastActive: {
           gte: startOfMonth,
         },
         isDeleted: false,
       },
-      select: {
-        userId: true,
-      },
-      distinct: ['userId'],
     });
 
     return {
