@@ -14,10 +14,9 @@ CREATE INDEX IF NOT EXISTS idx_admins_user_id ON admins(user_id);
 CREATE INDEX IF NOT EXISTS idx_admins_email ON admins(email);
 
 -- Insert the initial admin (neviljobanputra34@gmail.com)
--- Note: This will only work if the user exists in the users table
--- You may need to run this after the user is created, or update the user_id manually
--- Using a simple approach: generate a unique ID using md5 hash
-INSERT INTO admins (id, user_id, email, added_by, created_at, updated_at)
+-- Note: Prisma db push uses camelCase column names (userId, not user_id)
+-- This will only work if the user exists in the users table
+INSERT INTO admins (id, "userId", email, "addedBy", "createdAt", "updatedAt")
 SELECT 
   'admin_' || substr(md5(u.id || u.email), 1, 20),
   u.id,
@@ -27,5 +26,5 @@ SELECT
   CURRENT_TIMESTAMP
 FROM users u
 WHERE u.email = 'neviljobanputra34@gmail.com'
-  AND NOT EXISTS (SELECT 1 FROM admins WHERE user_id = u.id);
+  AND NOT EXISTS (SELECT 1 FROM admins WHERE "userId" = u.id);
 
