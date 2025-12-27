@@ -41,6 +41,7 @@ model Conversation {
   id         String   @id @default(cuid())
   userId     String
   title      String   @default("New Chat")
+  isDeleted  Boolean  @default(false) // Soft delete flag for safety and abuse prevention
   lastActive DateTime @default(now())
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -53,6 +54,7 @@ model Conversation {
 
   @@index([userId, lastActive(sort: Desc)])
   @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, isDeleted])
   @@map("conversations")
 }
 
