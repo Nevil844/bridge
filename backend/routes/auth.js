@@ -677,17 +677,8 @@ function createErrorPage(title, message, registrationUrl = null) {
             </a>
           ` : ''}
           <div class="footer">
-            <p style="margin: 0; font-size: 12px;">You can close this window</p>
+            <p style="margin: 0; font-size: 12px;">You can close this window when you're done</p>
           </div>
-          <script>
-            setTimeout(() => {
-              try {
-                window.close();
-              } catch (e) {
-                // Window might not be closable
-              }
-            }, 5000);
-          </script>
         </div>
       </body>
     </html>
