@@ -1,13 +1,16 @@
 /**
  * Plan Limits Configuration
- * Define token limits for each subscription plan
+ * Define credit limits for each subscription plan
+ * 
+ * Credits are cost-based units (1 credit = $0.01)
+ * Based on Claude Sonnet 4.5 costs: $0.003/1K input, $0.015/1K output
  */
 
-const PLAN_LIMITS = {
-  free: 200_000,        // 200K tokens/month (~$0.40 with Claude)
-  pro: 1_250_000,       // 1.25M tokens/month (~$20/month)
-  power: 3_000_000,     // 3M tokens/month (~$48/month)
-  enterprise: 10_000_000, // 10M tokens/month (~$160/month)
+const PLAN_CREDITS = {
+  free: 100,        // 100 credits = $1 worth
+  pro: 1000,        // 1000 credits = $10 worth
+  power: 3000,      // 3000 credits = $30 worth
+  enterprise: 10000, // 10000 credits = $100 worth
 };
 
 /**
@@ -21,10 +24,10 @@ const WARNING_THRESHOLDS = {
 };
 
 /**
- * Get limit for a plan
+ * Get credit limit for a plan
  */
 function getPlanLimit(plan) {
-  return PLAN_LIMITS[plan?.toLowerCase()] || PLAN_LIMITS.free;
+  return PLAN_CREDITS[plan?.toLowerCase()] || PLAN_CREDITS.free;
 }
 
 /**
@@ -39,23 +42,24 @@ function getWarningLevel(usagePercentage) {
 }
 
 /**
- * Calculate remaining tokens
+ * Calculate remaining credits
  */
-function getRemainingTokens(totalUsed, plan) {
+function getRemainingTokens(creditsUsed, plan) {
   const limit = getPlanLimit(plan);
-  return Math.max(0, limit - totalUsed);
+  return Math.max(0, limit - creditsUsed);
 }
 
 /**
  * Calculate usage percentage
  */
-function getUsagePercentage(totalUsed, plan) {
+function getUsagePercentage(creditsUsed, plan) {
   const limit = getPlanLimit(plan);
-  return (totalUsed / limit) * 100;
+  if (limit === 0) return 0;
+  return (creditsUsed / limit) * 100;
 }
 
 module.exports = {
-  PLAN_LIMITS,
+  PLAN_CREDITS,
   WARNING_THRESHOLDS,
   getPlanLimit,
   getWarningLevel,

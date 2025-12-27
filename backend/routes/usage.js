@@ -48,16 +48,35 @@ router.get('/:userId', verifyUser, async (req, res) => {
     const { month } = req.query; // Optional: specific month (format: "2025-11")
 
     // Get usage for current or specified month (using authenticated userId from token)
-    const usage = month 
-      ? await tokenUsageService.getMonthUsage(authenticatedUserId, month)
-      : await tokenUsageService.getCurrentMonthTotal(authenticatedUserId);
+    let usage;
+    if (month) {
+      // For specific month, aggregate the records
+      const monthRecords = await tokenUsageService.getMonthUsage(authenticatedUserId, month);
+      const inputTokens = monthRecords.reduce((sum, r) => sum + (r.inputTokens || 0), 0);
+      const outputTokens = monthRecords.reduce((sum, r) => sum + (r.outputTokens || 0), 0);
+      const totalTokens = inputTokens + outputTokens;
+      const creditsUsed = monthRecords.reduce((sum, r) => {
+        return sum + (r.creditsUsed ? parseFloat(r.creditsUsed.toString()) : 0);
+      }, 0);
+      usage = {
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        creditsUsed,
+      };
+    } else {
+      usage = await tokenUsageService.getCurrentMonthTotal(authenticatedUserId);
+    }
 
     // Get user's plan from database (using authenticated userId from token)
     const user = await userService.getUserById(authenticatedUserId);
     const userPlan = user?.plan || req.query.plan || 'free';
     const limit = getPlanLimit(userPlan);
-    const remaining = getRemainingTokens(usage.totalTokens, userPlan);
-    const percentage = getUsagePercentage(usage.totalTokens, userPlan);
+    
+    // Use credits for limits (cost-based)
+    const creditsUsed = usage.creditsUsed || 0;
+    const remaining = getRemainingTokens(creditsUsed, userPlan);
+    const percentage = getUsagePercentage(creditsUsed, userPlan);
     const warningLevel = getWarningLevel(percentage / 100);
 
     const currentMonth = month || new Date().toISOString().slice(0, 7);
@@ -67,13 +86,14 @@ router.get('/:userId', verifyUser, async (req, res) => {
       month: currentMonth,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      totalTokens: usage.totalTokens,
+      totalTokens: usage.totalTokens, // Keep for backward compatibility
+      creditsUsed: creditsUsed, // Primary metric for limits
       plan: userPlan,
       limit,
       remainingTokens: remaining,
       usagePercentage: percentage.toFixed(2),
       warningLevel,
-      isOverLimit: usage.totalTokens >= limit,
+      isOverLimit: creditsUsed >= limit,
     });
   } catch (error) {
     console.error('Error fetching user usage:', error);

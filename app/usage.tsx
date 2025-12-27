@@ -63,7 +63,7 @@ export default function UsageScreen() {
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <ThemedText style={styles.sectionTitle}>Token Usage</ThemedText>
+            <ThemedText style={styles.sectionTitle}>Credit Usage</ThemedText>
             <TouchableOpacity onPress={loadUsage} disabled={loadingUsage} style={styles.refreshButton}>
               <IconSymbol name="arrow.clockwise" size={20} color={isDark ? '#FFFFFF' : '#000000'} />
             </TouchableOpacity>
@@ -102,7 +102,7 @@ export default function UsageScreen() {
                 <View style={styles.usageStats}>
                   <View>
                     <ThemedText style={styles.usageLabel}>Used</ThemedText>
-                    <ThemedText style={styles.usageValue}>{formatTokenCount(usage.totalTokens)}</ThemedText>
+                    <ThemedText style={styles.usageValue}>{formatTokenCount(usage.creditsUsed || 0)}</ThemedText>
                   </View>
                   <View>
                     <ThemedText style={styles.usageLabel}>Remaining</ThemedText>
