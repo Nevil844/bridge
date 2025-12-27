@@ -53,6 +53,7 @@ interface TokenUsage {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  credits?: number;
 }
 
 interface Message {
@@ -123,6 +124,15 @@ export default function HomeScreen() {
   // Use minimal bottom padding - KeyboardAvoidingView will handle keyboard spacing automatically
   // Only add safe area padding when keyboard is closed (handled by KeyboardAvoidingView)
   const inputBottomPadding = Platform.OS === 'ios' ? Math.max(bottomInset, 8) : 8;
+  // Calculate credits from token usage (for display)
+  // Using Claude Sonnet 4.5 costs: $0.003/1K input, $0.015/1K output
+  const calculateCredits = (inputTokens: number, outputTokens: number): number => {
+    const inputCost = inputTokens * 0.000003;
+    const outputCost = outputTokens * 0.000015;
+    const totalCost = inputCost + outputCost;
+    return Math.round((totalCost / 0.01) * 100) / 100; // Round to 2 decimals
+  };
+
   const normalizeTokenUsage = (usage?: { input_tokens?: number; output_tokens?: number }) => {
     if (!usage) return undefined;
     const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined;
@@ -132,7 +142,9 @@ export default function HomeScreen() {
     if (inputTokens === undefined && outputTokens === undefined) {
       return undefined;
     }
-    return { inputTokens, outputTokens, totalTokens };
+    // Calculate credits for display
+    const credits = calculateCredits(inputTokens ?? 0, outputTokens ?? 0);
+    return { inputTokens, outputTokens, totalTokens, credits };
   };
 
   useEffect(() => {
@@ -1991,7 +2003,9 @@ export default function HomeScreen() {
                         { color: isDark ? '#9CA3AF' : '#6B7280' },
                       ]}
                     >
-                      Token Usage: {typeof message.tokenUsage.totalTokens === 'number' ? message.tokenUsage.totalTokens : '—'}
+                      Credits: {message.tokenUsage.credits !== undefined
+                        ? message.tokenUsage.credits.toFixed(2)
+                        : '—'}
                     </Text>
                   )}
                   <View

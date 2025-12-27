@@ -5,8 +5,8 @@ import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { formatTokenCount, getUserUsage, getWarningColor, type TokenUsage } from '@/services/usage';
-import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
+import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Modal, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 
@@ -15,8 +15,7 @@ interface Plan {
   name: string;
   price: string;
   priceMonthly: number;
-  tokens: string;
-  tokensCount: number;
+  credits: number; // Credit limit
   features: string[];
   color: string;
   popular?: boolean;
@@ -28,8 +27,7 @@ const PLANS: Plan[] = [
     name: 'Free',
     price: '$0',
     priceMonthly: 0,
-    tokens: '200K',
-    tokensCount: 200000,
+    credits: 100, // 100 credits = $1 worth
     features: [],
     color: '#888',
   },
@@ -38,8 +36,7 @@ const PLANS: Plan[] = [
     name: 'Pro',
     price: '$20',
     priceMonthly: 20,
-    tokens: '1.25M',
-    tokensCount: 1250000,
+    credits: 1000, // 1000 credits = $10 worth
     features: [],
     color: '#4a9eff',
     popular: true,
@@ -49,8 +46,7 @@ const PLANS: Plan[] = [
     name: 'Power',
     price: '$48',
     priceMonthly: 48,
-    tokens: '3M',
-    tokensCount: 3000000,
+    credits: 3000, // 3000 credits = $30 worth
     features: [],
     color: '#ff8800',
   },
@@ -116,7 +112,7 @@ export default function PricingScreen() {
     if (Platform.OS === 'web') {
       const confirmed = window.confirm(
         `${isUpgrade ? 'Upgrade' : 'Change'} to ${plan.name}?\n\n` +
-        `You'll ${isUpgrade ? 'be charged' : 'get'} ${plan.price === '$0' ? 'free' : plan.price + '/month'} and get ${plan.tokens} tokens per month.`
+        `You'll ${isUpgrade ? 'be charged' : 'get'} ${plan.price === '$0' ? 'free' : plan.price + '/month'} and get ${plan.credits} credits per month.`
       );
       if (confirmed) {
         processUpgrade(plan);
@@ -124,7 +120,7 @@ export default function PricingScreen() {
     } else {
       Alert.alert(
         `${isUpgrade ? 'Upgrade' : 'Change'} to ${plan.name}?`,
-        `You'll ${isUpgrade ? 'be charged' : 'get'} ${plan.price === '$0' ? 'free' : plan.price + '/month'} and get ${plan.tokens} tokens per month.`,
+        `You'll ${isUpgrade ? 'be charged' : 'get'} ${plan.price === '$0' ? 'free' : plan.price + '/month'} and get ${plan.credits} credits per month.`,
         [
           { text: 'Cancel', style: 'cancel' },
           { text: isUpgrade ? 'Upgrade' : 'Change Plan', onPress: () => processUpgrade(plan) },
@@ -174,7 +170,7 @@ User Details:
 - Name: ${userName}
 - Email: ${userEmail}
 - Current Plan: ${currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1)}
-- Requested Plan: ${selectedPlan.name} (${selectedPlan.price}/month - ${selectedPlan.tokens} tokens)
+- Requested Plan: ${selectedPlan.name} (${selectedPlan.price}/month - ${selectedPlan.credits} credits)
 
 ${feedback ? `Feedback/Notes:\n${feedback}\n\n` : ''}Please ${action} my plan when convenient.
 
@@ -325,7 +321,7 @@ Thank you!`;
                 <View style={styles.usageStats}>
                   <View style={styles.usageStatItem}>
                     <ThemedText style={styles.usageStatValue}>
-                      {formatTokenCount(usage.totalTokens)}
+                      {formatTokenCount(usage.creditsUsed || 0)}
                     </ThemedText>
                     <ThemedText style={styles.usageStatLabel}>Used</ThemedText>
                   </View>
@@ -389,7 +385,7 @@ Thank you!`;
             <View style={styles.planHeader}>
               <View style={styles.planNameContainer}>
                 <ThemedText style={styles.planName}>{plan.name}</ThemedText>
-                <ThemedText style={styles.planTokens}>{plan.tokens} tokens/month</ThemedText>
+                <ThemedText style={styles.planTokens}>{plan.credits} credits/month</ThemedText>
               </View>
               <View style={styles.priceContainer}>
                 <View style={styles.priceWrapper}>
@@ -429,21 +425,20 @@ Thank you!`;
         ))}
 
         <View style={styles.infoSection}>
-          <ThemedText style={styles.infoTitle}>💡 What are tokens?</ThemedText>
+          <ThemedText style={styles.infoTitle}>What are credits?</ThemedText>
           <ThemedText style={styles.infoText}>
-            Tokens are used to measure AI usage. Roughly:
+            Credits are units that measure your AI usage. They provide a simple and accurate way to track how much you've used.
           </ThemedText>
-          <ThemedText style={styles.infoText}>• 1 token ≈ 4 characters</ThemedText>
-          <ThemedText style={styles.infoText}>• 100 tokens ≈ 75 words</ThemedText>
-          <ThemedText style={styles.infoText}>• 1,000 tokens ≈ 750 words</ThemedText>
-          <ThemedText style={[styles.infoText, { marginTop: 12 }]}>
-            Your usage resets on the 1st of each month.
+          <ThemedText style={styles.infoText}>
+            • Calculated from your actual AI usage{'\n'}
+            • Simple and easy to understand{'\n'}
+            • Resets on the 1st of each month
           </ThemedText>
         </View>
 
         <View style={styles.footer}>
           <ThemedText style={styles.footerText}>
-            All plans include access to Claude, Gemini, and other AI models
+            All plans include access to all our AI models
           </ThemedText>
         </View>
       </ScrollView>
@@ -641,8 +636,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 24,
     padding: 20,
-    backgroundColor: 'rgba(74, 158, 255, 0.1)',
-    borderRadius: 12,
   },
   infoTitle: {
     fontSize: 18,
@@ -653,6 +646,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     opacity: 0.8,
+    marginTop: 8,
   },
   footer: {
     paddingHorizontal: 20,

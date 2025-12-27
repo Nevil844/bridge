@@ -1,10 +1,11 @@
 /**
  * Token Usage Service
- * Tracks AI token consumption for billing and rate limiting
+ * Tracks AI token consumption and credits for billing and rate limiting
  */
 
 const { getPrismaClient } = require('../index');
 const userService = require('./user');
+const { calculateCredits } = require('../config/creditSystem');
 
 class TokenUsageService {
   constructor() {
@@ -13,12 +14,17 @@ class TokenUsageService {
 
   /**
    * Track token usage for a request
+   * Calculates and stores credits based on actual API costs
    */
   async trackUsage(userId, model, inputTokens, outputTokens) {
     // Ensure user exists
     const user = await userService.getOrCreateUser(userId, null);
     
     const month = new Date().toISOString().slice(0, 7); // "2025-01"
+    
+    // Calculate credits from token usage
+    const credits = calculateCredits(model, inputTokens, outputTokens);
+    const totalTokens = inputTokens + outputTokens;
 
     return await this.prisma.tokenUsage.upsert({
       where: {
@@ -36,7 +42,10 @@ class TokenUsageService {
           increment: outputTokens,
         },
         totalTokens: {
-          increment: inputTokens + outputTokens,
+          increment: totalTokens,
+        },
+        creditsUsed: {
+          increment: credits,
         },
         updatedAt: new Date(),
       },
@@ -46,7 +55,8 @@ class TokenUsageService {
         model: model || 'unknown',
         inputTokens,
         outputTokens,
-        totalTokens: inputTokens + outputTokens,
+        totalTokens,
+        creditsUsed: credits,
       },
     });
   }
@@ -70,6 +80,7 @@ class TokenUsageService {
 
   /**
    * Get total usage for current month (all models)
+   * Returns both token counts and credits
    */
   async getCurrentMonthTotal(userId) {
     // Ensure user exists
@@ -86,13 +97,20 @@ class TokenUsageService {
         inputTokens: true,
         outputTokens: true,
         totalTokens: true,
+        creditsUsed: true,
       },
     });
+
+    // Convert Decimal to number for credits
+    const creditsUsed = result._sum.creditsUsed 
+      ? parseFloat(result._sum.creditsUsed.toString()) 
+      : 0;
 
     return {
       inputTokens: result._sum.inputTokens || 0,
       outputTokens: result._sum.outputTokens || 0,
       totalTokens: result._sum.totalTokens || 0,
+      creditsUsed: creditsUsed,
     };
   }
 
@@ -126,11 +144,11 @@ class TokenUsageService {
   }
 
   /**
-   * Check if user is over usage limit
+   * Check if user is over usage limit (based on credits)
    */
   async isOverLimit(userId, limit) {
     const total = await this.getCurrentMonthTotal(userId);
-    return total.totalTokens > limit;
+    return total.creditsUsed >= limit;
   }
 
   /**
