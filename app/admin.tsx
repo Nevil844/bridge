@@ -10,8 +10,6 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 
-const ADMIN_EMAIL = 'neviljobanputra34@gmail.com';
-
 interface DashboardStats {
   totalCost: string;
   totalCredits: string;
@@ -62,7 +60,7 @@ export default function AdminScreen() {
   const isDark = colorScheme === 'dark';
   const router = useRouter();
   const { user } = useAuth();
-  const isAdmin = user?.email === ADMIN_EMAIL;
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'approvals' | 'integrations'>('dashboard');
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
@@ -78,14 +76,34 @@ export default function AdminScreen() {
   const [userIsAdmin, setUserIsAdmin] = useState<boolean>(false);
   const [integrationSettings, setIntegrationSettings] = useState<any[]>([]);
 
-  // Redirect if not admin
+  // Check if user is admin
   useEffect(() => {
-    if (!isAdmin && user) {
-      // Only redirect if user is loaded and not admin
-      // Don't redirect if user is still loading
-      router.back();
-    }
-  }, [isAdmin, user, router]);
+    const checkAdminStatus = async () => {
+      if (!user?.id) return;
+      
+      try {
+        // Try to access admin endpoint - if successful, user is admin
+        const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.ADMINS);
+        if (response.ok) {
+          setIsAdmin(true);
+        } else {
+          setIsAdmin(false);
+          // Redirect if not admin and user is loaded
+          if (user) {
+            router.back();
+          }
+        }
+      } catch (error) {
+        setIsAdmin(false);
+        // Redirect if not admin and user is loaded
+        if (user) {
+          router.back();
+        }
+      }
+    };
+
+    checkAdminStatus();
+  }, [user, router]);
 
   // Load dashboard stats
   const loadDashboard = async () => {
