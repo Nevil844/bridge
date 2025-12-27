@@ -64,7 +64,7 @@ export default function AdminScreen() {
   const { user } = useAuth();
   const isAdmin = user?.email === ADMIN_EMAIL;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'approvals'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'approvals' | 'integrations'>('dashboard');
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -76,6 +76,7 @@ export default function AdminScreen() {
   const [selectedConversation, setSelectedConversation] = useState<any>(null);
   const [conversationMessages, setConversationMessages] = useState<any[]>([]);
   const [userIsAdmin, setUserIsAdmin] = useState<boolean>(false);
+  const [integrationSettings, setIntegrationSettings] = useState<any[]>([]);
 
   // Redirect if not admin
   useEffect(() => {
@@ -166,6 +167,66 @@ export default function AdminScreen() {
     }
   };
 
+  // Load integration settings
+  const loadIntegrationSettings = async () => {
+    try {
+      setIsLoading(true);
+      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.INTEGRATIONS);
+      if (response.ok) {
+        const settings = await response.json();
+        setIntegrationSettings(settings);
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('Integration settings API error:', response.status, errorData);
+        throw new Error(errorData.error || `Failed to load integration settings: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Error loading integration settings:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load integration settings';
+      setIntegrationSettings([]);
+      if (Platform.OS === 'web') {
+        console.warn(`Failed to load integration settings: ${errorMessage}`);
+      } else {
+        Alert.alert('Warning', `Integration settings not available: ${errorMessage}`);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Toggle integration enabled status
+  const toggleIntegration = async (provider: string, currentStatus: boolean) => {
+    try {
+      setIsLoading(true);
+      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.UPDATE_INTEGRATION(provider), {
+        method: 'PATCH',
+        body: JSON.stringify({ isEnabled: !currentStatus }),
+      });
+
+      if (response.ok) {
+        // Update local state
+        setIntegrationSettings(integrationSettings.map(setting =>
+          setting.provider === provider
+            ? { ...setting, isEnabled: !currentStatus }
+            : setting
+        ));
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `Failed to update integration: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Error toggling integration:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to update integration';
+      if (Platform.OS === 'web') {
+        alert(errorMessage);
+      } else {
+        Alert.alert('Error', errorMessage);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Toggle user approval status with confirmation
   const toggleApproval = (user: ApprovalUser) => {
     const action = user.isApproved ? 'ignore' : 'approve';
@@ -250,6 +311,8 @@ export default function AdminScreen() {
       loadUsers();
     } else if (activeTab === 'approvals') {
       loadApprovals();
+    } else if (activeTab === 'integrations') {
+      loadIntegrationSettings();
     }
   }, [activeTab, isAdmin]);
 
@@ -566,6 +629,17 @@ export default function AdminScreen() {
               Approvals
             </ThemedText>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.tab,
+              activeTab === 'integrations' && styles.activeTab,
+              { borderBottomColor: activeTab === 'integrations' ? '#FF9500' : 'transparent' },
+            ]}
+            onPress={() => setActiveTab('integrations')}>
+            <ThemedText style={[styles.tabText, activeTab === 'integrations' && { color: '#FF9500', fontWeight: '600' }]}>
+              Integrations
+            </ThemedText>
+          </TouchableOpacity>
         </View>
 
         {/* Content */}
@@ -691,6 +765,51 @@ export default function AdminScreen() {
                           disabled={isLoading}>
                           <ThemedText style={styles.approvalBadgeText}>
                             {user.isApproved ? 'APPROVED' : 'IGNORED'}
+                          </ThemedText>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+            )}
+
+            {activeTab === 'integrations' && (
+              <View style={styles.section}>
+                <ThemedText style={[styles.cardTitle, { marginBottom: 16 }]}>
+                  Manage Integrations
+                </ThemedText>
+                {integrationSettings.length === 0 ? (
+                  <View style={[styles.card, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+                    <ThemedText style={styles.emptyText}>No integrations found</ThemedText>
+                  </View>
+                ) : (
+                  integrationSettings.map((integration) => (
+                    <View
+                      key={integration.provider}
+                      style={[styles.approvalItem, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+                      <View style={styles.approvalItemContent}>
+                        <View style={styles.approvalItemLeft}>
+                          <ThemedText style={styles.approvalItemName}>{integration.name}</ThemedText>
+                          <ThemedText style={styles.approvalItemEmail}>{integration.provider}</ThemedText>
+                          {integration.description && (
+                            <ThemedText style={[styles.approvalItemDate, { marginTop: 4 }]}>
+                              {integration.description}
+                            </ThemedText>
+                          )}
+                        </View>
+                        <TouchableOpacity
+                          style={[
+                            styles.approvalBadgeButton,
+                            { 
+                              backgroundColor: integration.isEnabled ? '#34C759' : '#8E8E93',
+                              opacity: isLoading ? 0.6 : 1,
+                            }
+                          ]}
+                          onPress={() => toggleIntegration(integration.provider, integration.isEnabled)}
+                          disabled={isLoading}>
+                          <ThemedText style={styles.approvalBadgeText}>
+                            {integration.isEnabled ? 'ENABLED' : 'DISABLED'}
                           </ThemedText>
                         </TouchableOpacity>
                       </View>

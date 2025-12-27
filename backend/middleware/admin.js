@@ -54,9 +54,11 @@ async function verifyAdmin(req, res, next) {
     next();
   } catch (error) {
     console.error('Admin verification error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ 
       error: 'Internal Server Error', 
-      message: 'Failed to verify admin access' 
+      message: 'Failed to verify admin access',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 }
