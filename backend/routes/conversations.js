@@ -21,13 +21,23 @@ const generateEmbedding = async (text) => {
 /**
  * GET /api/conversations
  * Get user's conversations with pagination
+ * Query params:
+ * - limit: Number of conversations (default: 50)
+ * - offset: Pagination offset (default: 0)
+ * - includeDeleted: Include deleted conversations (default: false - users don't see deleted chats)
  */
 router.get('/', verifyUser, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
     const offset = parseInt(req.query.offset) || 0;
+    const includeDeleted = req.query.includeDeleted === 'true'; // Default to false - hide deleted from users
 
-    const conversations = await conversationService.getUserConversations(req.userId, limit, offset);
+    const conversations = await conversationService.getUserConversations(
+      req.userId, 
+      limit, 
+      offset, 
+      includeDeleted
+    );
     res.json(conversations);
   } catch (error) {
     console.error('Error fetching conversations:', error);
