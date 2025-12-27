@@ -63,6 +63,7 @@ export const API_ENDPOINTS = {
     APPROVALS: `${API_CONFIG.BASE_URL}/api/admin/approvals`,
     APPROVE: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/approvals/${userId}/approve`,
     REMOVE_APPROVAL: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/approvals/${userId}`,
+    CONVERSATION: (conversationId: string) => `${API_CONFIG.BASE_URL}/api/admin/conversations/${conversationId}`,
   },
 };
 

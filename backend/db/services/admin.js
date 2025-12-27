@@ -297,6 +297,39 @@ class AdminService {
   }
 
   /**
+   * Get conversation with messages (admin access - bypasses user ownership check)
+   */
+  async getConversation(conversationId) {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      include: {
+        messages: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    if (!conversation) {
+      return null;
+    }
+
+    return {
+      id: conversation.id,
+      title: conversation.title,
+      isDeleted: conversation.isDeleted,
+      lastActive: conversation.lastActive,
+      createdAt: conversation.createdAt,
+      messages: conversation.messages.map(msg => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        createdAt: msg.createdAt,
+        metadata: msg.metadata,
+      })),
+    };
+  }
+
+  /**
    * Get all users with their waitlist approval status
    */
   async getApprovals() {

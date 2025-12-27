@@ -138,5 +138,25 @@ router.delete('/approvals/:userId', verifyUser, verifyAdmin, async (req, res) =>
   }
 });
 
+/**
+ * GET /api/admin/conversations/:conversationId
+ * Get conversation with messages (admin access - bypasses user ownership)
+ */
+router.get('/conversations/:conversationId', verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const conversation = await adminService.getConversation(conversationId);
+    
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    res.json(conversation);
+  } catch (error) {
+    console.error('Error fetching conversation:', error);
+    res.status(500).json({ error: 'Failed to fetch conversation' });
+  }
+});
+
 module.exports = router;
 
