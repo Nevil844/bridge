@@ -297,42 +297,115 @@ class AdminService {
   }
 
   /**
-   * Get all approvals (placeholder - implement based on your approval system)
+   * Get all users with their waitlist approval status
    */
   async getApprovals() {
     try {
-      // TODO: Implement based on your approval system
-      // This is a placeholder - you'll need to create an approvals table or use existing system
-      // For now, return empty array so UI doesn't break
-      return [];
+      // Get all users
+      const users = await this.prisma.user.findMany({
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          plan: true,
+          createdAt: true,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      // Get waitlist entries for all user emails
+      const userEmails = users.map(u => u.email).filter(Boolean);
+      const waitlistEntries = await this.prisma.waitlist.findMany({
+        where: {
+          email: {
+            in: userEmails,
+          },
+        },
+      });
+
+      // Create a map of email -> isInvited
+      const waitlistMap = {};
+      waitlistEntries.forEach(entry => {
+        waitlistMap[entry.email.toLowerCase()] = entry.isInvited;
+      });
+
+      // Combine user data with waitlist status
+      return users.map(user => ({
+        id: user.id,
+        userId: user.id, // For compatibility
+        username: user.username,
+        email: user.email,
+        plan: user.plan,
+        createdAt: user.createdAt,
+        isApproved: user.email ? (waitlistMap[user.email.toLowerCase()] || false) : false,
+      }));
     } catch (error) {
       console.error('Error fetching approvals:', error);
-      // Return empty array on error so UI doesn't break
-      return [];
+      throw new Error('Failed to fetch approvals');
     }
   }
 
   /**
-   * Approve a request
+   * Approve a user (set isInvited to true in waitlist)
    */
-  async approveRequest(approvalId) {
+  async approveRequest(userId) {
     try {
-      // TODO: Implement based on your approval system
-      return { success: true, approvalId, message: 'Approval system not yet implemented' };
+      // Get user email
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true },
+      });
+
+      if (!user || !user.email) {
+        throw new Error('User not found or has no email');
+      }
+
+      // Update or create waitlist entry
+      await this.prisma.waitlist.upsert({
+        where: { email: user.email.toLowerCase().trim() },
+        update: { isInvited: true },
+        create: {
+          email: user.email.toLowerCase().trim(),
+          isInvited: true,
+        },
+      });
+
+      return { success: true, userId, message: 'User approved successfully' };
     } catch (error) {
-      console.error('Error approving request:', error);
-      throw new Error('Failed to approve request');
+      console.error('Error approving user:', error);
+      throw new Error('Failed to approve user');
     }
   }
 
   /**
-   * Remove/reject an approval
+   * Remove/reject an approval (set isInvited to false in waitlist)
    */
-  async removeApproval(approvalId) {
+  async removeApproval(userId) {
     try {
-      // TODO: Implement based on your approval system
-      return { success: true, approvalId, message: 'Approval system not yet implemented' };
+      // Get user email
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true },
+      });
+
+      if (!user || !user.email) {
+        throw new Error('User not found or has no email');
+      }
+
+      // Update waitlist entry
+      await this.prisma.waitlist.update({
+        where: { email: user.email.toLowerCase().trim() },
+        data: { isInvited: false },
+      });
+
+      return { success: true, userId, message: 'User approval removed successfully' };
     } catch (error) {
+      // If waitlist entry doesn't exist, that's fine - user is already not approved
+      if (error.code === 'P2025') {
+        return { success: true, userId, message: 'User approval removed successfully' };
+      }
       console.error('Error removing approval:', error);
       throw new Error('Failed to remove approval');
     }

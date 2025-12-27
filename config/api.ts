@@ -61,8 +61,8 @@ export const API_ENDPOINTS = {
     USER_DETAILS: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/users/${userId}`,
     UPDATE_USER_PLAN: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/users/${userId}/plan`,
     APPROVALS: `${API_CONFIG.BASE_URL}/api/admin/approvals`,
-    APPROVE: (approvalId: string) => `${API_CONFIG.BASE_URL}/api/admin/approvals/${approvalId}/approve`,
-    REMOVE_APPROVAL: (approvalId: string) => `${API_CONFIG.BASE_URL}/api/admin/approvals/${approvalId}`,
+    APPROVE: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/approvals/${userId}/approve`,
+    REMOVE_APPROVAL: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/approvals/${userId}`,
   },
 };
 
