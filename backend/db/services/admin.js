@@ -106,20 +106,27 @@ class AdminService {
       },
     });
 
+    // Ensure totalCost is a valid number
+    const safeTotalCost = isNaN(totalCost) || !isFinite(totalCost) ? 0 : totalCost;
+    const safeTotalCredits = isNaN(totalCredits) || !isFinite(totalCredits) ? 0 : totalCredits;
+
     return {
-      totalCost: totalCost.toFixed(2),
-      totalCredits: totalCredits.toFixed(2),
+      totalCost: safeTotalCost.toFixed(2),
+      totalCredits: safeTotalCredits.toFixed(2),
       currentMonth,
       activeUsers: {
         today: todayActiveUsers.length,
         week: weekActiveUsers.length,
         month: monthActiveUsers.length,
       },
-      topUsers: topUsers.map(user => ({
-        ...user,
-        totalCredits: user.totalCredits.toFixed(2),
-        cost: creditSystem.creditsToCost(user.totalCredits).toFixed(2),
-      })),
+      topUsers: topUsers.map(user => {
+        const safeUserCredits = isNaN(user.totalCredits) || !isFinite(user.totalCredits) ? 0 : user.totalCredits;
+        return {
+          ...user,
+          totalCredits: safeUserCredits.toFixed(2),
+          cost: creditSystem.creditsToCost(safeUserCredits).toFixed(2),
+        };
+      }),
     };
   }
 
@@ -132,7 +139,6 @@ class AdminService {
         _count: {
           select: {
             conversations: true,
-            messages: true,
             userIntegrations: true,
           },
         },
@@ -142,12 +148,28 @@ class AdminService {
     // Get last chat time for each user (including deleted if requested)
     const userStats = await Promise.all(
       users.map(async (user) => {
-        const lastConversation = await this.prisma.conversation.findFirst({
+        // Get conversation count (filtered by isDeleted if needed)
+        const conversationWhere = {
+          userId: user.id,
+          ...(includeDeleted ? {} : { isDeleted: false }),
+        };
+        
+        const conversationCount = await this.prisma.conversation.count({
+          where: conversationWhere,
+        });
+
+        // Get message count through conversations
+        const messageCount = await this.prisma.message.count({
           where: {
-            userId: user.id,
-            // Always include deleted for admin view when includeDeleted is true
-            ...(includeDeleted ? {} : { isDeleted: false }),
+            conversation: {
+              userId: user.id,
+              ...(includeDeleted ? {} : { isDeleted: false }),
+            },
           },
+        });
+
+        const lastConversation = await this.prisma.conversation.findFirst({
+          where: conversationWhere,
           orderBy: {
             lastActive: 'desc',
           },
@@ -185,8 +207,8 @@ class AdminService {
           email: user.email,
           plan: user.plan,
           createdAt: user.createdAt,
-          conversationCount: user._count.conversations,
-          messageCount: user._count.messages,
+          conversationCount,
+          messageCount,
           integrationCount: user._count.userIntegrations,
           lastChatTime: lastConversation?.lastActive || null,
           lastChatTimeIST,
@@ -278,25 +300,42 @@ class AdminService {
    * Get all approvals (placeholder - implement based on your approval system)
    */
   async getApprovals() {
-    // TODO: Implement based on your approval system
-    // This is a placeholder - you'll need to create an approvals table or use existing system
-    return [];
+    try {
+      // TODO: Implement based on your approval system
+      // This is a placeholder - you'll need to create an approvals table or use existing system
+      // For now, return empty array so UI doesn't break
+      return [];
+    } catch (error) {
+      console.error('Error fetching approvals:', error);
+      // Return empty array on error so UI doesn't break
+      return [];
+    }
   }
 
   /**
    * Approve a request
    */
   async approveRequest(approvalId) {
-    // TODO: Implement based on your approval system
-    return { success: true, approvalId };
+    try {
+      // TODO: Implement based on your approval system
+      return { success: true, approvalId, message: 'Approval system not yet implemented' };
+    } catch (error) {
+      console.error('Error approving request:', error);
+      throw new Error('Failed to approve request');
+    }
   }
 
   /**
    * Remove/reject an approval
    */
   async removeApproval(approvalId) {
-    // TODO: Implement based on your approval system
-    return { success: true, approvalId };
+    try {
+      // TODO: Implement based on your approval system
+      return { success: true, approvalId, message: 'Approval system not yet implemented' };
+    } catch (error) {
+      console.error('Error removing approval:', error);
+      throw new Error('Failed to remove approval');
+    }
   }
 }
 

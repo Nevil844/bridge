@@ -43,7 +43,12 @@ router.get('/users', verifyUser, verifyAdmin, async (req, res) => {
     res.json(users);
   } catch (error) {
     console.error('Error fetching users:', error);
-    res.status(500).json({ error: 'Failed to fetch users' });
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to fetch users',
+      message: error.message || 'Unknown error',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    });
   }
 });
 
