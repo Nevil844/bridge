@@ -64,10 +64,12 @@ export default function AdminScreen() {
 
   // Redirect if not admin
   useEffect(() => {
-    if (!isAdmin) {
+    if (!isAdmin && user) {
+      // Only redirect if user is loaded and not admin
+      // Don't redirect if user is still loading
       router.back();
     }
-  }, [isAdmin, router]);
+  }, [isAdmin, user, router]);
 
   // Load dashboard stats
   const loadDashboard = async () => {
@@ -78,14 +80,17 @@ export default function AdminScreen() {
         const stats = await response.json();
         setDashboardStats(stats);
       } else {
-        throw new Error('Failed to load dashboard');
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('Dashboard API error:', response.status, errorData);
+        throw new Error(errorData.error || `Failed to load dashboard: ${response.status}`);
       }
     } catch (error) {
       console.error('Error loading dashboard:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load dashboard';
       if (Platform.OS === 'web') {
-        alert('Failed to load dashboard');
+        alert(`Failed to load dashboard: ${errorMessage}`);
       } else {
-        Alert.alert('Error', 'Failed to load dashboard');
+        Alert.alert('Error', `Failed to load dashboard: ${errorMessage}`);
       }
     } finally {
       setIsLoading(false);
@@ -101,14 +106,17 @@ export default function AdminScreen() {
         const usersData = await response.json();
         setUsers(usersData);
       } else {
-        throw new Error('Failed to load users');
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('Users API error:', response.status, errorData);
+        throw new Error(errorData.error || `Failed to load users: ${response.status}`);
       }
     } catch (error) {
       console.error('Error loading users:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load users';
       if (Platform.OS === 'web') {
-        alert('Failed to load users');
+        alert(`Failed to load users: ${errorMessage}`);
       } else {
-        Alert.alert('Error', 'Failed to load users');
+        Alert.alert('Error', `Failed to load users: ${errorMessage}`);
       }
     } finally {
       setIsLoading(false);

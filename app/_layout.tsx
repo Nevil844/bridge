@@ -176,6 +176,14 @@ export default function RootLayout() {
             }} 
           />
           <Stack.Screen 
+            name="admin" 
+            options={{ 
+              headerShown: false,
+              title: '',
+              presentation: 'card',
+            }} 
+          />
+          <Stack.Screen 
             name="terms" 
             options={{ 
               headerShown: false,
