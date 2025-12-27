@@ -295,21 +295,24 @@ export default function AdminScreen() {
       setIsLoading(true);
       setSelectedConversation(conversation);
       
-      // Fetch conversation with messages
-      const response = await authenticatedFetch(`${API_ENDPOINTS.CONVERSATIONS}/${conversation.id}`);
+      // Fetch conversation with messages using admin endpoint
+      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.CONVERSATION(conversation.id));
       if (response.ok) {
         const convData = await response.json();
         setConversationMessages(convData.messages || []);
         setShowConversationModal(true);
       } else {
-        throw new Error('Failed to load conversation');
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('Conversation API error:', response.status, errorData);
+        throw new Error(errorData.error || `Failed to load conversation: ${response.status}`);
       }
     } catch (error) {
       console.error('Error loading conversation:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load conversation';
       if (Platform.OS === 'web') {
-        alert('Failed to load conversation');
+        alert(`Failed to load conversation: ${errorMessage}`);
       } else {
-        Alert.alert('Error', 'Failed to load conversation');
+        Alert.alert('Error', `Failed to load conversation: ${errorMessage}`);
       }
     } finally {
       setIsLoading(false);
