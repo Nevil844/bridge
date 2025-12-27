@@ -8,7 +8,7 @@ import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { authenticatedFetch } from '@/utils/api';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 const ADMIN_EMAIL = 'neviljobanputra34@gmail.com';
 
@@ -46,6 +46,16 @@ interface User {
   monthlyCost: string;
 }
 
+interface ApprovalUser {
+  id: string;
+  userId: string;
+  username: string;
+  email: string;
+  plan: string;
+  createdAt: string;
+  isApproved: boolean;
+}
+
 export default function AdminScreen() {
   const colorScheme = useColorScheme();
   const { topInset, bottomInset } = useSafeAreaPadding({ top: 16, bottom: 24 });
@@ -60,7 +70,8 @@ export default function AdminScreen() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [userDetails, setUserDetails] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [approvals, setApprovals] = useState<any[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalUser[]>([]);
+  const [showUserModal, setShowUserModal] = useState(false);
 
   // Redirect if not admin
   useEffect(() => {
@@ -151,6 +162,42 @@ export default function AdminScreen() {
     }
   };
 
+  // Toggle user approval status
+  const toggleApproval = async (user: ApprovalUser) => {
+    try {
+      setIsLoading(true);
+      const endpoint = user.isApproved 
+        ? API_ENDPOINTS.ADMIN.REMOVE_APPROVAL(user.id)
+        : API_ENDPOINTS.ADMIN.APPROVE(user.id);
+      
+      const method = user.isApproved ? 'DELETE' : 'POST';
+      
+      const response = await authenticatedFetch(endpoint, {
+        method,
+      });
+
+      if (response.ok) {
+        // Update local state
+        setApprovals(approvals.map(a => 
+          a.id === user.id ? { ...a, isApproved: !a.isApproved } : a
+        ));
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `Failed to ${user.isApproved ? 'remove' : 'approve'} user`);
+      }
+    } catch (error) {
+      console.error('Error toggling approval:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to update approval';
+      if (Platform.OS === 'web') {
+        alert(errorMessage);
+      } else {
+        Alert.alert('Error', errorMessage);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Load data when tab changes
   useEffect(() => {
     if (!isAdmin) return;
@@ -172,6 +219,7 @@ export default function AdminScreen() {
       if (response.ok) {
         const details = await response.json();
         setUserDetails(details);
+        setShowUserModal(true);
       } else {
         throw new Error('Failed to load user details');
       }
@@ -187,6 +235,19 @@ export default function AdminScreen() {
     }
   };
 
+  // Open user details modal
+  const openUserDetails = (user: User) => {
+    setSelectedUser(user);
+    loadUserDetails(user.id);
+  };
+
+  // Close user details modal
+  const closeUserModal = () => {
+    setShowUserModal(false);
+    setSelectedUser(null);
+    setUserDetails(null);
+  };
+
   // Update user plan
   const updateUserPlan = async (userId: string, newPlan: string) => {
     try {
@@ -196,12 +257,18 @@ export default function AdminScreen() {
       });
 
       if (response.ok) {
+        // Update local state
+        if (selectedUser && selectedUser.id === userId) {
+          setSelectedUser({ ...selectedUser, plan: newPlan });
+        }
+        // Update users list
+        setUsers(users.map(u => u.id === userId ? { ...u, plan: newPlan } : u));
+        
         if (Platform.OS === 'web') {
-          alert('Plan updated successfully');
+          // Silent update on web
         } else {
           Alert.alert('Success', 'Plan updated successfully');
         }
-        loadUsers(); // Reload users
       } else {
         throw new Error('Failed to update plan');
       }
@@ -349,102 +416,24 @@ export default function AdminScreen() {
                 {users.map((user) => (
                   <TouchableOpacity
                     key={user.id}
-                    style={[styles.userCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}
-                    onPress={() => {
-                      if (selectedUser?.id === user.id) {
-                        setSelectedUser(null);
-                        setUserDetails(null);
-                      } else {
-                        setSelectedUser(user);
-                        loadUserDetails(user.id);
-                      }
-                    }}>
-                    <View style={styles.userCardHeader}>
-                      <View>
-                        <ThemedText style={styles.userName}>{user.username || user.email}</ThemedText>
-                        <ThemedText style={styles.userEmail}>{user.email}</ThemedText>
-                        <View style={styles.userBadges}>
-                          <View style={[styles.planBadge, { backgroundColor: '#4a9eff' }]}>
-                            <ThemedText style={styles.planBadgeText}>{user.plan.toUpperCase()}</ThemedText>
-                          </View>
-                        </View>
+                    style={[styles.userListItem, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}
+                    onPress={() => openUserDetails(user)}>
+                    <View style={styles.userListItemContent}>
+                      <View style={styles.userListItemLeft}>
+                        <ThemedText style={styles.userListItemName}>{user.username || user.email}</ThemedText>
+                        <ThemedText style={styles.userListItemEmail}>{user.email}</ThemedText>
                       </View>
-                      <IconSymbol
-                        name={selectedUser?.id === user.id ? 'chevron.up' : 'chevron.down'}
-                        size={20}
-                        color={isDark ? '#8E8E93' : '#8E8E93'}
-                      />
+                      <View style={styles.userListItemRight}>
+                        <View style={[styles.planBadgeSmall, { backgroundColor: '#4a9eff' }]}>
+                          <ThemedText style={styles.planBadgeSmallText}>{user.plan.toUpperCase()}</ThemedText>
+                        </View>
+                        <IconSymbol
+                          name="chevron.right"
+                          size={16}
+                          color={isDark ? '#8E8E93' : '#8E8E93'}
+                        />
+                      </View>
                     </View>
-
-                    {selectedUser?.id === user.id && (
-                      <View style={styles.userDetails}>
-                        <View style={styles.userDetailRow}>
-                          <ThemedText style={styles.userDetailLabel}>Monthly Credits:</ThemedText>
-                          <ThemedText style={styles.userDetailValue}>
-                            {user.monthlyCredits} (${user.monthlyCost})
-                          </ThemedText>
-                        </View>
-                        <View style={styles.userDetailRow}>
-                          <ThemedText style={styles.userDetailLabel}>Conversations:</ThemedText>
-                          <ThemedText style={styles.userDetailValue}>{user.conversationCount}</ThemedText>
-                        </View>
-                        <View style={styles.userDetailRow}>
-                          <ThemedText style={styles.userDetailLabel}>Messages:</ThemedText>
-                          <ThemedText style={styles.userDetailValue}>{user.messageCount}</ThemedText>
-                        </View>
-                        <View style={styles.userDetailRow}>
-                          <ThemedText style={styles.userDetailLabel}>Last Chat (IST):</ThemedText>
-                          <ThemedText style={styles.userDetailValue}>{formatIST(user.lastChatTimeIST)}</ThemedText>
-                        </View>
-
-                        <View style={styles.planSelector}>
-                          <ThemedText style={styles.planSelectorLabel}>Change Plan:</ThemedText>
-                          <View style={styles.planButtons}>
-                            {['free', 'pro', 'power', 'enterprise'].map((plan) => (
-                              <TouchableOpacity
-                                key={plan}
-                                style={[
-                                  styles.planButton,
-                                  user.plan === plan && styles.planButtonActive,
-                                  { backgroundColor: user.plan === plan ? '#FF9500' : (isDark ? '#2C2C2E' : '#F2F2F7') },
-                                ]}
-                                onPress={() => updateUserPlan(user.id, plan)}>
-                                <ThemedText style={[styles.planButtonText, user.plan === plan && { color: '#FFFFFF' }]}>
-                                  {plan.toUpperCase()}
-                                </ThemedText>
-                              </TouchableOpacity>
-                            ))}
-                          </View>
-                        </View>
-
-                        {userDetails && (
-                          <View style={styles.conversationsSection}>
-                            <ThemedText style={styles.conversationsTitle}>All Conversations (Including Deleted)</ThemedText>
-                            {userDetails.conversations && userDetails.conversations.length > 0 ? (
-                              userDetails.conversations.map((conv: any) => (
-                                <View key={conv.id} style={[styles.conversationItem, conv.isDeleted && { opacity: 0.5 }]}>
-                                  <View style={styles.conversationHeader}>
-                                    <ThemedText style={[styles.conversationTitle, conv.isDeleted && { textDecorationLine: 'line-through' }]}>
-                                      {conv.title}
-                                    </ThemedText>
-                                    {conv.isDeleted && (
-                                      <View style={styles.deletedBadge}>
-                                        <ThemedText style={styles.deletedBadgeText}>DELETED</ThemedText>
-                                      </View>
-                                    )}
-                                  </View>
-                                  <ThemedText style={styles.conversationMeta}>
-                                    {conv.messageCount} messages • {formatIST(conv.lastActive)}
-                                  </ThemedText>
-                                </View>
-                              ))
-                            ) : (
-                              <ThemedText style={styles.emptyText}>No conversations</ThemedText>
-                            )}
-                          </View>
-                        )}
-                      </View>
-                    )}
                   </TouchableOpacity>
                 ))}
               </View>
@@ -452,19 +441,162 @@ export default function AdminScreen() {
 
             {activeTab === 'approvals' && (
               <View style={styles.section}>
-                <View style={[styles.card, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
-                  <ThemedText style={styles.cardTitle}>Approvals</ThemedText>
-                  {approvals.length === 0 ? (
-                    <ThemedText style={styles.emptyText}>No pending approvals</ThemedText>
-                  ) : (
-                    <ThemedText style={styles.emptyText}>Approval system coming soon</ThemedText>
-                  )}
-                </View>
+                {approvals.length === 0 ? (
+                  <View style={[styles.card, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+                    <ThemedText style={styles.emptyText}>No users found</ThemedText>
+                  </View>
+                ) : (
+                  approvals.map((user) => (
+                    <TouchableOpacity
+                      key={user.id}
+                      style={[styles.approvalItem, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}
+                      onPress={() => toggleApproval(user)}>
+                      <View style={styles.approvalItemContent}>
+                        <View style={styles.approvalItemLeft}>
+                          <ThemedText style={styles.approvalItemName}>{user.username || user.email}</ThemedText>
+                          <ThemedText style={styles.approvalItemEmail}>{user.email}</ThemedText>
+                          <View style={styles.approvalItemMeta}>
+                            <View style={[styles.planBadgeSmall, { backgroundColor: '#4a9eff' }]}>
+                              <ThemedText style={styles.planBadgeSmallText}>{user.plan.toUpperCase()}</ThemedText>
+                            </View>
+                            <ThemedText style={styles.approvalItemDate}>
+                              Joined: {new Date(user.createdAt).toLocaleDateString()}
+                            </ThemedText>
+                          </View>
+                        </View>
+                        <View style={styles.approvalItemRight}>
+                          <View style={[
+                            styles.approvalBadge,
+                            { backgroundColor: user.isApproved ? '#34C759' : '#FF9500' }
+                          ]}>
+                            <ThemedText style={styles.approvalBadgeText}>
+                              {user.isApproved ? 'APPROVED' : 'IGNORED'}
+                            </ThemedText>
+                          </View>
+                          <IconSymbol
+                            name="chevron.right"
+                            size={16}
+                            color={isDark ? '#8E8E93' : '#8E8E93'}
+                          />
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  ))
+                )}
               </View>
             )}
           </>
         )}
       </ScrollView>
+
+      {/* User Details Modal */}
+      <Modal
+        visible={showUserModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={closeUserModal}>
+        <ThemedView style={styles.modalContainer}>
+          <View style={[styles.modalHeader, { paddingTop: topInset + 20 }]}>
+            <View style={styles.modalHeaderRow}>
+              <TouchableOpacity onPress={closeUserModal} style={styles.modalBackButton}>
+                <IconSymbol
+                  name="chevron.left"
+                  size={20}
+                  color={isDark ? '#FFFFFF' : '#000000'}
+                />
+              </TouchableOpacity>
+              <ThemedText style={styles.modalTitle}>User Details</ThemedText>
+              <View style={styles.placeholder} />
+            </View>
+          </View>
+
+          {selectedUser && userDetails && (
+            <ScrollView style={styles.modalContent} contentContainerStyle={{ paddingBottom: bottomInset + 24 }}>
+              {/* User Info */}
+              <View style={[styles.modalCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+                <ThemedText style={styles.modalCardTitle}>User Information</ThemedText>
+                <View style={styles.modalInfoRow}>
+                  <ThemedText style={styles.modalInfoLabel}>Name:</ThemedText>
+                  <ThemedText style={styles.modalInfoValue}>{selectedUser.username || selectedUser.email}</ThemedText>
+                </View>
+                <View style={styles.modalInfoRow}>
+                  <ThemedText style={styles.modalInfoLabel}>Email:</ThemedText>
+                  <ThemedText style={styles.modalInfoValue}>{selectedUser.email}</ThemedText>
+                </View>
+                <View style={styles.modalInfoRow}>
+                  <ThemedText style={styles.modalInfoLabel}>Plan:</ThemedText>
+                  <View style={[styles.planBadgeSmall, { backgroundColor: '#4a9eff' }]}>
+                    <ThemedText style={styles.planBadgeSmallText}>{selectedUser.plan.toUpperCase()}</ThemedText>
+                  </View>
+                </View>
+                <View style={styles.modalInfoRow}>
+                  <ThemedText style={styles.modalInfoLabel}>Monthly Credits:</ThemedText>
+                  <ThemedText style={styles.modalInfoValue}>{selectedUser.monthlyCredits} (${selectedUser.monthlyCost})</ThemedText>
+                </View>
+                <View style={styles.modalInfoRow}>
+                  <ThemedText style={styles.modalInfoLabel}>Conversations:</ThemedText>
+                  <ThemedText style={styles.modalInfoValue}>{selectedUser.conversationCount}</ThemedText>
+                </View>
+                <View style={styles.modalInfoRow}>
+                  <ThemedText style={styles.modalInfoLabel}>Messages:</ThemedText>
+                  <ThemedText style={styles.modalInfoValue}>{selectedUser.messageCount}</ThemedText>
+                </View>
+                <View style={styles.modalInfoRow}>
+                  <ThemedText style={styles.modalInfoLabel}>Last Chat:</ThemedText>
+                  <ThemedText style={styles.modalInfoValue}>{formatIST(selectedUser.lastChatTimeIST)}</ThemedText>
+                </View>
+              </View>
+
+              {/* Change Plan */}
+              <View style={[styles.modalCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+                <ThemedText style={styles.modalCardTitle}>Change Plan</ThemedText>
+                <View style={styles.planButtons}>
+                  {['free', 'pro', 'power', 'enterprise'].map((plan) => (
+                    <TouchableOpacity
+                      key={plan}
+                      style={[
+                        styles.planButton,
+                        selectedUser.plan === plan && styles.planButtonActive,
+                        { backgroundColor: selectedUser.plan === plan ? '#FF9500' : (isDark ? '#2C2C2E' : '#F2F2F7') },
+                      ]}
+                      onPress={() => updateUserPlan(selectedUser.id, plan)}>
+                      <ThemedText style={[styles.planButtonText, selectedUser.plan === plan && { color: '#FFFFFF' }]}>
+                        {plan.toUpperCase()}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Conversations */}
+              <View style={[styles.modalCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+                <ThemedText style={styles.modalCardTitle}>All Conversations</ThemedText>
+                {userDetails.conversations && userDetails.conversations.length > 0 ? (
+                  userDetails.conversations.map((conv: any) => (
+                    <View key={conv.id} style={[styles.conversationItemSmall, conv.isDeleted && { opacity: 0.5 }]}>
+                      <View style={styles.conversationHeaderSmall}>
+                        <ThemedText style={[styles.conversationTitleSmall, conv.isDeleted && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
+                          {conv.title}
+                        </ThemedText>
+                        {conv.isDeleted && (
+                          <View style={styles.deletedBadgeSmall}>
+                            <ThemedText style={styles.deletedBadgeSmallText}>DELETED</ThemedText>
+                          </View>
+                        )}
+                      </View>
+                      <ThemedText style={styles.conversationMetaSmall}>
+                        {conv.messageCount} messages • {formatIST(conv.lastActive)}
+                      </ThemedText>
+                    </View>
+                  ))
+                ) : (
+                  <ThemedText style={styles.emptyText}>No conversations</ThemedText>
+                )}
+              </View>
+            </ScrollView>
+          )}
+        </ThemedView>
+      </Modal>
     </ThemedView>
   );
 }
@@ -489,9 +621,9 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   title: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: 'bold',
-    lineHeight: 40,
+    lineHeight: 30,
   },
   placeholder: {
     width: 32,
@@ -512,7 +644,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
   },
   tabText: {
-    fontSize: 16,
+    fontSize: 14,
     opacity: 0.7,
   },
   section: {
@@ -530,17 +662,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   cardTitle: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   cardValue: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 4,
   },
   cardSubtitle: {
-    fontSize: 14,
+    fontSize: 12,
     opacity: 0.7,
   },
   statsRow: {
@@ -552,12 +684,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statValue: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     marginBottom: 4,
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: 11,
     opacity: 0.7,
   },
   topUserItem: {
@@ -568,56 +700,73 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(128, 128, 128, 0.1)',
   },
   topUserRank: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: 'bold',
-    width: 40,
+    width: 30,
     opacity: 0.5,
   },
   topUserInfo: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 8,
   },
   topUserName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     marginBottom: 2,
   },
   topUserPlan: {
-    fontSize: 12,
+    fontSize: 11,
     opacity: 0.7,
   },
   topUserCredits: {
     alignItems: 'flex-end',
   },
   topUserCreditsValue: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#FF9500',
   },
   topUserCreditsLabel: {
-    fontSize: 12,
+    fontSize: 11,
     opacity: 0.7,
   },
-  userCard: {
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
+  userListItem: {
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
     borderWidth: 1,
   },
-  userCardHeader: {
+  userListItemContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  userName: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
+  userListItemLeft: {
+    flex: 1,
   },
-  userEmail: {
+  userListItemRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  userListItemName: {
     fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  userListItemEmail: {
+    fontSize: 12,
     opacity: 0.7,
-    marginBottom: 8,
+  },
+  planBadgeSmall: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  planBadgeSmallText: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   userBadges: {
     flexDirection: 'row',
@@ -729,6 +878,140 @@ const styles = StyleSheet.create({
   conversationMeta: {
     fontSize: 12,
     opacity: 0.7,
+  },
+  // Modal styles
+  modalContainer: {
+    flex: 1,
+  },
+  modalHeader: {
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(128, 128, 128, 0.2)',
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalBackButton: {
+    padding: 4,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  modalContent: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  modalCard: {
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+  },
+  modalCardTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  modalInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  modalInfoLabel: {
+    fontSize: 13,
+    opacity: 0.7,
+  },
+  modalInfoValue: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  conversationItemSmall: {
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(128, 128, 128, 0.1)',
+    marginBottom: 8,
+  },
+  conversationHeaderSmall: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  conversationTitleSmall: {
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  deletedBadgeSmall: {
+    backgroundColor: '#FF3B30',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 3,
+    marginLeft: 6,
+  },
+  deletedBadgeSmallText: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  conversationMetaSmall: {
+    fontSize: 11,
+    opacity: 0.7,
+  },
+  // Approval styles
+  approvalItem: {
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+  },
+  approvalItemContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  approvalItemLeft: {
+    flex: 1,
+  },
+  approvalItemRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  approvalItemName: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  approvalItemEmail: {
+    fontSize: 12,
+    opacity: 0.7,
+    marginBottom: 6,
+  },
+  approvalItemMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  approvalItemDate: {
+    fontSize: 11,
+    opacity: 0.6,
+  },
+  approvalBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  approvalBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });
 

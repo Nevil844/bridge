@@ -109,32 +109,32 @@ router.get('/approvals', verifyUser, verifyAdmin, async (req, res) => {
 });
 
 /**
- * POST /api/admin/approvals/:approvalId/approve
- * Approve a request
+ * POST /api/admin/approvals/:userId/approve
+ * Approve a user (set isInvited to true)
  */
-router.post('/approvals/:approvalId/approve', verifyUser, verifyAdmin, async (req, res) => {
+router.post('/approvals/:userId/approve', verifyUser, verifyAdmin, async (req, res) => {
   try {
-    const { approvalId } = req.params;
-    const result = await adminService.approveRequest(approvalId);
+    const { userId } = req.params;
+    const result = await adminService.approveRequest(userId);
     res.json(result);
   } catch (error) {
-    console.error('Error approving request:', error);
-    res.status(500).json({ error: 'Failed to approve request' });
+    console.error('Error approving user:', error);
+    res.status(500).json({ error: error.message || 'Failed to approve user' });
   }
 });
 
 /**
- * DELETE /api/admin/approvals/:approvalId
- * Remove/reject an approval
+ * DELETE /api/admin/approvals/:userId
+ * Remove/reject an approval (set isInvited to false)
  */
-router.delete('/approvals/:approvalId', verifyUser, verifyAdmin, async (req, res) => {
+router.delete('/approvals/:userId', verifyUser, verifyAdmin, async (req, res) => {
   try {
-    const { approvalId } = req.params;
-    const result = await adminService.removeApproval(approvalId);
+    const { userId } = req.params;
+    const result = await adminService.removeApproval(userId);
     res.json(result);
   } catch (error) {
     console.error('Error removing approval:', error);
-    res.status(500).json({ error: 'Failed to remove approval' });
+    res.status(500).json({ error: error.message || 'Failed to remove approval' });
   }
 });
 
