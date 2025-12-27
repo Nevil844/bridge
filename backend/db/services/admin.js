@@ -453,6 +453,129 @@ class AdminService {
       throw new Error('Failed to remove approval');
     }
   }
+
+  /**
+   * Check if a user is an admin
+   */
+  async isAdmin(userId) {
+    const admin = await this.prisma.admin.findUnique({
+      where: { userId },
+    });
+    return !!admin;
+  }
+
+  /**
+   * Get admin by userId
+   */
+  async getAdminByUserId(userId) {
+    return await this.prisma.admin.findUnique({
+      where: { userId },
+      include: { user: true },
+    });
+  }
+
+  /**
+   * Get all admins
+   */
+  async getAllAdmins() {
+    return await this.prisma.admin.findMany({
+      include: { user: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /**
+   * Add a user as admin
+   */
+  async addAdmin(userId, addedByUserId) {
+    // Get user to get email
+    const userService = require('./user');
+    const user = await userService.getUserById(userId);
+    
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Check if already admin
+    const existingAdmin = await this.prisma.admin.findUnique({
+      where: { userId },
+    });
+
+    if (existingAdmin) {
+      throw new Error('User is already an admin');
+    }
+
+    return await this.prisma.admin.create({
+      data: {
+        userId,
+        email: user.email || '',
+        addedBy: addedByUserId,
+      },
+    });
+  }
+
+  /**
+   * Remove admin privileges from a user
+   */
+  async removeAdmin(userId) {
+    const admin = await this.prisma.admin.findUnique({
+      where: { userId },
+    });
+
+    if (!admin) {
+      throw new Error('User is not an admin');
+    }
+
+    return await this.prisma.admin.delete({
+      where: { userId },
+    });
+  }
+
+  /**
+   * Get all integration settings
+   */
+  async getIntegrationSettings() {
+    const settings = await this.prisma.integrationSetting.findMany({
+      orderBy: { provider: 'asc' },
+    });
+
+    // Get all available integrations from registry
+    const integrationRegistry = require('../../mcp/integrations/index.js');
+    const allIntegrations = Object.keys(integrationRegistry);
+
+    // Create a map of existing settings
+    const settingsMap = {};
+    settings.forEach(setting => {
+      settingsMap[setting.provider] = setting;
+    });
+
+    // Return all integrations with their enabled status
+    return allIntegrations.map(provider => {
+      const setting = settingsMap[provider];
+      const registryInfo = integrationRegistry[provider];
+      return {
+        provider,
+        name: registryInfo?.name || provider,
+        description: registryInfo?.description || '',
+        icon: registryInfo?.icon || '',
+        isEnabled: setting ? setting.isEnabled : true, // Default to enabled if no setting exists
+      };
+    });
+  }
+
+  /**
+   * Update integration setting (enable/disable)
+   */
+  async updateIntegrationSetting(provider, isEnabled) {
+    return await this.prisma.integrationSetting.upsert({
+      where: { provider },
+      update: { isEnabled },
+      create: {
+        provider,
+        isEnabled,
+      },
+    });
+  }
 }
 
 module.exports = new AdminService();

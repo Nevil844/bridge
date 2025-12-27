@@ -52,6 +52,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/models', modelsRouter);
 app.use('/api/oauth', oauthRouter);
+app.use('/api/integrations', integrationsRouter); // Integration routes (including /available) - must be before oauthRouter
 app.use('/api/integrations', oauthRouter); // OAuth routes also handle /api/integrations/:type/oauth-url
 app.use('/api/waitlist', waitlistRouter);
 app.use('/api/sample-questions', sampleQuestionsRouter);

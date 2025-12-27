@@ -6,6 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const integrationService = require('../db/services/integration');
+const adminService = require('../db/services/admin');
 const { verifyUser } = require('../middleware/auth');
 
 /**
@@ -30,6 +31,22 @@ router.get('/', verifyUser, async (req, res) => {
   } catch (error) {
     console.error('Error fetching integrations:', error);
     res.status(500).json({ error: 'Failed to fetch integrations' });
+  }
+});
+
+/**
+ * GET /api/integrations/available
+ * Get all integrations with their enabled/disabled status
+ * Returns ALL integrations (both enabled and disabled) so frontend can categorize them
+ */
+router.get('/available', verifyUser, async (req, res) => {
+  try {
+    const settings = await adminService.getIntegrationSettings();
+    // Return ALL integrations with their enabled status
+    res.json({ integrations: settings });
+  } catch (error) {
+    console.error('Error fetching available integrations:', error);
+    res.status(500).json({ error: 'Failed to fetch available integrations' });
   }
 });
 

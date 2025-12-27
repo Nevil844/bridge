@@ -28,6 +28,7 @@ model User {
   userIntegrations UserIntegration[]
   memoryVectors    MemoryVector[]
   tokenUsage       TokenUsage[]
+  admin            Admin?
 
   @@index([email])
   @@index([plan])
@@ -184,5 +185,41 @@ model Waitlist {
   @@index([createdAt])
   @@index([isInvited])
   @@map("waitlist")
+}
+
+// ============================================
+// ADMIN MODEL
+// Multi-admin support - users with admin privileges
+// ============================================
+model Admin {
+  id        String   @id @default(cuid())
+  userId    String   @unique // Reference to User.id
+  email     String   // Store email for quick lookup
+  addedBy   String?  // userId of admin who added this admin
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([email])
+  @@map("admins")
+}
+
+// ============================================
+// INTEGRATION SETTINGS MODEL
+// Admin-controlled visibility of integrations
+// ============================================
+model IntegrationSetting {
+  id          String   @id @default(cuid())
+  provider    String   @unique // "github", "google-drive", "gmail", etc.
+  isEnabled   Boolean  @default(true) // If false, integration won't show in UI
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([provider])
+  @@index([isEnabled])
+  @@map("integration_settings")
 }
 

@@ -291,7 +291,27 @@ export default function IntegrationsScreen() {
   const loadUserIntegrations = async (showInitialLoading = false) => {
     try {
       if (showInitialLoading) setIsInitialLoading(true);
-      // Use authenticated fetch - token is automatically added to headers
+      
+      // Fetch all integrations with their enabled status from backend
+      const availableResponse = await authenticatedFetch(`${API_ENDPOINTS.AVAILABLE_INTEGRATIONS}`);
+      let allIntegrationsFromBackend: any[] = [];
+      
+      if (availableResponse.ok) {
+        const availableData = await availableResponse.json();
+        allIntegrationsFromBackend = availableData.integrations || [];
+      } else {
+        // Fallback: if API fails, treat all hardcoded integrations as enabled
+        console.warn('Failed to fetch integration settings, using fallback');
+        allIntegrationsFromBackend = AVAILABLE_INTEGRATIONS.map(int => ({
+          provider: int.type,
+          name: int.name,
+          description: int.description,
+          icon: int.logo,
+          isEnabled: true,
+        }));
+      }
+      
+      // Fetch user's connected integrations
       const response = await authenticatedFetch(`${API_ENDPOINTS.INTEGRATIONS}`);
       
       if (!response.ok) {
@@ -307,26 +327,64 @@ export default function IntegrationsScreen() {
         throw new Error('Server returned non-JSON response');
       }
       
-      const data = await response.json();
+      const userIntegrationsData = await response.json();
       
-      // Update integrations with user's connected status
-      // Check both 'configured' and 'isActive' for backwards compatibility
-      const updated = AVAILABLE_INTEGRATIONS.map(int => ({
-        ...int,
-        connected: data.integrations.some((ui: any) => 
-          ui.type === int.type && (ui.configured || ui.isActive)
-        ),
-      }));
+      // Create a map of all integrations (from backend + hardcoded) for metadata
+      const allIntegrationsMap = new Map<string, Integration>();
+      [...AVAILABLE_INTEGRATIONS, ...UPCOMING_INTEGRATIONS].forEach(int => {
+        allIntegrationsMap.set(int.type, int);
+      });
       
-      // Also update upcoming integrations (for JIRA and Zomato)
-      const updatedUpcoming = UPCOMING_INTEGRATIONS.map(int => ({
-        ...int,
-        connected: data.integrations.some((ui: any) => 
-          ui.type === int.type && (ui.configured || ui.isActive)
-        ),
-      }));
-      setIntegrations(updated);
-      setUpcomingIntegrations(updatedUpcoming);
+      // Split integrations into enabled (Available) and disabled (Upcoming)
+      const enabledIntegrations: Integration[] = [];
+      const disabledIntegrations: Integration[] = [];
+      
+      allIntegrationsFromBackend.forEach((backendInt: any) => {
+        const metadata = allIntegrationsMap.get(backendInt.provider);
+        const integration: Integration = {
+          id: backendInt.provider,
+          name: backendInt.name || metadata?.name || backendInt.provider,
+          type: backendInt.provider,
+          connected: userIntegrationsData.some((ui: any) => 
+            ui.provider === backendInt.provider && (ui.configured || ui.isActive)
+          ),
+          logo: backendInt.icon || metadata?.logo,
+          description: backendInt.description || metadata?.description || '',
+        };
+        
+        if (backendInt.isEnabled) {
+          enabledIntegrations.push(integration);
+        } else {
+          disabledIntegrations.push(integration);
+        }
+      });
+      
+      // Also include hardcoded integrations that aren't in backend (for backwards compatibility)
+      const backendProviders = new Set(allIntegrationsFromBackend.map((int: any) => int.provider));
+      AVAILABLE_INTEGRATIONS.forEach(int => {
+        if (!backendProviders.has(int.type)) {
+          enabledIntegrations.push({
+            ...int,
+            connected: userIntegrationsData.some((ui: any) => 
+              ui.provider === int.type && (ui.configured || ui.isActive)
+            ),
+          });
+        }
+      });
+      
+      UPCOMING_INTEGRATIONS.forEach(int => {
+        if (!backendProviders.has(int.type)) {
+          disabledIntegrations.push({
+            ...int,
+            connected: userIntegrationsData.some((ui: any) => 
+              ui.provider === int.type && (ui.configured || ui.isActive)
+            ),
+          });
+        }
+      });
+      
+      setIntegrations(enabledIntegrations);
+      setUpcomingIntegrations(disabledIntegrations);
     } catch (error) {
       console.error('Error loading integrations:', error);
     } finally {

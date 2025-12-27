@@ -1,14 +1,14 @@
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { API_ENDPOINTS } from '@/config/api';
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
+import { authenticatedFetch } from '@/utils/api';
 import { useRouter } from 'expo-router';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
-
-const ADMIN_EMAIL = 'neviljobanputra34@gmail.com';
 
 export default function SettingsScreen() {
   const colorScheme = useColorScheme();
@@ -16,7 +16,28 @@ export default function SettingsScreen() {
   const isDark = colorScheme === 'dark';
   const router = useRouter();
   const { user } = useAuth();
-  const isAdmin = user?.email === ADMIN_EMAIL;
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Check if user is admin
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      if (!user?.id) return;
+      
+      try {
+        // Try to access admin endpoint - if successful, user is admin
+        const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.ADMINS);
+        if (response.ok) {
+          setIsAdmin(true);
+        } else {
+          setIsAdmin(false);
+        }
+      } catch (error) {
+        setIsAdmin(false);
+      }
+    };
+
+    checkAdminStatus();
+  }, [user]);
 
   return (
     <ThemedView style={styles.container}>
