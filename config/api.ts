@@ -55,5 +55,14 @@ export const API_ENDPOINTS = {
   },
   WAITLIST: `${API_CONFIG.BASE_URL}/api/waitlist`,
   SAMPLE_QUESTIONS: `${API_CONFIG.BASE_URL}/api/sample-questions`,
+  ADMIN: {
+    DASHBOARD: `${API_CONFIG.BASE_URL}/api/admin/dashboard`,
+    USERS: `${API_CONFIG.BASE_URL}/api/admin/users`,
+    USER_DETAILS: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/users/${userId}`,
+    UPDATE_USER_PLAN: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/users/${userId}/plan`,
+    APPROVALS: `${API_CONFIG.BASE_URL}/api/admin/approvals`,
+    APPROVE: (approvalId: string) => `${API_CONFIG.BASE_URL}/api/admin/approvals/${approvalId}/approve`,
+    REMOVE_APPROVAL: (approvalId: string) => `${API_CONFIG.BASE_URL}/api/admin/approvals/${approvalId}`,
+  },
 };
 

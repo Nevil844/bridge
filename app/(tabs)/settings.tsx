@@ -1,17 +1,22 @@
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 
+const ADMIN_EMAIL = 'neviljobanputra34@gmail.com';
+
 export default function SettingsScreen() {
   const colorScheme = useColorScheme();
   const { topInset, bottomInset } = useSafeAreaPadding({ top: 16, bottom: 24 });
   const isDark = colorScheme === 'dark';
   const router = useRouter();
+  const { user } = useAuth();
+  const isAdmin = user?.email === ADMIN_EMAIL;
 
   return (
     <ThemedView style={styles.container}>
@@ -146,6 +151,48 @@ export default function SettingsScreen() {
               color={isDark ? '#8E8E93' : '#8E8E93'}
             />
           </TouchableOpacity>
+
+          {/* Admin Section - Only visible to admin */}
+          {isAdmin && (
+            <>
+              <View style={[styles.sectionDivider, { borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]} />
+              <ThemedText style={[styles.sectionTitle, { marginBottom: 12 }]}>Admin</ThemedText>
+              
+              <TouchableOpacity
+                style={[
+                  styles.settingButton,
+                  styles.adminButton,
+                  { 
+                    backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                    borderColor: '#FF9500',
+                    borderWidth: 2,
+                  },
+                ]}
+                onPress={() => {
+                  // @ts-ignore - admin route
+                  router.push('/admin');
+                }}>
+                <View style={styles.settingButtonContent}>
+                  <IconSymbol
+                    name="shield.fill"
+                    size={24}
+                    color="#FF9500"
+                  />
+                  <View style={styles.settingButtonText}>
+                    <ThemedText style={[styles.settingButtonTitle, { color: '#FF9500' }]}>Admin Dashboard</ThemedText>
+                    <ThemedText style={styles.settingButtonSubtitle}>
+                      Manage users, view stats, and approvals
+                    </ThemedText>
+                  </View>
+                </View>
+                <IconSymbol
+                  name="chevron.right"
+                  size={20}
+                  color={isDark ? '#8E8E93' : '#8E8E93'}
+                />
+              </TouchableOpacity>
+            </>
+          )}
         </View>
         <View style={styles.footer}>
           <ThemedText style={styles.footerText}>Bridge AI 1.0.0</ThemedText>
@@ -174,6 +221,20 @@ const styles = StyleSheet.create({
   section: {
     paddingHorizontal: 20,
     paddingBottom: 24,
+  },
+  sectionDivider: {
+    borderTopWidth: 1,
+    marginVertical: 24,
+    marginHorizontal: 20,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    paddingHorizontal: 20,
+  },
+  adminButton: {
+    borderColor: '#FF9500',
   },
   footer: {
     paddingHorizontal: 20,
