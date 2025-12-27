@@ -14,8 +14,7 @@
  * - No fallbacks or bypasses
  */
 
-const integrationService = require('../db/services/integration');
-const { getPrismaClient } = require('../db/index');
+// No longer need integrationService - we use req.user.email directly
 
 // Admin email - hardcoded for security
 const ADMIN_EMAIL = 'neviljobanputra34@gmail.com';
@@ -29,48 +28,32 @@ const ADMIN_EMAIL = 'neviljobanputra34@gmail.com';
  */
 async function verifyAdmin(req, res, next) {
   try {
-    // Ensure verifyUser ran first (req.userId should exist)
-    if (!req.userId) {
+    // Ensure verifyUser ran first (req.user should exist)
+    if (!req.user || !req.userId) {
       return res.status(401).json({ 
         error: 'Unauthorized', 
         message: 'User authentication required before admin verification' 
       });
     }
 
-    // Get user's email from Google OAuth integration
-    const prisma = getPrismaClient();
-    const integration = await prisma.userIntegration.findFirst({
-      where: {
-        userId: req.userId,
-        provider: 'google-auth',
-        isActive: true,
-      },
-    });
+    // Get user's email directly from the user object (set by verifyUser)
+    const userEmail = req.user.email;
 
-    if (!integration) {
+    if (!userEmail) {
       return res.status(403).json({ 
         error: 'Forbidden', 
-        message: 'Admin access requires Google OAuth integration' 
-      });
-    }
-
-    // Decrypt credentials to get email
-    let userEmail = null;
-    try {
-      const decryptedCredentials = integrationService.decrypt(integration.credentials);
-      if (decryptedCredentials && typeof decryptedCredentials === 'object') {
-        userEmail = decryptedCredentials.email || decryptedCredentials.user?.email;
-      }
-    } catch (error) {
-      console.error('Error decrypting admin credentials:', error);
-      return res.status(500).json({ 
-        error: 'Internal Server Error', 
-        message: 'Failed to verify admin access' 
+        message: 'User email not found. Admin access requires a valid email address.' 
       });
     }
 
     // Verify email matches admin email (case-sensitive exact match)
-    if (!userEmail || userEmail !== ADMIN_EMAIL) {
+    if (userEmail !== ADMIN_EMAIL) {
+      console.log('Admin access denied:', {
+        userEmail,
+        adminEmail: ADMIN_EMAIL,
+        match: userEmail === ADMIN_EMAIL,
+        userId: req.userId,
+      });
       return res.status(403).json({ 
         error: 'Forbidden', 
         message: 'Admin access denied. This endpoint is restricted to administrators only.' 
@@ -97,26 +80,14 @@ async function verifyAdmin(req, res, next) {
  */
 async function isAdmin(userId) {
   try {
-    const prisma = getPrismaClient();
-    const integration = await prisma.userIntegration.findFirst({
-      where: {
-        userId: userId,
-        provider: 'google-auth',
-        isActive: true,
-      },
-    });
-
-    if (!integration) {
+    const userService = require('../db/services/user');
+    const user = await userService.getUserById(userId);
+    
+    if (!user || !user.email) {
       return false;
     }
 
-    const decryptedCredentials = integrationService.decrypt(integration.credentials);
-    if (decryptedCredentials && typeof decryptedCredentials === 'object') {
-      const userEmail = decryptedCredentials.email || decryptedCredentials.user?.email;
-      return userEmail === ADMIN_EMAIL;
-    }
-
-    return false;
+    return user.email === ADMIN_EMAIL;
   } catch (error) {
     console.error('Error checking admin status:', error);
     return false;
