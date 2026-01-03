@@ -361,14 +361,39 @@ router.patch('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => 
     const { id } = req.params;
     const updateData = req.body;
 
-    // Don't allow updating if already sent
     const existing = await notificationService.getNotificationById(id);
     if (!existing) {
       return res.status(404).json({ error: 'Notification not found' });
     }
 
-    if (existing.status === 'sent' || existing.status === 'sending') {
+    // Allow updating metadata (like cronEnabled) even for sent notifications
+    // But restrict other updates for sent/sending notifications
+    const isMetadataOnlyUpdate = Object.keys(updateData).length === 1 && updateData.metadata !== undefined;
+    
+    if (!isMetadataOnlyUpdate && (existing.status === 'sent' || existing.status === 'sending')) {
       return res.status(400).json({ error: 'Cannot update notification that is already sent or sending' });
+    }
+
+    // For metadata-only updates on sent notifications, only allow cronEnabled changes
+    if (isMetadataOnlyUpdate && (existing.status === 'sent' || existing.status === 'sending')) {
+      const existingMetadata = existing.metadata || {};
+      const newMetadata = updateData.metadata || {};
+      
+      // Only allow cronEnabled to be changed, preserve everything else
+      const allowedMetadata = {
+        ...existingMetadata,
+        cronEnabled: newMetadata.cronEnabled,
+      };
+      
+      // Preserve other important metadata fields
+      if (existingMetadata.cronExpression) {
+        allowedMetadata.cronExpression = existingMetadata.cronExpression;
+      }
+      if (existingMetadata.sentUserIds) {
+        allowedMetadata.sentUserIds = existingMetadata.sentUserIds;
+      }
+      
+      updateData.metadata = allowedMetadata;
     }
 
     const notification = await notificationService.updateNotification(id, updateData);

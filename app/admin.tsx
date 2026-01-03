@@ -380,7 +380,6 @@ export default function AdminScreen() {
           const text = await response.text();
           data = text ? JSON.parse(text) : { notifications: [] };
         } catch (e) {
-          console.error('[Notifications] Failed to parse response:', e);
           data = { notifications: [] };
         }
         
@@ -389,23 +388,20 @@ export default function AdminScreen() {
           ? data.notifications 
           : (Array.isArray(data) ? data : []);
         
-        console.log('[Notifications] Loaded', allNotifications.length, 'total notifications');
-        if (allNotifications.length > 0) {
-          console.log('[Notifications] Sample notification:', allNotifications[0]);
-        }
-        
         // Separate into: active cron, history (sent), and pending one-time
         const activeCron = allNotifications.filter((n: any) => {
           const metadata = n.metadata || {};
           const hasCron = metadata && metadata.cronExpression;
           const cronEnabled = metadata.cronEnabled !== false; // Default to true if not set
-          // Active cron = has cron expression AND enabled AND (pending or sending)
-          return hasCron && cronEnabled && (n.status === 'pending' || n.status === 'sending');
+          // Active cron = has cron expression AND enabled (regardless of status - cron stays in cron section)
+          return hasCron && cronEnabled;
         });
         
         const history = allNotifications.filter((n: any) => {
-          // History = all sent notifications (both cron and one-time)
-          return n.status === 'sent';
+          const metadata = n.metadata || {};
+          const hasCron = metadata && metadata.cronExpression;
+          // History = sent notifications that are NOT cron (cron executions create separate entries)
+          return n.status === 'sent' && !hasCron;
         });
         
         const pendingOneTime = allNotifications.filter((n: any) => {
@@ -414,8 +410,6 @@ export default function AdminScreen() {
           // Pending one-time = no cron AND (pending or sending)
           return !hasCron && (n.status === 'pending' || n.status === 'sending');
         });
-        
-        console.log('[Notifications] Active Cron:', activeCron.length, 'History:', history.length, 'Pending One-Time:', pendingOneTime.length);
 
         // Always set notifications - if reset or empty, show first 5
         if (reset || activeCronNotifications.length === 0) {
@@ -433,9 +427,6 @@ export default function AdminScreen() {
         // Combine for backward compatibility
         setNotifications(allNotifications);
       } else {
-        console.error('Failed to load notifications:', response.status);
-        const errorData = await response.json().catch(() => ({}));
-        console.error('Error data:', errorData);
       }
     } catch (error) {
       console.error('Error loading notifications:', error);
@@ -467,7 +458,8 @@ export default function AdminScreen() {
           const metadata = n.metadata || {};
           const hasCron = metadata && metadata.cronExpression;
           const cronEnabled = metadata.cronEnabled !== false; // Default to true if not set
-          return hasCron && cronEnabled && (n.status === 'pending' || n.status === 'sending');
+          // Active cron = has cron expression AND enabled (regardless of status)
+          return hasCron && cronEnabled;
         });
         const nextBatch = activeCron.slice(activeCronSkip, activeCronSkip + 5);
         setActiveCronNotifications(prev => [...prev, ...nextBatch]);
