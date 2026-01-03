@@ -53,7 +53,7 @@ export function useColorScheme() {
   }, []);
 
   if (isLoading) {
-    return systemColorScheme || 'light';
+    return systemColorScheme || 'dark';
   }
 
   // If user has set a preference, use it (unless it's 'system')
@@ -64,5 +64,5 @@ export function useColorScheme() {
     return 'dark';
   }
   // If 'system' or no preference, use system color scheme
-  return systemColorScheme || 'light';
+  return systemColorScheme || 'dark';
 }
