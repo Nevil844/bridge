@@ -53,20 +53,34 @@ class NotificationService {
   }
 
   /**
-   * Get all notifications
+   * Get all notifications with pagination
    */
-  async getAllNotifications() {
+  async getAllNotifications(skip = 0, take = 5) {
     try {
       const notifications = await this.prisma.notification.findMany({
         orderBy: {
           createdAt: 'desc',
         },
+        skip,
+        take,
       });
 
       return notifications;
     } catch (error) {
       console.error('Error fetching notifications:', error);
       throw new Error('Failed to fetch notifications');
+    }
+  }
+
+  /**
+   * Get notifications count
+   */
+  async getNotificationsCount() {
+    try {
+      return await this.prisma.notification.count();
+    } catch (error) {
+      console.error('Error counting notifications:', error);
+      throw new Error('Failed to count notifications');
     }
   }
 

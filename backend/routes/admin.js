@@ -270,12 +270,16 @@ const notificationSender = require('../services/notificationSender');
 
 /**
  * GET /api/admin/notifications
- * Get all notifications
+ * Get notifications with pagination
+ * Query params: skip, take
  */
 router.get('/notifications', verifyUser, verifyAdmin, async (req, res) => {
   try {
-    const notifications = await notificationService.getAllNotifications();
-    res.json(notifications);
+    const skip = parseInt(req.query.skip) || 0;
+    const take = parseInt(req.query.take) || 5;
+    const notifications = await notificationService.getAllNotifications(skip, take);
+    const total = await notificationService.getNotificationsCount();
+    res.json({ notifications, total, hasMore: skip + take < total });
   } catch (error) {
     console.error('Error fetching notifications:', error);
     res.status(500).json({ error: 'Failed to fetch notifications' });
