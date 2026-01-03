@@ -80,10 +80,12 @@ export default function AdminScreen() {
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [expandedNotificationId, setExpandedNotificationId] = useState<string | null>(null);
   const [expandedSentUsersId, setExpandedSentUsersId] = useState<string | null>(null);
+  const [loadingSentUsers, setLoadingSentUsers] = useState<Record<string, boolean>>({});
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [allUsersList, setAllUsersList] = useState<User[]>([]);
   const [sentUsersMap, setSentUsersMap] = useState<Record<string, User[]>>({});
   const [cronNextOccurrences, setCronNextOccurrences] = useState<Date[]>([]);
+  const [editingNotificationId, setEditingNotificationId] = useState<string | null>(null);
   const [notificationForm, setNotificationForm] = useState({
     title: '',
     message: '',
@@ -381,11 +383,22 @@ export default function AdminScreen() {
 
   // Load sent users for a notification
   const loadSentUsers = async (notificationId: string, userIds: string[]) => {
-    if (sentUsersMap[notificationId]) {
-      return; // Already loaded
+    if (sentUsersMap[notificationId] || loadingSentUsers[notificationId]) {
+      return; // Already loaded or loading
+    }
+
+    if (!userIds || userIds.length === 0) {
+      // No users to load
+      setSentUsersMap(prev => ({
+        ...prev,
+        [notificationId]: [],
+      }));
+      return;
     }
 
     try {
+      setLoadingSentUsers(prev => ({ ...prev, [notificationId]: true }));
+      
       // Fetch user details for each user ID
       const userPromises = userIds.map(async (userId) => {
         try {
@@ -397,6 +410,9 @@ export default function AdminScreen() {
               username: userData.username,
               email: userData.email,
             };
+          } else {
+            console.error(`Failed to load user ${userId}:`, response.status);
+            return null;
           }
         } catch (error) {
           console.error(`Error loading user ${userId}:`, error);
@@ -411,6 +427,16 @@ export default function AdminScreen() {
       }));
     } catch (error) {
       console.error('Error loading sent users:', error);
+      setSentUsersMap(prev => ({
+        ...prev,
+        [notificationId]: [],
+      }));
+    } finally {
+      setLoadingSentUsers(prev => {
+        const updated = { ...prev };
+        delete updated[notificationId];
+        return updated;
+      });
     }
   };
 
@@ -530,6 +556,48 @@ export default function AdminScreen() {
         metadata.cronExpression = notificationForm.cronExpression;
       }
 
+      // If editing, update existing notification
+      if (editingNotificationId) {
+        const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.NOTIFICATION(editingNotificationId), {
+          method: 'PATCH',
+          body: JSON.stringify({
+            title: notificationForm.title,
+            message: notificationForm.message,
+            targetType: notificationForm.targetType,
+            targetValue: notificationForm.targetValue || null,
+            metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+          }),
+        });
+
+        if (response.ok) {
+          setShowNotificationModal(false);
+          setEditingNotificationId(null);
+          setNotificationForm({
+            title: '',
+            message: '',
+            type: 'push',
+            targetType: 'all',
+            targetValue: '',
+            scheduledFor: '',
+            cronExpression: '',
+            scheduleType: 'datetime',
+          });
+          setSelectedUserIds([]);
+          setCronNextOccurrences([]);
+          loadNotifications();
+          if (Platform.OS === 'web') {
+            alert('Notification updated successfully');
+          } else {
+            Alert.alert('Success', 'Notification updated successfully');
+          }
+        } else {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(errorData.error || 'Failed to update notification');
+        }
+        return;
+      }
+
+      // Create new notification
       const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.NOTIFICATIONS, {
         method: 'POST',
         body: JSON.stringify({
@@ -556,6 +624,7 @@ export default function AdminScreen() {
           scheduleType: 'datetime',
         });
         setSelectedUserIds([]);
+        setCronNextOccurrences([]);
         loadNotifications();
         if (Platform.OS === 'web') {
           alert('Notification created successfully');
@@ -633,6 +702,62 @@ export default function AdminScreen() {
         alert('Failed to send notification');
       } else {
         Alert.alert('Error', 'Failed to send notification');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Disable cron (convert to one-time notification)
+  const disableCron = async (id: string) => {
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm('Are you sure you want to disable cron? This will convert it to a one-time notification.')
+      : await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            'Disable Cron',
+            'Are you sure you want to disable cron? This will convert it to a one-time notification.',
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Disable', style: 'destructive', onPress: () => resolve(true) },
+            ]
+          );
+        });
+
+    if (!confirmed) return;
+
+    try {
+      setIsLoading(true);
+      const notification = notifications.find(n => n.id === id);
+      if (!notification) return;
+
+      const metadata = notification.metadata || {};
+      delete metadata.cronExpression;
+
+      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.NOTIFICATION(id), {
+        method: 'PATCH',
+        body: JSON.stringify({
+          metadata: Object.keys(metadata).length > 0 ? metadata : null,
+        }),
+      });
+
+      if (response.ok) {
+        loadNotifications();
+        if (Platform.OS === 'web') {
+          alert('Cron disabled successfully');
+        } else {
+          Alert.alert('Success', 'Cron disabled successfully');
+        }
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || 'Failed to disable cron');
+      }
+    } catch (error) {
+      console.error('Error disabling cron:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to disable cron';
+      if (Platform.OS === 'web') {
+        alert(errorMessage);
+      } else {
+        Alert.alert('Error', errorMessage);
       }
     } finally {
       setIsLoading(false);
@@ -947,16 +1072,16 @@ export default function AdminScreen() {
             { key: 'integrations', label: 'Integrations', icon: 'link' },
             { key: 'notifications', label: 'Notifications', icon: 'envelope' },
           ].map((tab) => (
-            <TouchableOpacity
+          <TouchableOpacity
               key={tab.key}
-              style={[
-                styles.tab,
+            style={[
+              styles.tab,
                 activeTab === tab.key && styles.activeTab,
                 { 
                   borderBottomColor: activeTab === tab.key ? '#FF9500' : 'transparent',
                   backgroundColor: activeTab === tab.key ? (isDark ? 'rgba(255, 149, 0, 0.1)' : 'rgba(255, 149, 0, 0.05)') : 'transparent',
                 },
-              ]}
+            ]}
               onPress={() => setActiveTab(tab.key as any)}>
               <IconSymbol
                 name={tab.icon as any}
@@ -966,8 +1091,8 @@ export default function AdminScreen() {
               />
               <ThemedText style={[styles.tabText, activeTab === tab.key && { color: '#FF9500', fontWeight: '600' }]}>
                 {tab.label}
-              </ThemedText>
-            </TouchableOpacity>
+            </ThemedText>
+          </TouchableOpacity>
           ))}
         </ScrollView>
 
@@ -1075,9 +1200,9 @@ export default function AdminScreen() {
                           <ThemedText style={styles.approvalItemEmail}>{entry.email}</ThemedText>
                           <View style={styles.approvalItemMeta}>
                             {entry.plan && (
-                              <View style={[styles.planBadgeSmall, { backgroundColor: '#4a9eff' }]}>
+                            <View style={[styles.planBadgeSmall, { backgroundColor: '#4a9eff' }]}>
                                 <ThemedText style={styles.planBadgeSmallText}>{entry.plan.toUpperCase()}</ThemedText>
-                              </View>
+                            </View>
                             )}
                             {entry.userId && (
                               <View style={[styles.planBadgeSmall, { backgroundColor: '#8E8E93', marginLeft: entry.plan ? 4 : 0 }]}>
@@ -1173,6 +1298,8 @@ export default function AdminScreen() {
                         scheduleType: 'datetime',
                       });
                       setSelectedUserIds([]);
+                      setCronNextOccurrences([]);
+                      setEditingNotificationId(null);
                       setShowNotificationModal(true);
                     }}>
                     <ThemedText style={styles.approvalBadgeText}>+ New</ThemedText>
@@ -1229,9 +1356,17 @@ export default function AdminScreen() {
                                       const metadata = notification.metadata || {};
                                       const sentUserIds = metadata.sentUserIds || [];
                                       
+                                      console.log('Sent user IDs:', sentUserIds, 'for notification:', notification.id);
+                                      
                                       if (sentUserIds.length > 0 && expandedSentUsersId !== notification.id) {
                                         // Load user details
                                         loadSentUsers(notification.id, sentUserIds);
+                                      } else if (sentUserIds.length === 0) {
+                                        // No users to load, set empty array
+                                        setSentUsersMap(prev => ({
+                                          ...prev,
+                                          [notification.id]: [],
+                                        }));
                                       }
                                       setExpandedSentUsersId(expandedSentUsersId === notification.id ? null : notification.id);
                                     }}>
@@ -1248,7 +1383,12 @@ export default function AdminScreen() {
                                     </View>
                                     {expandedSentUsersId === notification.id && (
                                       <View style={{ marginTop: 8, padding: 12, borderRadius: 8, backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }}>
-                                        {sentUsersMap[notification.id] ? (
+                                        {loadingSentUsers[notification.id] ? (
+                                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                            <ActivityIndicator size="small" color="#FF9500" />
+                                            <ThemedText style={styles.approvalItemDate}>Loading users...</ThemedText>
+                                          </View>
+                                        ) : sentUsersMap[notification.id] ? (
                                           sentUsersMap[notification.id].length > 0 ? (
                                             <ScrollView style={{ maxHeight: 200 }}>
                                               {sentUsersMap[notification.id].map((user) => (
@@ -1259,10 +1399,10 @@ export default function AdminScreen() {
                                               ))}
                                             </ScrollView>
                                           ) : (
-                                            <ThemedText style={styles.approvalItemDate}>Loading users...</ThemedText>
+                                            <ThemedText style={styles.approvalItemDate}>No users found</ThemedText>
                                           )
                                         ) : (
-                                          <ThemedText style={styles.approvalItemDate}>Loading users...</ThemedText>
+                                          <ThemedText style={styles.approvalItemDate}>No user data available</ThemedText>
                                         )}
                                       </View>
                                     )}
@@ -1270,10 +1410,53 @@ export default function AdminScreen() {
                                 )}
 
                                 {metadata.cronExpression && (
-                                  <ThemedText style={styles.approvalItemDate}>
-                                    <ThemedText style={{ fontWeight: '600' }}>Cron: </ThemedText>
-                                    {metadata.cronExpression}
-                                  </ThemedText>
+                                  <View style={{ marginTop: 8 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                      <ThemedText style={styles.approvalItemDate}>
+                                        <ThemedText style={{ fontWeight: '600' }}>Cron: </ThemedText>
+                                        {metadata.cronExpression}
+                                      </ThemedText>
+                                      {notification.status === 'pending' && (
+                                        <TouchableOpacity
+                                          style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', paddingHorizontal: 12, paddingVertical: 6 }]}
+                                          onPress={(e) => {
+                                            e.stopPropagation();
+                                            setEditingNotificationId(notification.id);
+                                            setNotificationForm({
+                                              title: notification.title,
+                                              message: notification.message,
+                                              type: notification.type,
+                                              targetType: notification.targetType,
+                                              targetValue: notification.targetValue || '',
+                                              scheduledFor: notification.scheduledFor || '',
+                                              cronExpression: metadata.cronExpression || '',
+                                              scheduleType: 'cron',
+                                            });
+                                            setSelectedUserIds(notification.targetType === 'specific' && notification.targetValue 
+                                              ? notification.targetValue.split(',').map((id: string) => id.trim()).filter(Boolean)
+                                              : []);
+                                            if (notification.targetType === 'specific') {
+                                              loadUsersForSelection();
+                                            }
+                                            setShowNotificationModal(true);
+                                          }}>
+                                          <ThemedText style={styles.approvalBadgeText}>EDIT</ThemedText>
+                                        </TouchableOpacity>
+                                      )}
+                                    </View>
+                                    {notification.status === 'pending' && (
+                                      <TouchableOpacity
+                                        style={{ marginTop: 8 }}
+                                        onPress={(e) => {
+                                          e.stopPropagation();
+                                          disableCron(notification.id);
+                                        }}>
+                                        <ThemedText style={[styles.approvalItemDate, { color: '#FF3B30' }]}>
+                                          Disable Cron (convert to one-time)
+                                        </ThemedText>
+                                      </TouchableOpacity>
+                                    )}
+                                  </View>
                                 )}
 
                                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
@@ -1831,7 +2014,9 @@ export default function AdminScreen() {
                 style={[styles.approvalBadgeButton, { backgroundColor: '#FF9500', marginTop: 16, opacity: isLoading ? 0.6 : 1 }]}
                 onPress={createNotification}
                 disabled={isLoading}>
-                <ThemedText style={styles.approvalBadgeText}>CREATE NOTIFICATION</ThemedText>
+                <ThemedText style={styles.approvalBadgeText}>
+                  {editingNotificationId ? 'UPDATE NOTIFICATION' : 'CREATE NOTIFICATION'}
+                </ThemedText>
               </TouchableOpacity>
             </View>
           </ScrollView>
