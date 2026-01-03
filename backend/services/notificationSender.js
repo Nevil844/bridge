@@ -28,8 +28,6 @@ class NotificationSender {
       const failedCount = pushResult.failed || 0;
       const sentUserIds = pushResult.sentUserIds || [];
 
-      console.log(`[Notification ${notification.id}] Sent to ${sentCount} users, failed: ${failedCount}, sentUserIds:`, sentUserIds);
-
       // Mark as sent with user IDs
       await notificationService.markAsSent(notification.id, sentCount, failedCount, sentUserIds);
 

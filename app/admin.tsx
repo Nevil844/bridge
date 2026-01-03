@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { authenticatedFetch } from '@/utils/api';
-import { getCronNextOccurrences, formatISTDate } from '@/utils/cronParser';
+import { formatISTDate, getCronNextOccurrences } from '@/utils/cronParser';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
@@ -77,6 +77,12 @@ export default function AdminScreen() {
   const [userIsAdmin, setUserIsAdmin] = useState<boolean>(false);
   const [integrationSettings, setIntegrationSettings] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [cronNotifications, setCronNotifications] = useState<any[]>([]);
+  const [oneTimeNotifications, setOneTimeNotifications] = useState<any[]>([]);
+  const [cronSkip, setCronSkip] = useState(0);
+  const [oneTimeSkip, setOneTimeSkip] = useState(0);
+  const [cronHasMore, setCronHasMore] = useState(false);
+  const [oneTimeHasMore, setOneTimeHasMore] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [expandedNotificationId, setExpandedNotificationId] = useState<string | null>(null);
   const [expandedSentUsersId, setExpandedSentUsersId] = useState<string | null>(null);
@@ -341,28 +347,109 @@ export default function AdminScreen() {
     }
   };
 
-  // Load notifications
-  const loadNotifications = async () => {
+  // Load notifications (separated by cron and one-time)
+  const loadNotifications = async (reset = false) => {
     try {
       setIsLoading(true);
-      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.NOTIFICATIONS);
+      
+      if (reset) {
+        setCronSkip(0);
+        setOneTimeSkip(0);
+        setCronNotifications([]);
+        setOneTimeNotifications([]);
+      }
+
+      // Load all notifications and separate them
+      const response = await authenticatedFetch(`${API_ENDPOINTS.ADMIN.NOTIFICATIONS}?skip=0&take=1000`);
       if (response.ok) {
-        const notificationsData = await response.json();
-        setNotifications(Array.isArray(notificationsData) ? notificationsData : []);
-      } else {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        console.error('Notifications API error:', response.status, errorData);
-        throw new Error(errorData.error || `Failed to load notifications: ${response.status}`);
+        const data = await response.json();
+        const allNotifications = Array.isArray(data.notifications) ? data.notifications : (Array.isArray(data) ? data : []);
+        
+        // Separate cron and one-time
+        const cronOnly = allNotifications.filter((n: any) => {
+          const metadata = n.metadata || {};
+          return metadata.cronExpression;
+        });
+        
+        const oneTimeOnly = allNotifications.filter((n: any) => {
+          const metadata = n.metadata || {};
+          return !metadata.cronExpression;
+        });
+
+        // Load first 5 of each
+        if (reset) {
+          setCronNotifications(cronOnly.slice(0, 5));
+          setOneTimeNotifications(oneTimeOnly.slice(0, 5));
+          setCronSkip(5);
+          setOneTimeSkip(5);
+          setCronHasMore(cronOnly.length > 5);
+          setOneTimeHasMore(oneTimeOnly.length > 5);
+        }
+
+        // Combine for backward compatibility
+        setNotifications(allNotifications);
       }
     } catch (error) {
       console.error('Error loading notifications:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to load notifications';
+      setCronNotifications([]);
+      setOneTimeNotifications([]);
       setNotifications([]);
       if (Platform.OS === 'web') {
         console.warn(`Failed to load notifications: ${errorMessage}`);
       } else {
         Alert.alert('Warning', `Notifications not available: ${errorMessage}`);
       }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load more cron notifications
+  const loadMoreCron = async () => {
+    try {
+      setIsLoading(true);
+      const response = await authenticatedFetch(`${API_ENDPOINTS.ADMIN.NOTIFICATIONS}?skip=0&take=1000`);
+      if (response.ok) {
+        const data = await response.json();
+        const allNotifications = Array.isArray(data.notifications) ? data.notifications : (Array.isArray(data) ? data : []);
+        const cronOnly = allNotifications.filter((n: any) => {
+          const metadata = n.metadata || {};
+          return metadata.cronExpression;
+        });
+        const currentSkip = cronSkip;
+        const nextBatch = cronOnly.slice(currentSkip, currentSkip + 5);
+        setCronNotifications(prev => [...prev, ...nextBatch]);
+        setCronSkip(prev => prev + 5);
+        setCronHasMore(currentSkip + 5 < cronOnly.length);
+      }
+    } catch (error) {
+      console.error('Error loading more cron notifications:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load more one-time notifications
+  const loadMoreOneTime = async () => {
+    try {
+      setIsLoading(true);
+      const response = await authenticatedFetch(`${API_ENDPOINTS.ADMIN.NOTIFICATIONS}?skip=0&take=1000`);
+      if (response.ok) {
+        const data = await response.json();
+        const allNotifications = Array.isArray(data.notifications) ? data.notifications : (Array.isArray(data) ? data : []);
+        const oneTimeOnly = allNotifications.filter((n: any) => {
+          const metadata = n.metadata || {};
+          return !metadata.cronExpression;
+        });
+        const currentSkip = oneTimeSkip;
+        const nextBatch = oneTimeOnly.slice(currentSkip, currentSkip + 5);
+        setOneTimeNotifications(prev => [...prev, ...nextBatch]);
+        setOneTimeSkip(prev => prev + 5);
+        setOneTimeHasMore(currentSkip + 5 < oneTimeOnly.length);
+      }
+    } catch (error) {
+      console.error('Error loading more one-time notifications:', error);
     } finally {
       setIsLoading(false);
     }
@@ -1305,12 +1392,17 @@ export default function AdminScreen() {
                     <ThemedText style={styles.approvalBadgeText}>+ New</ThemedText>
                   </TouchableOpacity>
                 </View>
-                {notifications.length === 0 ? (
-                  <View style={[styles.card, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
-                    <ThemedText style={styles.emptyText}>No notifications found</ThemedText>
-                  </View>
-                ) : (
-                  notifications.map((notification) => {
+
+                {/* Cron Notifications Section */}
+                <View style={{ marginBottom: 24 }}>
+                  <ThemedText style={[styles.cardTitle, { marginBottom: 12 }]}>Cron Notifications</ThemedText>
+                  {cronNotifications.length === 0 ? (
+                    <View style={[styles.card, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+                      <ThemedText style={styles.emptyText}>No cron notifications found</ThemedText>
+                    </View>
+                  ) : (
+                    <>
+                      {cronNotifications.map((notification) => {
                     const isExpanded = expandedNotificationId === notification.id;
                     const metadata = notification.metadata || {};
                     const hasCron = metadata.cronExpression;
@@ -1356,8 +1448,6 @@ export default function AdminScreen() {
                                       const metadata = notification.metadata || {};
                                       const sentUserIds = metadata.sentUserIds || [];
                                       
-                                      console.log('Sent user IDs:', sentUserIds, 'for notification:', notification.id);
-                                      
                                       if (sentUserIds.length > 0 && expandedSentUsersId !== notification.id) {
                                         // Load user details
                                         loadSentUsers(notification.id, sentUserIds);
@@ -1392,9 +1482,8 @@ export default function AdminScreen() {
                                           sentUsersMap[notification.id].length > 0 ? (
                                             <ScrollView style={{ maxHeight: 200 }}>
                                               {sentUsersMap[notification.id].map((user) => (
-                                                <View key={user.id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
-                                                  <ThemedText style={styles.approvalItemName}>{user.username || user.email}</ThemedText>
-                                                  <ThemedText style={styles.approvalItemEmail}>{user.email}</ThemedText>
+                                                <View key={user.id} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
+                                                  <ThemedText style={[styles.approvalItemEmail, { fontSize: 12 }]}>{user.email}</ThemedText>
                                                 </View>
                                               ))}
                                             </ScrollView>
@@ -1416,7 +1505,7 @@ export default function AdminScreen() {
                                         <ThemedText style={{ fontWeight: '600' }}>Cron: </ThemedText>
                                         {metadata.cronExpression}
                                       </ThemedText>
-                                      {notification.status === 'pending' && (
+                                      {(notification.status === 'pending' || notification.status === 'sent') && (
                                         <TouchableOpacity
                                           style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', paddingHorizontal: 12, paddingVertical: 6 }]}
                                           onPress={(e) => {
@@ -1444,7 +1533,7 @@ export default function AdminScreen() {
                                         </TouchableOpacity>
                                       )}
                                     </View>
-                                    {notification.status === 'pending' && (
+                                    {(notification.status === 'pending' || notification.status === 'sent') && (
                                       <TouchableOpacity
                                         style={{ marginTop: 8 }}
                                         onPress={(e) => {
@@ -1526,8 +1615,201 @@ export default function AdminScreen() {
                         </View>
                       </TouchableOpacity>
                     );
-                  })
-                )}
+                  })}
+                      {cronHasMore && (
+                        <TouchableOpacity
+                          style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', marginTop: 12, opacity: isLoading ? 0.6 : 1 }]}
+                          onPress={loadMoreCron}
+                          disabled={isLoading}>
+                          <ThemedText style={styles.approvalBadgeText}>Load 5 More</ThemedText>
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  )}
+                </View>
+
+                {/* One-Time Notifications Section */}
+                <View style={{ marginBottom: 24 }}>
+                  <ThemedText style={[styles.cardTitle, { marginBottom: 12 }]}>One-Time Notifications</ThemedText>
+                  {oneTimeNotifications.length === 0 ? (
+                    <View style={[styles.card, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+                      <ThemedText style={styles.emptyText}>No one-time notifications found</ThemedText>
+                    </View>
+                  ) : (
+                    <>
+                      {oneTimeNotifications.map((notification) => {
+                    const isExpanded = expandedNotificationId === notification.id;
+                    const metadata = notification.metadata || {};
+                    const hasCron = metadata.cronExpression;
+                    const timeDisplay = notification.sentAt 
+                      ? new Date(notification.sentAt).toLocaleString()
+                      : hasCron
+                      ? `Cron: ${metadata.cronExpression}`
+                      : notification.scheduledFor
+                      ? `Scheduled: ${new Date(notification.scheduledFor).toLocaleString()}`
+                      : new Date(notification.createdAt).toLocaleString();
+
+                    return (
+                      <TouchableOpacity
+                        key={notification.id}
+                        style={[styles.approvalItem, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}
+                        onPress={() => setExpandedNotificationId(isExpanded ? null : notification.id)}>
+                        <View style={styles.approvalItemContent}>
+                          <View style={[styles.approvalItemLeft, { flex: 1 }]}>
+                            <ThemedText style={styles.approvalItemName}>{notification.title}</ThemedText>
+                            <ThemedText style={[styles.approvalItemEmail, { marginTop: 4 }]} numberOfLines={isExpanded ? undefined : 2}>
+                              {notification.message}
+                            </ThemedText>
+                            <ThemedText style={[styles.approvalItemDate, { marginTop: 4 }]}>
+                              {timeDisplay}
+                            </ThemedText>
+                            
+                            {isExpanded && (
+                              <View style={{ marginTop: 12, gap: 8 }}>
+                                <View style={styles.approvalItemMeta}>
+                                  <ThemedText style={styles.approvalItemDate}>
+                                    <ThemedText style={{ fontWeight: '600' }}>Target: </ThemedText>
+                                    {notification.targetType === 'all' && 'All Users'}
+                                    {notification.targetType === 'plan' && `Plan: ${notification.targetValue || 'N/A'}`}
+                                    {notification.targetType === 'waitlist' && `Waitlist: ${notification.targetValue || 'All'}`}
+                                    {notification.targetType === 'specific' && `Specific Users (${notification.targetValue?.split(',').length || 0})`}
+                                  </ThemedText>
+                                </View>
+                                
+                                {notification.status === 'sent' && (
+                                  <TouchableOpacity
+                                    onPress={(e) => {
+                                      e.stopPropagation();
+                                      const metadata = notification.metadata || {};
+                                      const sentUserIds = metadata.sentUserIds || [];
+                                      
+                                      if (sentUserIds.length > 0 && expandedSentUsersId !== notification.id) {
+                                        loadSentUsers(notification.id, sentUserIds);
+                                      } else if (sentUserIds.length === 0) {
+                                        setSentUsersMap(prev => ({
+                                          ...prev,
+                                          [notification.id]: [],
+                                        }));
+                                      }
+                                      setExpandedSentUsersId(expandedSentUsersId === notification.id ? null : notification.id);
+                                    }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                      <ThemedText style={styles.approvalItemDate}>
+                                        Sent to {notification.sentCount} users
+                                        {notification.failedCount > 0 && ` (${notification.failedCount} failed)`}
+                                      </ThemedText>
+                                      <IconSymbol
+                                        name={expandedSentUsersId === notification.id ? 'chevron.up' : 'chevron.down'}
+                                        size={16}
+                                        color={isDark ? '#8E8E93' : '#8E8E93'}
+                                      />
+                                    </View>
+                                    {expandedSentUsersId === notification.id && (
+                                      <View style={{ marginTop: 8, padding: 12, borderRadius: 8, backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }}>
+                                        {loadingSentUsers[notification.id] ? (
+                                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                            <ActivityIndicator size="small" color="#FF9500" />
+                                            <ThemedText style={styles.approvalItemDate}>Loading users...</ThemedText>
+                                          </View>
+                                        ) : sentUsersMap[notification.id] ? (
+                                          sentUsersMap[notification.id].length > 0 ? (
+                                            <ScrollView style={{ maxHeight: 200 }}>
+                                              {sentUsersMap[notification.id].map((user) => (
+                                                <View key={user.id} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
+                                                  <ThemedText style={[styles.approvalItemEmail, { fontSize: 12 }]}>{user.email}</ThemedText>
+                                                </View>
+                                              ))}
+                                            </ScrollView>
+                                          ) : (
+                                            <ThemedText style={styles.approvalItemDate}>No users found</ThemedText>
+                                          )
+                                        ) : (
+                                          <ThemedText style={styles.approvalItemDate}>No user data available</ThemedText>
+                                        )}
+                                      </View>
+                                    )}
+                                  </TouchableOpacity>
+                                )}
+
+                                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                                  <TouchableOpacity
+                                    style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', flex: 1, minWidth: 80 }]}
+                                    onPress={(e) => {
+                                      e.stopPropagation();
+                                      handleReplay(notification);
+                                    }}>
+                                    <ThemedText style={styles.approvalBadgeText}>REPLAY</ThemedText>
+                                  </TouchableOpacity>
+                                  
+                                  {notification.status === 'pending' && (
+                                    <>
+                                      <TouchableOpacity
+                                        style={[styles.approvalBadgeButton, { backgroundColor: '#34C759', flex: 1, minWidth: 80, opacity: isLoading ? 0.6 : 1 }]}
+                                        onPress={(e) => {
+                                          e.stopPropagation();
+                                          sendNotification(notification.id);
+                                        }}
+                                        disabled={isLoading}>
+                                        <ThemedText style={styles.approvalBadgeText}>SEND</ThemedText>
+                                      </TouchableOpacity>
+                                      <TouchableOpacity
+                                        style={[styles.approvalBadgeButton, { backgroundColor: '#8E8E93', flex: 1, minWidth: 80, opacity: isLoading ? 0.6 : 1 }]}
+                                        onPress={(e) => {
+                                          e.stopPropagation();
+                                          cancelNotification(notification.id);
+                                        }}
+                                        disabled={isLoading}>
+                                        <ThemedText style={styles.approvalBadgeText}>CANCEL</ThemedText>
+                                      </TouchableOpacity>
+                                    </>
+                                  )}
+                                  
+                                  <TouchableOpacity
+                                    style={[styles.approvalBadgeButton, { backgroundColor: '#FF3B30', flex: 1, minWidth: 80, opacity: isLoading ? 0.6 : 1 }]}
+                                    onPress={(e) => {
+                                      e.stopPropagation();
+                                      deleteNotification(notification.id);
+                                    }}
+                                    disabled={isLoading}>
+                                    <ThemedText style={styles.approvalBadgeText}>DELETE</ThemedText>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            )}
+                          </View>
+                          
+                          {!isExpanded && (
+                            <View style={[
+                              styles.approvalBadgeButton,
+                              {
+                                backgroundColor:
+                                  notification.status === 'sent' ? '#34C759' :
+                                  notification.status === 'sending' ? '#FF9500' :
+                                  notification.status === 'failed' ? '#FF3B30' :
+                                  notification.status === 'cancelled' ? '#8E8E93' :
+                                  '#4a9eff',
+                              }
+                            ]}>
+                              <ThemedText style={styles.approvalBadgeText}>
+                                {notification.status.toUpperCase()}
+                              </ThemedText>
+                            </View>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                      {oneTimeHasMore && (
+                        <TouchableOpacity
+                          style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', marginTop: 12, opacity: isLoading ? 0.6 : 1 }]}
+                          onPress={loadMoreOneTime}
+                          disabled={isLoading}>
+                          <ThemedText style={styles.approvalBadgeText}>Load 5 More</ThemedText>
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  )}
+                </View>
               </View>
             )}
           </>
