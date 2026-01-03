@@ -45,13 +45,13 @@ interface User {
 }
 
 interface ApprovalUser {
-  id: string;
-  userId: string;
-  username: string;
+  id: string; // Waitlist entry ID
   email: string;
-  plan: string;
-  createdAt: string;
   isApproved: boolean;
+  createdAt: string;
+  userId: string | null; // User ID if user exists
+  username: string | null; // Username if user exists
+  plan: string | null; // Plan if user exists
 }
 
 export default function AdminScreen() {
@@ -245,29 +245,30 @@ export default function AdminScreen() {
     }
   };
 
-  // Toggle user approval status with confirmation
-  const toggleApproval = (user: ApprovalUser) => {
-    const action = user.isApproved ? 'ignore' : 'approve';
-    const actionText = user.isApproved ? 'Ignore' : 'Approve';
+  // Toggle waitlist approval status with confirmation
+  const toggleApproval = (waitlistEntry: ApprovalUser) => {
+    const action = waitlistEntry.isApproved ? 'ignore' : 'approve';
+    const actionText = waitlistEntry.isApproved ? 'Ignore' : 'Approve';
+    const displayName = waitlistEntry.username || waitlistEntry.email;
     
     if (Platform.OS === 'web') {
       const confirmed = (typeof window !== 'undefined' && window.confirm) 
         ? window.confirm(
-            `Are you sure you want to ${action} ${user.username || user.email}?\n\n` +
-            `This will ${user.isApproved ? 'revoke' : 'grant'} access to the app.`
+            `Are you sure you want to ${action} ${displayName}?\n\n` +
+            `This will ${waitlistEntry.isApproved ? 'revoke' : 'grant'} access to the app.`
           )
         : confirm(
-            `Are you sure you want to ${action} ${user.username || user.email}?\n\n` +
-            `This will ${user.isApproved ? 'revoke' : 'grant'} access to the app.`
+            `Are you sure you want to ${action} ${displayName}?\n\n` +
+            `This will ${waitlistEntry.isApproved ? 'revoke' : 'grant'} access to the app.`
           );
       if (confirmed) {
-        performApprovalToggle(user);
+        performApprovalToggle(waitlistEntry);
       }
     } else {
       Alert.alert(
-        `${actionText} User`,
-        `Are you sure you want to ${action} ${user.username || user.email}?\n\n` +
-        `This will ${user.isApproved ? 'revoke' : 'grant'} access to the app.`,
+        `${actionText} Waitlist Entry`,
+        `Are you sure you want to ${action} ${displayName}?\n\n` +
+        `This will ${waitlistEntry.isApproved ? 'revoke' : 'grant'} access to the app.`,
         [
           {
             text: 'Cancel',
@@ -275,8 +276,8 @@ export default function AdminScreen() {
           },
           {
             text: actionText,
-            style: user.isApproved ? 'destructive' : 'default',
-            onPress: () => performApprovalToggle(user),
+            style: waitlistEntry.isApproved ? 'destructive' : 'default',
+            onPress: () => performApprovalToggle(waitlistEntry),
           },
         ]
       );
@@ -284,14 +285,14 @@ export default function AdminScreen() {
   };
 
   // Perform the actual approval toggle
-  const performApprovalToggle = async (user: ApprovalUser) => {
+  const performApprovalToggle = async (waitlistEntry: ApprovalUser) => {
     try {
       setIsLoading(true);
-      const endpoint = user.isApproved 
-        ? API_ENDPOINTS.ADMIN.REMOVE_APPROVAL(user.id)
-        : API_ENDPOINTS.ADMIN.APPROVE(user.id);
+      const endpoint = waitlistEntry.isApproved 
+        ? API_ENDPOINTS.ADMIN.REMOVE_APPROVAL(waitlistEntry.id)
+        : API_ENDPOINTS.ADMIN.APPROVE(waitlistEntry.id);
       
-      const method = user.isApproved ? 'DELETE' : 'POST';
+      const method = waitlistEntry.isApproved ? 'DELETE' : 'POST';
       
       const response = await authenticatedFetch(endpoint, {
         method,
@@ -300,11 +301,11 @@ export default function AdminScreen() {
       if (response.ok) {
         // Update local state
         setApprovals(approvals.map(a => 
-          a.id === user.id ? { ...a, isApproved: !a.isApproved } : a
+          a.id === waitlistEntry.id ? { ...a, isApproved: !a.isApproved } : a
         ));
       } else {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errorData.error || `Failed to ${user.isApproved ? 'remove' : 'approve'} user`);
+        throw new Error(errorData.error || `Failed to ${waitlistEntry.isApproved ? 'remove' : 'approve'} waitlist entry`);
       }
     } catch (error) {
       console.error('Error toggling approval:', error);
@@ -751,23 +752,30 @@ export default function AdminScreen() {
               <View style={styles.section}>
                 {approvals.length === 0 ? (
                   <View style={[styles.card, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
-                    <ThemedText style={styles.emptyText}>No users found</ThemedText>
+                    <ThemedText style={styles.emptyText}>No waitlist entries found</ThemedText>
                   </View>
                 ) : (
-                  approvals.map((user) => (
+                  approvals.map((entry) => (
                     <View
-                      key={user.id}
+                      key={entry.id}
                       style={[styles.approvalItem, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
                       <View style={styles.approvalItemContent}>
                         <View style={styles.approvalItemLeft}>
-                          <ThemedText style={styles.approvalItemName}>{user.username || user.email}</ThemedText>
-                          <ThemedText style={styles.approvalItemEmail}>{user.email}</ThemedText>
+                          <ThemedText style={styles.approvalItemName}>{entry.username || entry.email}</ThemedText>
+                          <ThemedText style={styles.approvalItemEmail}>{entry.email}</ThemedText>
                           <View style={styles.approvalItemMeta}>
-                            <View style={[styles.planBadgeSmall, { backgroundColor: '#4a9eff' }]}>
-                              <ThemedText style={styles.planBadgeSmallText}>{user.plan.toUpperCase()}</ThemedText>
-                            </View>
+                            {entry.plan && (
+                              <View style={[styles.planBadgeSmall, { backgroundColor: '#4a9eff' }]}>
+                                <ThemedText style={styles.planBadgeSmallText}>{entry.plan.toUpperCase()}</ThemedText>
+                              </View>
+                            )}
+                            {entry.userId && (
+                              <View style={[styles.planBadgeSmall, { backgroundColor: '#8E8E93', marginLeft: entry.plan ? 4 : 0 }]}>
+                                <ThemedText style={styles.planBadgeSmallText}>USER</ThemedText>
+                              </View>
+                            )}
                             <ThemedText style={styles.approvalItemDate}>
-                              Joined: {new Date(user.createdAt).toLocaleDateString()}
+                              {entry.userId ? 'Joined' : 'Waitlisted'}: {new Date(entry.createdAt).toLocaleDateString()}
                             </ThemedText>
                           </View>
                         </View>
@@ -775,14 +783,14 @@ export default function AdminScreen() {
                           style={[
                             styles.approvalBadgeButton,
                             { 
-                              backgroundColor: user.isApproved ? '#34C759' : '#FF9500',
+                              backgroundColor: entry.isApproved ? '#34C759' : '#FF9500',
                               opacity: isLoading ? 0.6 : 1,
                             }
                           ]}
-                          onPress={() => toggleApproval(user)}
+                          onPress={() => toggleApproval(entry)}
                           disabled={isLoading}>
                           <ThemedText style={styles.approvalBadgeText}>
-                            {user.isApproved ? 'APPROVED' : 'IGNORED'}
+                            {entry.isApproved ? 'APPROVED' : 'PENDING'}
                           </ThemedText>
                         </TouchableOpacity>
                       </View>
