@@ -7,7 +7,72 @@ const notificationService = require('../db/services/notification');
 
 class NotificationSender {
   /**
-   * Send notification to users
+   * Send cron notification - creates a new sent notification entry
+   * while keeping the cron notification as pending for next run
+   */
+  async sendCronNotification(cronNotification) {
+    try {
+      // Get target users
+      const targetUsers = await notificationService.getTargetUsers(cronNotification);
+      
+      if (targetUsers.length === 0) {
+        return { sent: 0, failed: 0, message: 'No target users found' };
+      }
+
+      // Create a new notification entry for this cron execution
+      const sentNotification = await notificationService.createNotification({
+        title: cronNotification.title,
+        message: cronNotification.message,
+        type: 'push',
+        targetType: cronNotification.targetType,
+        targetValue: cronNotification.targetValue,
+        scheduledFor: null, // Already being sent
+        createdBy: cronNotification.createdBy,
+        metadata: {
+          cronNotificationId: cronNotification.id, // Link back to the cron
+        },
+      });
+
+      // Mark the new notification as sending
+      await notificationService.markAsSending(sentNotification.id);
+
+      // Send push notifications
+      const pushResult = await this.sendPushNotification(sentNotification, targetUsers);
+      const sentCount = pushResult.sent || 0;
+      const failedCount = pushResult.failed || 0;
+      const sentUserIds = pushResult.sentUserIds || [];
+
+      // Mark the new notification as sent
+      await notificationService.markAsSent(sentNotification.id, sentCount, failedCount, sentUserIds);
+
+      // Calculate next occurrence and update cron notification's scheduledFor
+      const metadata = cronNotification.metadata || {};
+      const cronExpression = metadata.cronExpression;
+      if (cronExpression) {
+        const { getCronNextOccurrences } = require('../../utils/cronParser');
+        const result = getCronNextOccurrences(cronExpression, 1);
+        if (result.isValid && result.occurrences.length > 0) {
+          const nextOccurrence = result.occurrences[0];
+          // Update the cron notification's scheduledFor to the next occurrence
+          await notificationService.updateNotification(cronNotification.id, {
+            scheduledFor: nextOccurrence,
+          });
+        }
+      }
+
+      return {
+        sent: sentCount,
+        failed: failedCount,
+        total: targetUsers.length,
+      };
+    } catch (error) {
+      console.error('Error sending cron notification:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Send notification to users (for one-time notifications)
    */
   async sendNotification(notification) {
     try {

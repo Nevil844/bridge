@@ -16,34 +16,33 @@ const notificationSender = require('../services/notificationSender');
  */
 async function processNotifications() {
   try {
-    console.log('🔔 Processing scheduled notifications...');
-    
     // Get pending notifications that are ready to send
     const pendingNotifications = await notificationService.getPendingNotifications();
     
     if (pendingNotifications.length === 0) {
-      console.log('   No pending notifications to process');
       return;
     }
-
-    console.log(`   Found ${pendingNotifications.length} notification(s) to process`);
 
     // Process each notification
     for (const notification of pendingNotifications) {
       try {
-        console.log(`   Processing notification: ${notification.id} - "${notification.title}"`);
+        const metadata = notification.metadata || {};
+        const hasCron = metadata && metadata.cronExpression;
         
-        const result = await notificationSender.sendNotification(notification);
-        
-        console.log(`   ✅ Notification sent: ${result.sent} successful, ${result.failed} failed`);
+        if (hasCron) {
+          // For cron notifications, create a new sent notification entry
+          // and keep the cron notification as pending for next run
+          await notificationSender.sendCronNotification(notification);
+        } else {
+          // For one-time notifications, send and mark as sent
+          await notificationSender.sendNotification(notification);
+        }
       } catch (error) {
-        console.error(`   ❌ Error processing notification ${notification.id}:`, error);
+        console.error(`Error processing notification ${notification.id}:`, error);
       }
     }
-
-    console.log('✅ Notification processing complete');
   } catch (error) {
-    console.error('❌ Error in notification processor:', error);
+    console.error('Error in notification processor:', error);
     throw error;
   }
 }
