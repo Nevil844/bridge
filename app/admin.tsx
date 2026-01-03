@@ -77,12 +77,15 @@ export default function AdminScreen() {
   const [userIsAdmin, setUserIsAdmin] = useState<boolean>(false);
   const [integrationSettings, setIntegrationSettings] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
-  const [cronNotifications, setCronNotifications] = useState<any[]>([]);
-  const [oneTimeNotifications, setOneTimeNotifications] = useState<any[]>([]);
-  const [cronSkip, setCronSkip] = useState(0);
-  const [oneTimeSkip, setOneTimeSkip] = useState(0);
-  const [cronHasMore, setCronHasMore] = useState(false);
-  const [oneTimeHasMore, setOneTimeHasMore] = useState(false);
+  const [activeCronNotifications, setActiveCronNotifications] = useState<any[]>([]);
+  const [notificationHistory, setNotificationHistory] = useState<any[]>([]);
+  const [pendingOneTimeNotifications, setPendingOneTimeNotifications] = useState<any[]>([]);
+  const [activeCronSkip, setActiveCronSkip] = useState(0);
+  const [historySkip, setHistorySkip] = useState(0);
+  const [pendingOneTimeSkip, setPendingOneTimeSkip] = useState(0);
+  const [activeCronHasMore, setActiveCronHasMore] = useState(false);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [pendingOneTimeHasMore, setPendingOneTimeHasMore] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [expandedNotificationId, setExpandedNotificationId] = useState<string | null>(null);
   const [expandedSentUsersId, setExpandedSentUsersId] = useState<string | null>(null);
@@ -353,47 +356,93 @@ export default function AdminScreen() {
       setIsLoading(true);
       
       if (reset) {
-        setCronSkip(0);
-        setOneTimeSkip(0);
-        setCronNotifications([]);
-        setOneTimeNotifications([]);
+        setActiveCronSkip(0);
+        setHistorySkip(0);
+        setPendingOneTimeSkip(0);
+        setActiveCronNotifications([]);
+        setNotificationHistory([]);
+        setPendingOneTimeNotifications([]);
       }
 
-      // Load all notifications and separate them
-      const response = await authenticatedFetch(`${API_ENDPOINTS.ADMIN.NOTIFICATIONS}?skip=0&take=1000`);
+      // Load all notifications and separate them - add cache busting to avoid 304
+      const cacheBuster = `?skip=0&take=1000&_t=${Date.now()}`;
+      const response = await authenticatedFetch(`${API_ENDPOINTS.ADMIN.NOTIFICATIONS}${cacheBuster}`, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+        },
+      });
+      
       if (response.ok) {
-        const data = await response.json();
-        const allNotifications = Array.isArray(data.notifications) ? data.notifications : (Array.isArray(data) ? data : []);
+        let data;
+        try {
+          const text = await response.text();
+          data = text ? JSON.parse(text) : { notifications: [] };
+        } catch (e) {
+          console.error('[Notifications] Failed to parse response:', e);
+          data = { notifications: [] };
+        }
         
-        // Separate cron and one-time
-        const cronOnly = allNotifications.filter((n: any) => {
+        // Handle both response formats: { notifications, total, hasMore } or just array
+        const allNotifications = Array.isArray(data.notifications) 
+          ? data.notifications 
+          : (Array.isArray(data) ? data : []);
+        
+        console.log('[Notifications] Loaded', allNotifications.length, 'total notifications');
+        if (allNotifications.length > 0) {
+          console.log('[Notifications] Sample notification:', allNotifications[0]);
+        }
+        
+        // Separate into: active cron, history (sent), and pending one-time
+        const activeCron = allNotifications.filter((n: any) => {
           const metadata = n.metadata || {};
-          return metadata.cronExpression;
+          const hasCron = metadata && metadata.cronExpression;
+          const cronEnabled = metadata.cronEnabled !== false; // Default to true if not set
+          // Active cron = has cron expression AND enabled AND (pending or sending)
+          return hasCron && cronEnabled && (n.status === 'pending' || n.status === 'sending');
         });
         
-        const oneTimeOnly = allNotifications.filter((n: any) => {
-          const metadata = n.metadata || {};
-          return !metadata.cronExpression;
+        const history = allNotifications.filter((n: any) => {
+          // History = all sent notifications (both cron and one-time)
+          return n.status === 'sent';
         });
+        
+        const pendingOneTime = allNotifications.filter((n: any) => {
+          const metadata = n.metadata || {};
+          const hasCron = metadata && metadata.cronExpression;
+          // Pending one-time = no cron AND (pending or sending)
+          return !hasCron && (n.status === 'pending' || n.status === 'sending');
+        });
+        
+        console.log('[Notifications] Active Cron:', activeCron.length, 'History:', history.length, 'Pending One-Time:', pendingOneTime.length);
 
-        // Load first 5 of each
-        if (reset) {
-          setCronNotifications(cronOnly.slice(0, 5));
-          setOneTimeNotifications(oneTimeOnly.slice(0, 5));
-          setCronSkip(5);
-          setOneTimeSkip(5);
-          setCronHasMore(cronOnly.length > 5);
-          setOneTimeHasMore(oneTimeOnly.length > 5);
+        // Always set notifications - if reset or empty, show first 5
+        if (reset || activeCronNotifications.length === 0) {
+          setActiveCronNotifications(activeCron.slice(0, 5));
+          setNotificationHistory(history.slice(0, 5));
+          setPendingOneTimeNotifications(pendingOneTime.slice(0, 5));
+          setActiveCronSkip(5);
+          setHistorySkip(5);
+          setPendingOneTimeSkip(5);
+          setActiveCronHasMore(activeCron.length > 5);
+          setHistoryHasMore(history.length > 5);
+          setPendingOneTimeHasMore(pendingOneTime.length > 5);
         }
 
         // Combine for backward compatibility
         setNotifications(allNotifications);
+      } else {
+        console.error('Failed to load notifications:', response.status);
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Error data:', errorData);
       }
     } catch (error) {
       console.error('Error loading notifications:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to load notifications';
-      setCronNotifications([]);
-      setOneTimeNotifications([]);
+      setActiveCronNotifications([]);
+      setNotificationHistory([]);
+      setPendingOneTimeNotifications([]);
       setNotifications([]);
       if (Platform.OS === 'web') {
         console.warn(`Failed to load notifications: ${errorMessage}`);
@@ -405,51 +454,75 @@ export default function AdminScreen() {
     }
   };
 
-  // Load more cron notifications
-  const loadMoreCron = async () => {
+  // Load more active cron notifications
+  const loadMoreActiveCron = async () => {
     try {
       setIsLoading(true);
-      const response = await authenticatedFetch(`${API_ENDPOINTS.ADMIN.NOTIFICATIONS}?skip=0&take=1000`);
+      const response = await authenticatedFetch(`${API_ENDPOINTS.ADMIN.NOTIFICATIONS}?skip=0&take=1000&_t=${Date.now()}`);
       if (response.ok) {
-        const data = await response.json();
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : { notifications: [] };
         const allNotifications = Array.isArray(data.notifications) ? data.notifications : (Array.isArray(data) ? data : []);
-        const cronOnly = allNotifications.filter((n: any) => {
+        const activeCron = allNotifications.filter((n: any) => {
           const metadata = n.metadata || {};
-          return metadata.cronExpression;
+          const hasCron = metadata && metadata.cronExpression;
+          const cronEnabled = metadata.cronEnabled !== false; // Default to true if not set
+          return hasCron && cronEnabled && (n.status === 'pending' || n.status === 'sending');
         });
-        const currentSkip = cronSkip;
-        const nextBatch = cronOnly.slice(currentSkip, currentSkip + 5);
-        setCronNotifications(prev => [...prev, ...nextBatch]);
-        setCronSkip(prev => prev + 5);
-        setCronHasMore(currentSkip + 5 < cronOnly.length);
+        const nextBatch = activeCron.slice(activeCronSkip, activeCronSkip + 5);
+        setActiveCronNotifications(prev => [...prev, ...nextBatch]);
+        setActiveCronSkip(prev => prev + 5);
+        setActiveCronHasMore(activeCronSkip + 5 < activeCron.length);
       }
     } catch (error) {
-      console.error('Error loading more cron notifications:', error);
+      console.error('Error loading more active cron notifications:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Load more one-time notifications
-  const loadMoreOneTime = async () => {
+  // Load more history notifications
+  const loadMoreHistory = async () => {
     try {
       setIsLoading(true);
-      const response = await authenticatedFetch(`${API_ENDPOINTS.ADMIN.NOTIFICATIONS}?skip=0&take=1000`);
+      const response = await authenticatedFetch(`${API_ENDPOINTS.ADMIN.NOTIFICATIONS}?skip=0&take=1000&_t=${Date.now()}`);
       if (response.ok) {
-        const data = await response.json();
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : { notifications: [] };
         const allNotifications = Array.isArray(data.notifications) ? data.notifications : (Array.isArray(data) ? data : []);
-        const oneTimeOnly = allNotifications.filter((n: any) => {
-          const metadata = n.metadata || {};
-          return !metadata.cronExpression;
-        });
-        const currentSkip = oneTimeSkip;
-        const nextBatch = oneTimeOnly.slice(currentSkip, currentSkip + 5);
-        setOneTimeNotifications(prev => [...prev, ...nextBatch]);
-        setOneTimeSkip(prev => prev + 5);
-        setOneTimeHasMore(currentSkip + 5 < oneTimeOnly.length);
+        const history = allNotifications.filter((n: any) => n.status === 'sent');
+        const nextBatch = history.slice(historySkip, historySkip + 5);
+        setNotificationHistory(prev => [...prev, ...nextBatch]);
+        setHistorySkip(prev => prev + 5);
+        setHistoryHasMore(historySkip + 5 < history.length);
       }
     } catch (error) {
-      console.error('Error loading more one-time notifications:', error);
+      console.error('Error loading more history notifications:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load more pending one-time notifications
+  const loadMorePendingOneTime = async () => {
+    try {
+      setIsLoading(true);
+      const response = await authenticatedFetch(`${API_ENDPOINTS.ADMIN.NOTIFICATIONS}?skip=0&take=1000&_t=${Date.now()}`);
+      if (response.ok) {
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : { notifications: [] };
+        const allNotifications = Array.isArray(data.notifications) ? data.notifications : (Array.isArray(data) ? data : []);
+        const pendingOneTime = allNotifications.filter((n: any) => {
+          const metadata = n.metadata || {};
+          return !metadata || !metadata.cronExpression && (n.status === 'pending' || n.status === 'sending');
+        });
+        const nextBatch = pendingOneTime.slice(pendingOneTimeSkip, pendingOneTimeSkip + 5);
+        setPendingOneTimeNotifications(prev => [...prev, ...nextBatch]);
+        setPendingOneTimeSkip(prev => prev + 5);
+        setPendingOneTimeHasMore(pendingOneTimeSkip + 5 < pendingOneTime.length);
+      }
+    } catch (error) {
+      console.error('Error loading more pending one-time notifications:', error);
     } finally {
       setIsLoading(false);
     }
@@ -671,7 +744,7 @@ export default function AdminScreen() {
           });
           setSelectedUserIds([]);
           setCronNextOccurrences([]);
-          loadNotifications();
+          loadNotifications(true);
           if (Platform.OS === 'web') {
             alert('Notification updated successfully');
           } else {
@@ -795,17 +868,18 @@ export default function AdminScreen() {
     }
   };
 
-  // Disable cron (convert to one-time notification)
-  const disableCron = async (id: string) => {
+  // Toggle cron enabled/disabled state
+  const toggleCron = async (id: string, enable: boolean) => {
+    const action = enable ? 'enable' : 'disable';
     const confirmed = Platform.OS === 'web'
-      ? window.confirm('Are you sure you want to disable cron? This will convert it to a one-time notification.')
+      ? window.confirm(`Are you sure you want to ${action} this cron notification?`)
       : await new Promise<boolean>((resolve) => {
           Alert.alert(
-            'Disable Cron',
-            'Are you sure you want to disable cron? This will convert it to a one-time notification.',
+            `${enable ? 'Enable' : 'Disable'} Cron`,
+            `Are you sure you want to ${action} this cron notification?`,
             [
               { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-              { text: 'Disable', style: 'destructive', onPress: () => resolve(true) },
+              { text: enable ? 'Enable' : 'Disable', style: enable ? 'default' : 'destructive', onPress: () => resolve(true) },
             ]
           );
         });
@@ -818,29 +892,29 @@ export default function AdminScreen() {
       if (!notification) return;
 
       const metadata = notification.metadata || {};
-      delete metadata.cronExpression;
+      metadata.cronEnabled = enable;
 
       const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.NOTIFICATION(id), {
         method: 'PATCH',
         body: JSON.stringify({
-          metadata: Object.keys(metadata).length > 0 ? metadata : null,
+          metadata,
         }),
       });
 
       if (response.ok) {
-        loadNotifications();
+        loadNotifications(true);
         if (Platform.OS === 'web') {
-          alert('Cron disabled successfully');
+          alert(`Cron ${action}d successfully`);
         } else {
-          Alert.alert('Success', 'Cron disabled successfully');
+          Alert.alert('Success', `Cron ${action}d successfully`);
         }
       } else {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errorData.error || 'Failed to disable cron');
+        throw new Error(errorData.error || `Failed to ${action} cron`);
       }
     } catch (error) {
-      console.error('Error disabling cron:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to disable cron';
+      console.error(`Error ${action}ing cron:`, error);
+      const errorMessage = error instanceof Error ? error.message : `Failed to ${action} cron`;
       if (Platform.OS === 'web') {
         alert(errorMessage);
       } else {
@@ -864,7 +938,7 @@ export default function AdminScreen() {
     } else if (activeTab === 'integrations') {
       loadIntegrationSettings();
     } else if (activeTab === 'notifications') {
-      loadNotifications();
+      loadNotifications(true);
     }
   }, [activeTab, isAdmin]);
 
@@ -1393,16 +1467,16 @@ export default function AdminScreen() {
                   </TouchableOpacity>
                 </View>
 
-                {/* Cron Notifications Section */}
+                {/* Active Cron Notifications Section */}
                 <View style={{ marginBottom: 24 }}>
-                  <ThemedText style={[styles.cardTitle, { marginBottom: 12 }]}>Cron Notifications</ThemedText>
-                  {cronNotifications.length === 0 ? (
+                  <ThemedText style={[styles.cardTitle, { marginBottom: 12 }]}>Active Cron Notifications</ThemedText>
+                  {activeCronNotifications.length === 0 ? (
                     <View style={[styles.card, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
-                      <ThemedText style={styles.emptyText}>No cron notifications found</ThemedText>
+                      <ThemedText style={styles.emptyText}>No active cron notifications found</ThemedText>
                     </View>
                   ) : (
                     <>
-                      {cronNotifications.map((notification) => {
+                      {activeCronNotifications.map((notification: any) => {
                     const isExpanded = expandedNotificationId === notification.id;
                     const metadata = notification.metadata || {};
                     const hasCron = metadata.cronExpression;
@@ -1501,10 +1575,17 @@ export default function AdminScreen() {
                                 {metadata.cronExpression && (
                                   <View style={{ marginTop: 8 }}>
                                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                                      <ThemedText style={styles.approvalItemDate}>
-                                        <ThemedText style={{ fontWeight: '600' }}>Cron: </ThemedText>
-                                        {metadata.cronExpression}
-                                      </ThemedText>
+                                      <View style={{ flex: 1 }}>
+                                        <ThemedText style={styles.approvalItemDate}>
+                                          <ThemedText style={{ fontWeight: '600' }}>Cron: </ThemedText>
+                                          {metadata.cronExpression}
+                                        </ThemedText>
+                                        {metadata.cronEnabled === false && (
+                                          <ThemedText style={[styles.approvalItemDate, { color: '#FF3B30', marginTop: 4 }]}>
+                                            (Disabled)
+                                          </ThemedText>
+                                        )}
+                                      </View>
                                       {(notification.status === 'pending' || notification.status === 'sent') && (
                                         <TouchableOpacity
                                           style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', paddingHorizontal: 12, paddingVertical: 6 }]}
@@ -1538,10 +1619,10 @@ export default function AdminScreen() {
                                         style={{ marginTop: 8 }}
                                         onPress={(e) => {
                                           e.stopPropagation();
-                                          disableCron(notification.id);
+                                          toggleCron(notification.id, metadata.cronEnabled === false);
                                         }}>
-                                        <ThemedText style={[styles.approvalItemDate, { color: '#FF3B30' }]}>
-                                          Disable Cron (convert to one-time)
+                                        <ThemedText style={[styles.approvalItemDate, { color: metadata.cronEnabled === false ? '#34C759' : '#FF3B30' }]}>
+                                          {metadata.cronEnabled === false ? 'Enable Cron' : 'Disable Cron'}
                                         </ThemedText>
                                       </TouchableOpacity>
                                     )}
@@ -1616,10 +1697,10 @@ export default function AdminScreen() {
                       </TouchableOpacity>
                     );
                   })}
-                      {cronHasMore && (
+                      {activeCronHasMore && (
                         <TouchableOpacity
                           style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', marginTop: 12, opacity: isLoading ? 0.6 : 1 }]}
-                          onPress={loadMoreCron}
+                          onPress={loadMoreActiveCron}
                           disabled={isLoading}>
                           <ThemedText style={styles.approvalBadgeText}>Load 5 More</ThemedText>
                         </TouchableOpacity>
@@ -1628,16 +1709,255 @@ export default function AdminScreen() {
                   )}
                 </View>
 
-                {/* One-Time Notifications Section */}
+                {/* Notification History Section */}
                 <View style={{ marginBottom: 24 }}>
-                  <ThemedText style={[styles.cardTitle, { marginBottom: 12 }]}>One-Time Notifications</ThemedText>
-                  {oneTimeNotifications.length === 0 ? (
+                  <ThemedText style={[styles.cardTitle, { marginBottom: 12 }]}>Notification History</ThemedText>
+                  <ThemedText style={[styles.approvalItemDate, { marginBottom: 12, fontSize: 12 }]}>
+                    All sent notifications (including cron notifications that have been sent)
+                  </ThemedText>
+                  {notificationHistory.length === 0 ? (
                     <View style={[styles.card, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
-                      <ThemedText style={styles.emptyText}>No one-time notifications found</ThemedText>
+                      <ThemedText style={styles.emptyText}>No notification history found</ThemedText>
                     </View>
                   ) : (
                     <>
-                      {oneTimeNotifications.map((notification) => {
+                      {notificationHistory.map((notification: any) => {
+                    const isExpanded = expandedNotificationId === notification.id;
+                    const metadata = notification.metadata || {};
+                    const hasCron = metadata && metadata.cronExpression;
+                    const timeDisplay = notification.sentAt 
+                      ? `Sent: ${new Date(notification.sentAt).toLocaleString()}${hasCron ? ` (Cron: ${metadata.cronExpression})` : ''}`
+                      : hasCron
+                      ? `Cron: ${metadata.cronExpression}`
+                      : notification.scheduledFor
+                      ? `Scheduled: ${new Date(notification.scheduledFor).toLocaleString()}`
+                      : new Date(notification.createdAt).toLocaleString();
+
+                    return (
+                      <TouchableOpacity
+                        key={notification.id}
+                        style={[styles.approvalItem, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}
+                        onPress={() => setExpandedNotificationId(isExpanded ? null : notification.id)}>
+                        <View style={styles.approvalItemContent}>
+                          <View style={[styles.approvalItemLeft, { flex: 1 }]}>
+                            <ThemedText style={styles.approvalItemName}>{notification.title}</ThemedText>
+                            <ThemedText style={[styles.approvalItemEmail, { marginTop: 4 }]} numberOfLines={isExpanded ? undefined : 2}>
+                              {notification.message}
+                            </ThemedText>
+                            <ThemedText style={[styles.approvalItemDate, { marginTop: 4 }]}>
+                              {timeDisplay}
+                            </ThemedText>
+                            
+                            {isExpanded && (
+                              <View style={{ marginTop: 12, gap: 8 }}>
+                                <View style={styles.approvalItemMeta}>
+                                  <ThemedText style={styles.approvalItemDate}>
+                                    <ThemedText style={{ fontWeight: '600' }}>Target: </ThemedText>
+                                    {notification.targetType === 'all' && 'All Users'}
+                                    {notification.targetType === 'plan' && `Plan: ${notification.targetValue || 'N/A'}`}
+                                    {notification.targetType === 'waitlist' && `Waitlist: ${notification.targetValue || 'All'}`}
+                                    {notification.targetType === 'specific' && `Specific Users (${notification.targetValue?.split(',').length || 0})`}
+                                  </ThemedText>
+                                </View>
+                                
+                                {hasCron && (
+                                  <View style={{ marginTop: 8 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                      <ThemedText style={styles.approvalItemDate}>
+                                        <ThemedText style={{ fontWeight: '600' }}>Cron: </ThemedText>
+                                        {metadata.cronExpression}
+                                        {metadata.cronEnabled === false && (
+                                          <ThemedText style={{ color: '#FF3B30' }}> (Disabled)</ThemedText>
+                                        )}
+                                      </ThemedText>
+                                      {(notification.status === 'pending' || notification.status === 'sent') && (
+                                        <TouchableOpacity
+                                          style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', paddingHorizontal: 12, paddingVertical: 6 }]}
+                                          onPress={(e) => {
+                                            e.stopPropagation();
+                                            setEditingNotificationId(notification.id);
+                                            setNotificationForm({
+                                              title: notification.title,
+                                              message: notification.message,
+                                              type: notification.type,
+                                              targetType: notification.targetType,
+                                              targetValue: notification.targetValue || '',
+                                              scheduledFor: notification.scheduledFor || '',
+                                              cronExpression: metadata.cronExpression || '',
+                                              scheduleType: 'cron',
+                                            });
+                                            setSelectedUserIds(notification.targetType === 'specific' && notification.targetValue 
+                                              ? notification.targetValue.split(',').map((id: string) => id.trim()).filter(Boolean)
+                                              : []);
+                                            if (notification.targetType === 'specific') {
+                                              loadUsersForSelection();
+                                            }
+                                            setShowNotificationModal(true);
+                                          }}>
+                                          <ThemedText style={styles.approvalBadgeText}>EDIT</ThemedText>
+                                        </TouchableOpacity>
+                                      )}
+                                    </View>
+                                    {(notification.status === 'pending' || notification.status === 'sent') && (
+                                      <TouchableOpacity
+                                        style={{ marginTop: 8 }}
+                                        onPress={(e) => {
+                                          e.stopPropagation();
+                                          toggleCron(notification.id, metadata.cronEnabled === false);
+                                        }}>
+                                        <ThemedText style={[styles.approvalItemDate, { color: metadata.cronEnabled === false ? '#34C759' : '#FF3B30' }]}>
+                                          {metadata.cronEnabled === false ? 'Enable Cron' : 'Disable Cron'}
+                                        </ThemedText>
+                                      </TouchableOpacity>
+                                    )}
+                                  </View>
+                                )}
+
+                                {notification.status === 'sent' && (
+                                  <TouchableOpacity
+                                    onPress={(e) => {
+                                      e.stopPropagation();
+                                      const metadata = notification.metadata || {};
+                                      const sentUserIds = metadata.sentUserIds || [];
+                                      
+                                      if (sentUserIds.length > 0 && expandedSentUsersId !== notification.id) {
+                                        loadSentUsers(notification.id, sentUserIds);
+                                      } else if (sentUserIds.length === 0) {
+                                        setSentUsersMap(prev => ({
+                                          ...prev,
+                                          [notification.id]: [],
+                                        }));
+                                      }
+                                      setExpandedSentUsersId(expandedSentUsersId === notification.id ? null : notification.id);
+                                    }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                      <ThemedText style={styles.approvalItemDate}>
+                                        Sent to {notification.sentCount} users
+                                        {notification.failedCount > 0 && ` (${notification.failedCount} failed)`}
+                                      </ThemedText>
+                                      <IconSymbol
+                                        name={expandedSentUsersId === notification.id ? 'chevron.up' : 'chevron.down'}
+                                        size={16}
+                                        color={isDark ? '#8E8E93' : '#8E8E93'}
+                                      />
+                                    </View>
+                                    {expandedSentUsersId === notification.id && (
+                                      <View style={{ marginTop: 8, padding: 12, borderRadius: 8, backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }}>
+                                        {loadingSentUsers[notification.id] ? (
+                                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                            <ActivityIndicator size="small" color="#FF9500" />
+                                            <ThemedText style={styles.approvalItemDate}>Loading users...</ThemedText>
+                                          </View>
+                                        ) : sentUsersMap[notification.id] ? (
+                                          sentUsersMap[notification.id].length > 0 ? (
+                                            <ScrollView style={{ maxHeight: 200 }}>
+                                              {sentUsersMap[notification.id].map((user) => (
+                                                <View key={user.id} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
+                                                  <ThemedText style={[styles.approvalItemEmail, { fontSize: 12 }]}>{user.email}</ThemedText>
+                                                </View>
+                                              ))}
+                                            </ScrollView>
+                                          ) : (
+                                            <ThemedText style={styles.approvalItemDate}>No users found</ThemedText>
+                                          )
+                                        ) : (
+                                          <ThemedText style={styles.approvalItemDate}>No user data available</ThemedText>
+                                        )}
+                                      </View>
+                                    )}
+                                  </TouchableOpacity>
+                                )}
+
+                                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                                  <TouchableOpacity
+                                    style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', flex: 1, minWidth: 80 }]}
+                                    onPress={(e) => {
+                                      e.stopPropagation();
+                                      handleReplay(notification);
+                                    }}>
+                                    <ThemedText style={styles.approvalBadgeText}>REPLAY</ThemedText>
+                                  </TouchableOpacity>
+                                  
+                                  {notification.status === 'pending' && (
+                                    <>
+                                      <TouchableOpacity
+                                        style={[styles.approvalBadgeButton, { backgroundColor: '#34C759', flex: 1, minWidth: 80, opacity: isLoading ? 0.6 : 1 }]}
+                                        onPress={(e) => {
+                                          e.stopPropagation();
+                                          sendNotification(notification.id);
+                                        }}
+                                        disabled={isLoading}>
+                                        <ThemedText style={styles.approvalBadgeText}>SEND</ThemedText>
+                                      </TouchableOpacity>
+                                      <TouchableOpacity
+                                        style={[styles.approvalBadgeButton, { backgroundColor: '#8E8E93', flex: 1, minWidth: 80, opacity: isLoading ? 0.6 : 1 }]}
+                                        onPress={(e) => {
+                                          e.stopPropagation();
+                                          cancelNotification(notification.id);
+                                        }}
+                                        disabled={isLoading}>
+                                        <ThemedText style={styles.approvalBadgeText}>CANCEL</ThemedText>
+                                      </TouchableOpacity>
+                                    </>
+                                  )}
+                                  
+                                  <TouchableOpacity
+                                    style={[styles.approvalBadgeButton, { backgroundColor: '#FF3B30', flex: 1, minWidth: 80, opacity: isLoading ? 0.6 : 1 }]}
+                                    onPress={(e) => {
+                                      e.stopPropagation();
+                                      deleteNotification(notification.id);
+                                    }}
+                                    disabled={isLoading}>
+                                    <ThemedText style={styles.approvalBadgeText}>DELETE</ThemedText>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            )}
+                          </View>
+                          
+                          {!isExpanded && (
+                            <View style={[
+                              styles.approvalBadgeButton,
+                              {
+                                backgroundColor:
+                                  notification.status === 'sent' ? '#34C759' :
+                                  notification.status === 'sending' ? '#FF9500' :
+                                  notification.status === 'failed' ? '#FF3B30' :
+                                  notification.status === 'cancelled' ? '#8E8E93' :
+                                  '#4a9eff',
+                              }
+                            ]}>
+                              <ThemedText style={styles.approvalBadgeText}>
+                                {notification.status.toUpperCase()}
+                              </ThemedText>
+                            </View>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                      {historyHasMore && (
+                        <TouchableOpacity
+                          style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', marginTop: 12, opacity: isLoading ? 0.6 : 1 }]}
+                          onPress={loadMoreHistory}
+                          disabled={isLoading}>
+                          <ThemedText style={styles.approvalBadgeText}>Load 5 More</ThemedText>
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  )}
+                </View>
+
+                {/* Pending One-Time Notifications Section */}
+                <View style={{ marginBottom: 24 }}>
+                  <ThemedText style={[styles.cardTitle, { marginBottom: 12 }]}>Pending One-Time Notifications</ThemedText>
+                  {pendingOneTimeNotifications.length === 0 ? (
+                    <View style={[styles.card, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+                      <ThemedText style={styles.emptyText}>No pending one-time notifications found</ThemedText>
+                    </View>
+                  ) : (
+                    <>
+                      {pendingOneTimeNotifications.map((notification) => {
                     const isExpanded = expandedNotificationId === notification.id;
                     const metadata = notification.metadata || {};
                     const hasCron = metadata.cronExpression;
@@ -1799,10 +2119,10 @@ export default function AdminScreen() {
                       </TouchableOpacity>
                     );
                   })}
-                      {oneTimeHasMore && (
+                      {pendingOneTimeHasMore && (
                         <TouchableOpacity
                           style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', marginTop: 12, opacity: isLoading ? 0.6 : 1 }]}
-                          onPress={loadMoreOneTime}
+                          onPress={loadMorePendingOneTime}
                           disabled={isLoading}>
                           <ThemedText style={styles.approvalBadgeText}>Load 5 More</ThemedText>
                         </TouchableOpacity>
