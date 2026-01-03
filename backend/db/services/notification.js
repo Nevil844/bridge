@@ -172,16 +172,32 @@ class NotificationService {
         },
       });
 
-      // Filter out disabled cron notifications
-      return notifications.filter(notification => {
+      // Filter out disabled cron notifications and log for debugging
+      const filtered = notifications.filter(notification => {
         const metadata = notification.metadata || {};
         const hasCron = metadata.cronExpression;
         if (hasCron) {
           // If cron is explicitly disabled, skip it
-          return metadata.cronEnabled !== false;
+          const isEnabled = metadata.cronEnabled !== false;
+          if (!isEnabled) {
+            console.log(`[${new Date().toISOString()}] ⏸️  Skipping disabled cron notification: ${notification.id}`);
+          }
+          return isEnabled;
         }
         return true;
       });
+
+      // Debug logging
+      if (notifications.length > 0) {
+        console.log(`[${new Date().toISOString()}] 🔍 Found ${notifications.length} pending notification(s) before filtering, ${filtered.length} after filtering`);
+        notifications.forEach(n => {
+          const metadata = n.metadata || {};
+          const hasCron = metadata.cronExpression;
+          console.log(`  - ${n.id}: status=${n.status}, scheduledFor=${n.scheduledFor ? n.scheduledFor.toISOString() : 'null'}, hasCron=${hasCron}, cronEnabled=${metadata.cronEnabled !== false ? 'true' : 'false'}`);
+        });
+      }
+
+      return filtered;
     } catch (error) {
       console.error('Error fetching pending notifications:', error);
       throw new Error('Failed to fetch pending notifications');
