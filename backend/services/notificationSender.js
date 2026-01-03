@@ -28,6 +28,8 @@ class NotificationSender {
       const failedCount = pushResult.failed || 0;
       const sentUserIds = pushResult.sentUserIds || [];
 
+      console.log(`[Notification ${notification.id}] Sent to ${sentCount} users, failed: ${failedCount}, sentUserIds:`, sentUserIds);
+
       // Mark as sent with user IDs
       await notificationService.markAsSent(notification.id, sentCount, failedCount, sentUserIds);
 
@@ -73,13 +75,14 @@ class NotificationSender {
       return {
         sent: result.sent || 0,
         failed: result.failed || 0,
-        sentUserIds: result.sentUserIds || userIds, // Return user IDs that were successfully sent
+        sentUserIds: result.sentUserIds || [], // Return user IDs that were successfully sent
       };
     } catch (error) {
       console.error('Error sending push notifications:', error);
       return {
         sent: 0,
         failed: usersWithIds.length,
+        sentUserIds: [], // Return empty array on error
       };
     }
   }
