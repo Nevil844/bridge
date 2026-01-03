@@ -71,12 +71,43 @@ interface Model {
   provider?: 'gemini' | 'openrouter' | 'bedrock';
 }
 
+// Greeting messages with placeholders
+const GREETING_MESSAGES = [
+  "What's on your mind today?",
+  "What can I help with?",
+  "Where should we begin?",
+  "Hey, {name}. Ready to dive in?",
+  "What's on the agenda today?",
+  "How can I help, {name}?",
+  "Back at it, {name}",
+];
+
+// Function to get a random greeting with name replacement
+function getRandomGreeting(userName?: string | null): string {
+  const randomIndex = Math.floor(Math.random() * GREETING_MESSAGES.length);
+  let greeting = GREETING_MESSAGES[randomIndex];
+  
+  // Extract first name only (split by space and take first part)
+  let name = 'there';
+  if (userName) {
+    const firstName = userName.split(' ')[0];
+    name = firstName || 'there';
+  }
+  
+  // Replace {name} and {username} with first name or fallback
+  greeting = greeting.replace(/{name}/g, name);
+  greeting = greeting.replace(/{username}/g, name);
+  
+  return greeting;
+}
+
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const screenHeight = Dimensions.get('window').height;
   const { user, logout, isAuthenticated } = useAuth();
   const { toolApprovalEnabled } = usePreferences();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [greeting, setGreeting] = useState<string>(() => getRandomGreeting(user?.name));
   const [inputText, setInputText] = useState('');
   const [inputHeight, setInputHeight] = useState(44);
   const [isLoading, setIsLoading] = useState(false);
@@ -205,6 +236,11 @@ export default function HomeScreen() {
 
     checkOnboardingStatus();
   }, [user, isAuthenticated]);
+
+  // Update greeting when user changes
+  useEffect(() => {
+    setGreeting(getRandomGreeting(user?.name));
+  }, [user?.name]);
 
   const handleOnboardingComplete = () => {
     // Move to disclaimer step
@@ -1957,7 +1993,7 @@ export default function HomeScreen() {
             <View style={styles.emptyState}>
               <GlowingOrb />
               <ThemedText style={styles.emptyText}>
-                What's on your mind today?
+                {greeting}
               </ThemedText>
               <ThemedText style={styles.emptySubtext}>
                 Connect integrations to make it more fun!
@@ -2065,8 +2101,8 @@ export default function HomeScreen() {
           )}
         </TouchableWithoutFeedback>
 
-        {/* Sample Questions Button - Only shown when chat is new and no expert/character selected */}
-        {messages.length === 0 && !shouldHideMainContent && !selectedExpertOrCharacter && (
+        {/* Sample Questions Button - Only shown when chat is new, no expert/character selected, and input is empty */}
+        {messages.length === 0 && !shouldHideMainContent && !selectedExpertOrCharacter && inputText.trim().length === 0 && (
           <SampleQuestions userId={userId} onQuestionSelect={handleQuestionSelect} />
         )}
 
@@ -2191,7 +2227,7 @@ export default function HomeScreen() {
                     border: 'none',
                   },
                 ]}
-                placeholder="Message..."
+                placeholder="Ask Anything"
                 placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
                 value={inputText}
                 onChangeText={(text) => {
