@@ -106,28 +106,28 @@ router.get('/approvals', verifyUser, verifyAdmin, async (req, res) => {
 });
 
 /**
- * POST /api/admin/approvals/:userId/approve
- * Approve a user (set isInvited to true)
+ * POST /api/admin/approvals/:waitlistId/approve
+ * Approve a waitlist entry (set isInvited to true)
  */
-router.post('/approvals/:userId/approve', verifyUser, verifyAdmin, async (req, res) => {
+router.post('/approvals/:waitlistId/approve', verifyUser, verifyAdmin, async (req, res) => {
   try {
-    const { userId } = req.params;
-    const result = await adminService.approveRequest(userId);
+    const { waitlistId } = req.params;
+    const result = await adminService.approveRequest(waitlistId);
     res.json(result);
   } catch (error) {
-    console.error('Error approving user:', error);
-    res.status(500).json({ error: error.message || 'Failed to approve user' });
+    console.error('Error approving waitlist entry:', error);
+    res.status(500).json({ error: error.message || 'Failed to approve waitlist entry' });
   }
 });
 
 /**
- * DELETE /api/admin/approvals/:userId
+ * DELETE /api/admin/approvals/:waitlistId
  * Remove/reject an approval (set isInvited to false)
  */
-router.delete('/approvals/:userId', verifyUser, verifyAdmin, async (req, res) => {
+router.delete('/approvals/:waitlistId', verifyUser, verifyAdmin, async (req, res) => {
   try {
-    const { userId } = req.params;
-    const result = await adminService.removeApproval(userId);
+    const { waitlistId } = req.params;
+    const result = await adminService.removeApproval(waitlistId);
     res.json(result);
   } catch (error) {
     console.error('Error removing approval:', error);
