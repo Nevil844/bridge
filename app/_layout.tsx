@@ -34,7 +34,14 @@ export default function RootLayout() {
   
   // Disable auth for testing (set to true to skip login)
   const DISABLE_AUTH_FOR_TESTING = false;
-
+  
+  // Set browser title on web
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      document.title = 'Bridge AI';
+    }
+  }, []);
+  
   // Protect routes: redirect to login if accessing protected routes without authentication
   useEffect(() => {
     if (Platform.OS === 'web' && !isLoading && !isAuthenticated && !isJoinSubdomain) {
