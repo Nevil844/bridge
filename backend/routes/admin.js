@@ -331,8 +331,8 @@ router.post('/notifications', verifyUser, verifyAdmin, async (req, res) => {
     const notificationMetadata = metadata || {};
     if (notificationMetadata.cronExpression) {
       try {
-        const parser = require('cron-parser');
-        const interval = parser.parseExpression(notificationMetadata.cronExpression, {
+        const { CronExpressionParser } = require('cron-parser');
+        const interval = CronExpressionParser.parse(notificationMetadata.cronExpression, {
           tz: 'Asia/Kolkata', // IST timezone
         });
         finalScheduledFor = interval.next().toDate();

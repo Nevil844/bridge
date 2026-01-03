@@ -48,8 +48,8 @@ class NotificationSender {
       const metadata = cronNotification.metadata || {};
       const cronExpression = metadata.cronExpression;
       if (cronExpression) {
-        const parser = require('cron-parser');
-        const interval = parser.parseExpression(cronExpression, {
+        const { CronExpressionParser } = require('cron-parser');
+        const interval = CronExpressionParser.parse(cronExpression, {
           tz: 'Asia/Kolkata', // IST timezone
         });
         const nextOccurrence = interval.next().toDate();
