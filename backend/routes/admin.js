@@ -506,6 +506,17 @@ router.patch('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => 
     }
 
     const notification = await notificationService.updateNotification(id, updateData);
+    
+    // Log the final state after update
+    if (newCronExpression && newCronExpression !== oldCronExpression) {
+      console.log(`[${new Date().toISOString()}] ✅ Cron notification ${id} updated:`);
+      console.log(`  Final scheduledFor: ${notification.scheduledFor ? notification.scheduledFor.toISOString() : 'null'}`);
+      console.log(`  Status: ${notification.status}`);
+      const finalMetadata = notification.metadata || {};
+      console.log(`  Cron expression: ${finalMetadata.cronExpression}`);
+      console.log(`  Cron enabled: ${finalMetadata.cronEnabled !== false ? 'true' : 'false'}`);
+    }
+    
     res.json(notification);
   } catch (error) {
     console.error('Error updating notification:', error);

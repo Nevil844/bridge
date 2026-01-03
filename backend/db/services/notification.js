@@ -162,12 +162,15 @@ class NotificationService {
     try {
       const now = new Date();
       
+      // Use a small buffer (1 second) to account for timing differences
+      const bufferTime = new Date(now.getTime() + 1000);
+      
       const notifications = await this.prisma.notification.findMany({
         where: {
           status: 'pending',
           OR: [
             { scheduledFor: null }, // Immediate send
-            { scheduledFor: { lte: now } }, // Scheduled time has passed
+            { scheduledFor: { lte: bufferTime } }, // Scheduled time has passed (with 1s buffer)
           ],
         },
       });
