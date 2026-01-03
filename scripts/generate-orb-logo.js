@@ -84,7 +84,85 @@ function drawAngularGradientCircle(ctx, x, y, radius, colors) {
   }
 }
 
-// Generate logo with proper padding for Android adaptive icons
+// Generate logo with transparent background (for favicon and splash screen)
+function generateOrbLogoTransparent(outputPath, size = SIZE) {
+  const canvas = createCanvas(size, size);
+  const ctx = canvas.getContext('2d');
+  
+  // No background fill - transparent background
+  
+  const centerX = size / 2;
+  const centerY = size / 2;
+  const scale = size / 200; // Original orb is 200x200
+  
+  // Draw glow layers (from outer to inner)
+  const glowLayers = [
+    { radius: 100 * scale, color: COLORS.glow1, opacity: 0.4 * 0.4 },
+    { radius: 92.5 * scale, color: COLORS.glow2, opacity: 0.4 * 0.45 },
+    { radius: 80 * scale, color: COLORS.glow3, opacity: 0.5 * 0.5 },
+    { radius: 70 * scale, color: COLORS.glow4, opacity: 0.5 * 0.55 },
+    { radius: 60 * scale, color: COLORS.glow5, opacity: 0.6 * 0.6 },
+    { radius: 52.5 * scale, color: COLORS.glow6, opacity: 0.65 * 0.65 },
+  ];
+  
+  glowLayers.forEach(layer => {
+    ctx.save();
+    ctx.globalAlpha = layer.opacity;
+    drawCircle(ctx, centerX, centerY, layer.radius, layer.color);
+    ctx.restore();
+  });
+  
+  // Draw gradient rings
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  const ring1Gradient = createRadialGradient(ctx, centerX, centerY, 0, 50 * scale, COLORS.ring1);
+  drawCircle(ctx, centerX, centerY, 50 * scale, ring1Gradient);
+  ctx.restore();
+  
+  ctx.save();
+  ctx.globalAlpha = 0.4;
+  const ring2Gradient = createRadialGradient(ctx, centerX, centerY, 0, 45 * scale, COLORS.ring2);
+  drawCircle(ctx, centerX, centerY, 45 * scale, ring2Gradient);
+  ctx.restore();
+  
+  // Draw core orb
+  const coreRadius = 40 * scale;
+  const coreGradient = ctx.createRadialGradient(
+    centerX - coreRadius * 0.3,
+    centerY - coreRadius * 0.3,
+    0,
+    centerX,
+    centerY,
+    coreRadius
+  );
+  coreGradient.addColorStop(0, COLORS.core1);
+  coreGradient.addColorStop(0.5, COLORS.core2);
+  coreGradient.addColorStop(1, COLORS.core3);
+  
+  drawCircle(ctx, centerX, centerY, coreRadius, coreGradient);
+  
+  // Add shadow/glow effect around core
+  ctx.save();
+  ctx.shadowColor = '#007AFF';
+  ctx.shadowBlur = 30 * scale;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+  drawCircle(ctx, centerX, centerY, coreRadius, coreGradient);
+  ctx.restore();
+  
+  // Draw inner shine
+  const shineX = centerX - coreRadius * 0.25;
+  const shineY = centerY - coreRadius * 0.25;
+  const shineRadius = 15 * scale;
+  drawCircle(ctx, shineX, shineY, shineRadius, COLORS.shine);
+  
+  // Save to file
+  const buffer = canvas.toBuffer('image/png');
+  fs.writeFileSync(outputPath, buffer);
+  console.log(`✅ Generated orb logo with transparent background: ${outputPath} (${size}x${size}px)`);
+}
+
+// Generate logo with proper padding for Android adaptive icons (with background)
 function generateOrbLogoWithPadding(outputPath, size = SIZE) {
   const canvas = createCanvas(size, size);
   const ctx = canvas.getContext('2d');
@@ -169,21 +247,28 @@ function generateOrbLogoWithPadding(outputPath, size = SIZE) {
 
 // Main execution
 const outputDir = path.join(__dirname, '..', 'assets', 'images');
-const logoPath = path.join(outputDir, 'logo.png');
+const logoPath = path.join(outputDir, 'logo.png'); // With background for Android adaptive icon
+const logoTransparentPath = path.join(outputDir, 'logo-transparent.png'); // Transparent for favicon and splash
 
 // Ensure output directory exists
 if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
 }
 
-// Generate the logo with proper padding for Android adaptive icons
+// Generate both versions
 try {
+  // Generate logo with background for Android adaptive icon
   generateOrbLogoWithPadding(logoPath, SIZE);
-  console.log(`\n✨ Logo generated successfully!`);
-  console.log(`📁 Location: ${logoPath}`);
-  console.log(`\n💡 The logo is centered in the middle 60% (safe zone) for Android adaptive icons.`);
+  
+  // Generate transparent logo for favicon and splash screen
+  generateOrbLogoTransparent(logoTransparentPath, SIZE);
+  
+  console.log(`\n✨ Logos generated successfully!`);
+  console.log(`📁 Logo (with background): ${logoPath}`);
+  console.log(`📁 Logo (transparent): ${logoTransparentPath}`);
+  console.log(`\n💡 Transparent logo works for both light and dark modes!`);
 } catch (error) {
-  console.error('❌ Error generating logo:', error);
+  console.error('❌ Error generating logos:', error);
   process.exit(1);
 }
 
