@@ -249,24 +249,30 @@ function generateOrbLogoWithPadding(outputPath, size = SIZE) {
 const outputDir = path.join(__dirname, '..', 'assets', 'images');
 const logoPath = path.join(outputDir, 'logo.png'); // With background for Android adaptive icon
 const logoTransparentPath = path.join(outputDir, 'logo-transparent.png'); // Transparent for favicon and splash
+const playStoreIconPath = path.join(outputDir, 'play-store-icon.png'); // 512x512 for Google Play Store
 
 // Ensure output directory exists
 if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
 }
 
-// Generate both versions
+// Generate all versions
 try {
-  // Generate logo with background for Android adaptive icon
+  // Generate logo with background for Android adaptive icon (1024x1024)
   generateOrbLogoWithPadding(logoPath, SIZE);
   
-  // Generate transparent logo for favicon and splash screen
+  // Generate transparent logo for favicon and splash screen (1024x1024)
   generateOrbLogoTransparent(logoTransparentPath, SIZE);
   
+  // Generate 512x512 icon for Google Play Store (with background)
+  generateOrbLogoWithPadding(playStoreIconPath, 512);
+  
   console.log(`\n✨ Logos generated successfully!`);
-  console.log(`📁 Logo (with background): ${logoPath}`);
-  console.log(`📁 Logo (transparent): ${logoTransparentPath}`);
+  console.log(`📁 Logo (with background, 1024x1024): ${logoPath}`);
+  console.log(`📁 Logo (transparent, 1024x1024): ${logoTransparentPath}`);
+  console.log(`📁 Play Store Icon (512x512): ${playStoreIconPath}`);
   console.log(`\n💡 Transparent logo works for both light and dark modes!`);
+  console.log(`📱 Play Store icon is ready for Google Play Console upload!`);
 } catch (error) {
   console.error('❌ Error generating logos:', error);
   process.exit(1);
