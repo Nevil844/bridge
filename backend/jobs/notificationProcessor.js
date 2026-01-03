@@ -16,12 +16,17 @@ const notificationSender = require('../services/notificationSender');
  */
 async function processNotifications() {
   try {
+    console.log(`[${new Date().toISOString()}] 🔔 Notification processor running...`);
+    
     // Get pending notifications that are ready to send
     const pendingNotifications = await notificationService.getPendingNotifications();
     
     if (pendingNotifications.length === 0) {
+      console.log(`[${new Date().toISOString()}] ✅ No pending notifications to process`);
       return;
     }
+    
+    console.log(`[${new Date().toISOString()}] 📬 Found ${pendingNotifications.length} pending notification(s) to process`);
 
     // Process each notification
     for (const notification of pendingNotifications) {
@@ -30,17 +35,21 @@ async function processNotifications() {
         const hasCron = metadata && metadata.cronExpression;
         
         if (hasCron) {
+          console.log(`[${new Date().toISOString()}] ⏰ Processing cron notification: ${notification.id} (${notification.title})`);
           // For cron notifications, create a new sent notification entry
           // and keep the cron notification as pending for next run
           await notificationSender.sendCronNotification(notification);
         } else {
+          console.log(`[${new Date().toISOString()}] 📤 Processing one-time notification: ${notification.id} (${notification.title})`);
           // For one-time notifications, send and mark as sent
           await notificationSender.sendNotification(notification);
         }
       } catch (error) {
-        console.error(`Error processing notification ${notification.id}:`, error);
+        console.error(`[${new Date().toISOString()}] ❌ Error processing notification ${notification.id}:`, error);
       }
     }
+    
+    console.log(`[${new Date().toISOString()}] ✅ Notification processor completed`);
   } catch (error) {
     console.error('Error in notification processor:', error);
     throw error;
