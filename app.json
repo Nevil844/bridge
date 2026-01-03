@@ -22,7 +22,9 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/logo-transparent.png"
+      "favicon": "./assets/images/logo-transparent.png",
+      "name": "Bridge AI",
+      "title": "Bridge AI"
     },
     "plugins": [
       "expo-router",
