@@ -277,9 +277,8 @@ class NotificationService {
       });
 
       const metadata = existing?.metadata || {};
-      if (sentUserIds.length > 0) {
-        metadata.sentUserIds = sentUserIds;
-      }
+      // Always store sentUserIds, even if empty (to distinguish from old notifications)
+      metadata.sentUserIds = sentUserIds;
 
       await this.prisma.notification.update({
         where: { id },
