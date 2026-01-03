@@ -435,11 +435,56 @@ router.patch('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => 
     if (newCronExpression && newCronExpression !== oldCronExpression) {
       try {
         const { CronExpressionParser } = require('cron-parser');
+        const now = new Date();
+        
+        // Parse the new cron expression starting from current time
         const interval = CronExpressionParser.parse(newCronExpression, {
           tz: 'Asia/Kolkata', // IST timezone
         });
+        
+        // Get the next occurrence
         const nextOccurrence = interval.next().toDate();
-        updateData.scheduledFor = nextOccurrence;
+        const minutesUntilNext = (nextOccurrence - now) / 1000 / 60;
+        
+        // If the next occurrence is more than 5 minutes away, check if there was a recent occurrence
+        // that should have triggered (e.g., if cron was updated to run more frequently)
+        if (minutesUntilNext > 5) {
+          // Try to find the previous occurrence to see if we missed one
+          try {
+            // Go back 1 hour and find all occurrences, then find the last one before now
+            const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+            const prevInterval = CronExpressionParser.parse(newCronExpression, {
+              tz: 'Asia/Kolkata',
+              currentDate: oneHourAgo,
+            });
+            
+            let lastOccurrence = prevInterval.next().toDate();
+            let currentOccurrence = lastOccurrence;
+            
+            // Find the last occurrence before now
+            while (currentOccurrence < now) {
+              lastOccurrence = currentOccurrence;
+              currentOccurrence = prevInterval.next().toDate();
+              if (currentOccurrence > now) break;
+            }
+            
+            // If the last occurrence was within the last 5 minutes, schedule for immediate execution
+            // This handles the case where the cron was updated to run more frequently
+            const minutesSinceLast = (now - lastOccurrence) / 1000 / 60;
+            if (minutesSinceLast >= 0 && minutesSinceLast <= 5) {
+              // Schedule for immediate execution (within next minute so processor picks it up)
+              updateData.scheduledFor = new Date(now.getTime() + 30 * 1000); // 30 seconds from now
+            } else {
+              updateData.scheduledFor = nextOccurrence;
+            }
+          } catch (e) {
+            // Fallback to next occurrence if we can't calculate previous
+            updateData.scheduledFor = nextOccurrence;
+          }
+        } else {
+          // Next occurrence is soon (within 5 minutes), use it
+          updateData.scheduledFor = nextOccurrence;
+        }
       } catch (error) {
         console.error('Error parsing cron expression during update:', error);
         return res.status(400).json({ error: 'Invalid cron expression' });
