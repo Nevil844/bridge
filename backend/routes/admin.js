@@ -418,6 +418,34 @@ router.patch('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => 
       updateData.metadata = allowedMetadata;
     }
 
+    // If cron expression is being updated, recalculate scheduledFor immediately
+    // Merge metadata to preserve existing fields (like cronEnabled, sentUserIds)
+    if (updateData.metadata !== undefined) {
+      updateData.metadata = {
+        ...existingMetadata,
+        ...updateData.metadata,
+      };
+    }
+    
+    const finalMetadata = updateData.metadata || existingMetadata;
+    const newCronExpression = finalMetadata.cronExpression;
+    const oldCronExpression = existingMetadata.cronExpression;
+    
+    // If cron expression changed (or is being set for the first time), recalculate next occurrence
+    if (newCronExpression && newCronExpression !== oldCronExpression) {
+      try {
+        const { CronExpressionParser } = require('cron-parser');
+        const interval = CronExpressionParser.parse(newCronExpression, {
+          tz: 'Asia/Kolkata', // IST timezone
+        });
+        const nextOccurrence = interval.next().toDate();
+        updateData.scheduledFor = nextOccurrence;
+      } catch (error) {
+        console.error('Error parsing cron expression during update:', error);
+        return res.status(400).json({ error: 'Invalid cron expression' });
+      }
+    }
+
     const notification = await notificationService.updateNotification(id, updateData);
     res.json(notification);
   } catch (error) {
