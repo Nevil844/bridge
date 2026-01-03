@@ -4,8 +4,8 @@
  * 
  * Run this periodically via cron or scheduler:
  *   node jobs/notificationProcessor.js
- * Or use node-cron in server.js:
- *   cron.schedule('*/5 * * * *', () => require('./jobs/notificationProcessor').run());
+ * Or use node-cron in server.js (every 5 minutes):
+ *   cron.schedule('every 5 minutes', () => require('./jobs/notificationProcessor').run());
  */
 
 const notificationService = require('../db/services/notification');
