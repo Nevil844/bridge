@@ -55,7 +55,7 @@ export default function PreferencesScreen() {
     if (themePreference === 'light') return 'light';
     if (themePreference === 'dark') return 'dark';
     // System or no preference - use system color scheme
-    return systemColorScheme || 'light';
+    return systemColorScheme || 'dark';
   };
 
   const currentTheme = getCurrentTheme();
