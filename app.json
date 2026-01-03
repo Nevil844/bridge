@@ -44,6 +44,15 @@
             "backgroundColor": "#151718"
           }
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/logo-transparent.png",
+          "color": "#FF9500",
+          "sounds": ["default"],
+          "mode": "production"
+        }
       ]
     ],
     "experiments": {

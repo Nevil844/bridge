@@ -56,6 +56,11 @@ export const API_ENDPOINTS = {
   },
   WAITLIST: `${API_CONFIG.BASE_URL}/api/waitlist`,
   SAMPLE_QUESTIONS: `${API_CONFIG.BASE_URL}/api/sample-questions`,
+  NOTIFICATIONS: {
+    REGISTER: `${API_CONFIG.BASE_URL}/api/notifications/register`,
+    UNREGISTER: `${API_CONFIG.BASE_URL}/api/notifications/unregister`,
+    TOKENS: `${API_CONFIG.BASE_URL}/api/notifications/tokens`,
+  },
   ADMIN: {
     DASHBOARD: `${API_CONFIG.BASE_URL}/api/admin/dashboard`,
     USERS: `${API_CONFIG.BASE_URL}/api/admin/users`,
@@ -70,6 +75,10 @@ export const API_ENDPOINTS = {
     ADMINS: `${API_CONFIG.BASE_URL}/api/admin/admins`,
     ADD_ADMIN: `${API_CONFIG.BASE_URL}/api/admin/admins`,
     REMOVE_ADMIN: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/admins/${userId}`,
+    NOTIFICATIONS: `${API_CONFIG.BASE_URL}/api/admin/notifications`,
+    NOTIFICATION: (id: string) => `${API_CONFIG.BASE_URL}/api/admin/notifications/${id}`,
+    SEND_NOTIFICATION: (id: string) => `${API_CONFIG.BASE_URL}/api/admin/notifications/${id}/send`,
+    CANCEL_NOTIFICATION: (id: string) => `${API_CONFIG.BASE_URL}/api/admin/notifications/${id}/cancel`,
   },
 };
 

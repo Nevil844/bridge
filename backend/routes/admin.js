@@ -261,5 +261,192 @@ router.patch('/integrations/:provider', verifyUser, verifyAdmin, async (req, res
   }
 });
 
+/**
+ * NOTIFICATION ROUTES
+ */
+
+const notificationService = require('../db/services/notification');
+const notificationSender = require('../services/notificationSender');
+
+/**
+ * GET /api/admin/notifications
+ * Get all notifications
+ */
+router.get('/notifications', verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const notifications = await notificationService.getAllNotifications();
+    res.json(notifications);
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({ error: 'Failed to fetch notifications' });
+  }
+});
+
+/**
+ * GET /api/admin/notifications/:id
+ * Get notification by ID
+ */
+router.get('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const notification = await notificationService.getNotificationById(id);
+    
+    if (!notification) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+
+    res.json(notification);
+  } catch (error) {
+    console.error('Error fetching notification:', error);
+    res.status(500).json({ error: 'Failed to fetch notification' });
+  }
+});
+
+/**
+ * POST /api/admin/notifications
+ * Create a new notification
+ */
+router.post('/notifications', verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const {
+      title,
+      message,
+      type,
+      targetType,
+      targetValue,
+      scheduledFor,
+      metadata,
+    } = req.body;
+
+    if (!title || !message) {
+      return res.status(400).json({ error: 'Title and message are required' });
+    }
+
+    const notification = await notificationService.createNotification({
+      title,
+      message,
+      type: type || 'email',
+      targetType: targetType || 'all',
+      targetValue,
+      scheduledFor,
+      createdBy: req.userId,
+      metadata,
+    });
+
+    // If scheduledFor is null or in the past, send immediately
+    if (!scheduledFor || new Date(scheduledFor) <= new Date()) {
+      // Send in background (don't wait)
+      notificationSender.sendNotification(notification).catch(err => {
+        console.error('Error sending notification in background:', err);
+      });
+    }
+
+    res.json(notification);
+  } catch (error) {
+    console.error('Error creating notification:', error);
+    res.status(500).json({ error: error.message || 'Failed to create notification' });
+  }
+});
+
+/**
+ * PATCH /api/admin/notifications/:id
+ * Update notification
+ */
+router.patch('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    // Don't allow updating if already sent
+    const existing = await notificationService.getNotificationById(id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+
+    if (existing.status === 'sent' || existing.status === 'sending') {
+      return res.status(400).json({ error: 'Cannot update notification that is already sent or sending' });
+    }
+
+    const notification = await notificationService.updateNotification(id, updateData);
+    res.json(notification);
+  } catch (error) {
+    console.error('Error updating notification:', error);
+    res.status(500).json({ error: error.message || 'Failed to update notification' });
+  }
+});
+
+/**
+ * DELETE /api/admin/notifications/:id
+ * Delete notification
+ */
+router.delete('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const existing = await notificationService.getNotificationById(id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+
+    if (existing.status === 'sending') {
+      return res.status(400).json({ error: 'Cannot delete notification that is currently sending' });
+    }
+
+    await notificationService.deleteNotification(id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting notification:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete notification' });
+  }
+});
+
+/**
+ * POST /api/admin/notifications/:id/cancel
+ * Cancel a pending notification
+ */
+router.post('/notifications/:id/cancel', verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const notification = await notificationService.cancelNotification(id);
+    res.json(notification);
+  } catch (error) {
+    console.error('Error cancelling notification:', error);
+    res.status(500).json({ error: error.message || 'Failed to cancel notification' });
+  }
+});
+
+/**
+ * POST /api/admin/notifications/:id/send
+ * Manually trigger sending a notification
+ */
+router.post('/notifications/:id/send', verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const notification = await notificationService.getNotificationById(id);
+    
+    if (!notification) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+
+    if (notification.status === 'sent') {
+      return res.status(400).json({ error: 'Notification has already been sent' });
+    }
+
+    if (notification.status === 'sending') {
+      return res.status(400).json({ error: 'Notification is currently being sent' });
+    }
+
+    // Send in background
+    notificationSender.sendNotification(notification).catch(err => {
+      console.error('Error sending notification:', err);
+    });
+
+    res.json({ success: true, message: 'Notification sending started' });
+  } catch (error) {
+    console.error('Error triggering notification send:', error);
+    res.status(500).json({ error: error.message || 'Failed to send notification' });
+  }
+});
+
 module.exports = router;
 

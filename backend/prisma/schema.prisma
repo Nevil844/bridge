@@ -29,6 +29,7 @@ model User {
   memoryVectors    MemoryVector[]
   tokenUsage       TokenUsage[]
   admin            Admin?
+  deviceTokens     DeviceToken[]
 
   @@index([email])
   @@index([plan])
@@ -221,5 +222,53 @@ model IntegrationSetting {
   @@index([provider])
   @@index([isEnabled])
   @@map("integration_settings")
+}
+
+// ============================================
+// NOTIFICATION MODEL
+// Admin-created notifications for users
+// ============================================
+model Notification {
+  id            String    @id @default(cuid())
+  title         String
+  message       String    @db.Text
+  type          String    // "email" | "in_app" | "push" | "all"
+  targetType    String    // "all" | "plan" | "waitlist" | "specific"
+  targetValue   String?   // Plan name, waitlist status, or comma-separated user IDs
+  scheduledFor  DateTime? // If null, send immediately
+  sentAt        DateTime? // When notification was actually sent
+  status        String    @default("pending") // "pending" | "sending" | "sent" | "failed" | "cancelled"
+  sentCount     Int       @default(0) // Number of users notified
+  failedCount   Int       @default(0) // Number of failed sends
+  createdBy     String    // Admin userId who created this
+  metadata      Json?     // Additional data (email subject, push payload, etc.)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status, scheduledFor])
+  @@index([createdBy])
+  @@index([createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+// ============================================
+// DEVICE TOKEN MODEL
+// Push notification device tokens for users
+// ============================================
+model DeviceToken {
+  id          String   @id @default(cuid())
+  userId      String
+  token       String   @unique // Expo push token
+  platform    String   // "ios" | "android" | "web"
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+  @@index([token])
+  @@map("device_tokens")
 }
 
