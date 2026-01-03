@@ -148,6 +148,18 @@ app.get('/api/mcp/status', verifyUser, async (req, res) => {
   }
 });
 
+// Schedule notification processor to run every 5 minutes
+const cron = require('node-cron');
+const notificationProcessor = require('./jobs/notificationProcessor');
+
+// Run notification processor every 5 minutes to check for pending notifications
+cron.schedule('*/5 * * * *', () => {
+  notificationProcessor.processNotifications().catch(err => {
+    console.error('Error in scheduled notification processor:', err);
+  });
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`${appConfig.appName} backend running on http://localhost:${PORT}`);
+  console.log('📅 Notification processor scheduled to run every 5 minutes');
 });

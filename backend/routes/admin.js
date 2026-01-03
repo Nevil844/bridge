@@ -326,19 +326,36 @@ router.post('/notifications', verifyUser, verifyAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Title and message are required' });
     }
 
+    // If this is a cron notification, calculate the first occurrence
+    let finalScheduledFor = scheduledFor;
+    const notificationMetadata = metadata || {};
+    if (notificationMetadata.cronExpression) {
+      try {
+        const parser = require('cron-parser');
+        const interval = parser.parseExpression(notificationMetadata.cronExpression, {
+          tz: 'Asia/Kolkata', // IST timezone
+        });
+        finalScheduledFor = interval.next().toDate();
+      } catch (error) {
+        console.error('Error parsing cron expression:', error);
+        return res.status(400).json({ error: 'Invalid cron expression' });
+      }
+    }
+
     const notification = await notificationService.createNotification({
       title,
       message,
       type: 'push', // Only push notifications supported
       targetType: targetType || 'all',
       targetValue,
-      scheduledFor,
+      scheduledFor: finalScheduledFor,
       createdBy: req.userId,
       metadata,
     });
 
-    // If scheduledFor is null or in the past, send immediately
-    if (!scheduledFor || new Date(scheduledFor) <= new Date()) {
+    // For non-cron notifications: if scheduledFor is null or in the past, send immediately
+    // Cron notifications should wait for their scheduled time
+    if (!notificationMetadata.cronExpression && (!finalScheduledFor || new Date(finalScheduledFor) <= new Date())) {
       // Send in background (don't wait)
       notificationSender.sendNotification(notification).catch(err => {
         console.error('Error sending notification in background:', err);
@@ -462,18 +479,33 @@ router.post('/notifications/:id/send', verifyUser, verifyAdmin, async (req, res)
       return res.status(404).json({ error: 'Notification not found' });
     }
 
-    if (notification.status === 'sent') {
-      return res.status(400).json({ error: 'Notification has already been sent' });
+    // Check if this is a cron notification (schedule)
+    const metadata = notification.metadata || {};
+    const isCronNotification = metadata.cronExpression;
+
+    // For cron notifications, always allow sending (they're schedules that can fire multiple times)
+    if (!isCronNotification) {
+      // For regular notifications, check status
+      if (notification.status === 'sent') {
+        return res.status(400).json({ error: 'Notification has already been sent' });
+      }
+
+      if (notification.status === 'sending') {
+        return res.status(400).json({ error: 'Notification is currently being sent' });
+      }
     }
 
-    if (notification.status === 'sending') {
-      return res.status(400).json({ error: 'Notification is currently being sent' });
+    // For cron notifications, use sendCronNotification to create a new sent notification entry
+    // For regular notifications, use sendNotification
+    if (isCronNotification) {
+      notificationSender.sendCronNotification(notification).catch(err => {
+        console.error('Error sending cron notification:', err);
+      });
+    } else {
+      notificationSender.sendNotification(notification).catch(err => {
+        console.error('Error sending notification:', err);
+      });
     }
-
-    // Send in background
-    notificationSender.sendNotification(notification).catch(err => {
-      console.error('Error sending notification:', err);
-    });
 
     res.json({ success: true, message: 'Notification sending started' });
   } catch (error) {
