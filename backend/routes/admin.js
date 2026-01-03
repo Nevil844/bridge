@@ -366,17 +366,25 @@ router.patch('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => 
       return res.status(404).json({ error: 'Notification not found' });
     }
 
+    // Check if this is a cron notification (schedule) - cron notifications should always be editable
+    const existingMetadata = existing.metadata || {};
+    const isCronNotification = existingMetadata.cronExpression;
+    
     // Allow updating metadata (like cronEnabled) even for sent notifications
-    // But restrict other updates for sent/sending notifications
+    // But restrict other updates for sent/sending notifications (unless it's a cron)
     const isMetadataOnlyUpdate = Object.keys(updateData).length === 1 && updateData.metadata !== undefined;
     
-    if (!isMetadataOnlyUpdate && (existing.status === 'sent' || existing.status === 'sending')) {
+    // Cron notifications are schedules and should always be editable
+    if (isCronNotification) {
+      // Allow all updates to cron notifications regardless of status
+      // Cron notifications are schedules, not messages, so they can always be edited
+    } else if (!isMetadataOnlyUpdate && (existing.status === 'sent' || existing.status === 'sending')) {
+      // For non-cron notifications, block updates if already sent/sending
       return res.status(400).json({ error: 'Cannot update notification that is already sent or sending' });
     }
 
-    // For metadata-only updates on sent notifications, only allow cronEnabled changes
-    if (isMetadataOnlyUpdate && (existing.status === 'sent' || existing.status === 'sending')) {
-      const existingMetadata = existing.metadata || {};
+    // For metadata-only updates on sent notifications (non-cron), only allow cronEnabled changes
+    if (!isCronNotification && isMetadataOnlyUpdate && (existing.status === 'sent' || existing.status === 'sending')) {
       const newMetadata = updateData.metadata || {};
       
       // Only allow cronEnabled to be changed, preserve everything else
@@ -386,9 +394,6 @@ router.patch('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => 
       };
       
       // Preserve other important metadata fields
-      if (existingMetadata.cronExpression) {
-        allowedMetadata.cronExpression = existingMetadata.cronExpression;
-      }
       if (existingMetadata.sentUserIds) {
         allowedMetadata.sentUserIds = existingMetadata.sentUserIds;
       }

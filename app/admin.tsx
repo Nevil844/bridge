@@ -394,9 +394,8 @@ export default function AdminScreen() {
         const activeCron = allNotifications.filter((n: any) => {
           const metadata = n.metadata || {};
           const hasCron = metadata && metadata.cronExpression;
-          const cronEnabled = metadata.cronEnabled !== false; // Default to true if not set
-          // Active cron = has cron expression AND enabled (these are schedules, stay in cron section always)
-          return hasCron && cronEnabled;
+          // Show ALL cron notifications (enabled and disabled) - they're schedules, not messages
+          return hasCron;
         });
         
         const history = allNotifications.filter((n: any) => {
@@ -459,9 +458,8 @@ export default function AdminScreen() {
         const activeCron = allNotifications.filter((n: any) => {
           const metadata = n.metadata || {};
           const hasCron = metadata && metadata.cronExpression;
-          const cronEnabled = metadata.cronEnabled !== false; // Default to true if not set
-          // Active cron = has cron expression AND enabled (regardless of status)
-          return hasCron && cronEnabled;
+          // Show ALL cron notifications (enabled and disabled) - they're schedules, not messages
+          return hasCron;
         });
         const nextBatch = activeCron.slice(activeCronSkip, activeCronSkip + 5);
         setActiveCronNotifications(prev => [...prev, ...nextBatch]);
@@ -1473,13 +1471,12 @@ export default function AdminScreen() {
                       {activeCronNotifications.map((notification: any) => {
                     const isExpanded = expandedNotificationId === notification.id;
                     const metadata = notification.metadata || {};
-                    const hasCron = metadata.cronExpression;
-                    const timeDisplay = notification.sentAt 
-                      ? new Date(notification.sentAt).toLocaleString()
-                      : hasCron
-                      ? `Cron: ${metadata.cronExpression}`
-                      : notification.scheduledFor
-                      ? `Scheduled: ${new Date(notification.scheduledFor).toLocaleString()}`
+                    const cronExpression = metadata.cronExpression;
+                    // Cron notifications show next scheduled time, not sent time (cron is a schedule, not a message)
+                    const timeDisplay = notification.scheduledFor
+                      ? `Next: ${new Date(notification.scheduledFor).toLocaleString()}`
+                      : cronExpression
+                      ? `Cron: ${cronExpression}`
                       : new Date(notification.createdAt).toLocaleString();
 
                     return (
@@ -1509,62 +1506,8 @@ export default function AdminScreen() {
                                   </ThemedText>
                                 </View>
                                 
-                                {notification.status === 'sent' && (
-                                  <TouchableOpacity
-                                    onPress={(e) => {
-                                      e.stopPropagation();
-                                      const metadata = notification.metadata || {};
-                                      const sentUserIds = metadata.sentUserIds || [];
-                                      
-                                      if (sentUserIds.length > 0 && expandedSentUsersId !== notification.id) {
-                                        // Load user details
-                                        loadSentUsers(notification.id, sentUserIds);
-                                      } else if (sentUserIds.length === 0) {
-                                        // No users to load, set empty array
-                                        setSentUsersMap(prev => ({
-                                          ...prev,
-                                          [notification.id]: [],
-                                        }));
-                                      }
-                                      setExpandedSentUsersId(expandedSentUsersId === notification.id ? null : notification.id);
-                                    }}>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                                      <ThemedText style={styles.approvalItemDate}>
-                                        Sent to {notification.sentCount} users
-                                        {notification.failedCount > 0 && ` (${notification.failedCount} failed)`}
-                                      </ThemedText>
-                                      <IconSymbol
-                                        name={expandedSentUsersId === notification.id ? 'chevron.up' : 'chevron.down'}
-                                        size={16}
-                                        color={isDark ? '#8E8E93' : '#8E8E93'}
-                                      />
-                                    </View>
-                                    {expandedSentUsersId === notification.id && (
-                                      <View style={{ marginTop: 8, padding: 12, borderRadius: 8, backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }}>
-                                        {loadingSentUsers[notification.id] ? (
-                                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                            <ActivityIndicator size="small" color="#FF9500" />
-                                            <ThemedText style={styles.approvalItemDate}>Loading users...</ThemedText>
-                                          </View>
-                                        ) : sentUsersMap[notification.id] ? (
-                                          sentUsersMap[notification.id].length > 0 ? (
-                                            <ScrollView style={{ maxHeight: 200 }}>
-                                              {sentUsersMap[notification.id].map((user) => (
-                                                <View key={user.id} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
-                                                  <ThemedText style={[styles.approvalItemEmail, { fontSize: 12 }]}>{user.email}</ThemedText>
-                                                </View>
-                                              ))}
-                                            </ScrollView>
-                                          ) : (
-                                            <ThemedText style={styles.approvalItemDate}>No users found</ThemedText>
-                                          )
-                                        ) : (
-                                          <ThemedText style={styles.approvalItemDate}>No user data available</ThemedText>
-                                        )}
-                                      </View>
-                                    )}
-                                  </TouchableOpacity>
-                                )}
+                                {/* Cron notifications don't show sent status - they're schedules, not messages */}
+                                {/* Sent messages from cron appear in History section */}
 
                                 {metadata.cronExpression && (
                                   <View style={{ marginTop: 8 }}>
@@ -1580,81 +1523,55 @@ export default function AdminScreen() {
                                           </ThemedText>
                                         )}
                                       </View>
-                                      {(notification.status === 'pending' || notification.status === 'sent') && (
-                                        <TouchableOpacity
-                                          style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', paddingHorizontal: 12, paddingVertical: 6 }]}
-                                          onPress={(e) => {
-                                            e.stopPropagation();
-                                            setEditingNotificationId(notification.id);
-                                            setNotificationForm({
-                                              title: notification.title,
-                                              message: notification.message,
-                                              type: notification.type,
-                                              targetType: notification.targetType,
-                                              targetValue: notification.targetValue || '',
-                                              scheduledFor: notification.scheduledFor || '',
-                                              cronExpression: metadata.cronExpression || '',
-                                              scheduleType: 'cron',
-                                            });
-                                            setSelectedUserIds(notification.targetType === 'specific' && notification.targetValue 
-                                              ? notification.targetValue.split(',').map((id: string) => id.trim()).filter(Boolean)
-                                              : []);
-                                            if (notification.targetType === 'specific') {
-                                              loadUsersForSelection();
-                                            }
-                                            setShowNotificationModal(true);
-                                          }}>
-                                          <ThemedText style={styles.approvalBadgeText}>EDIT</ThemedText>
-                                        </TouchableOpacity>
-                                      )}
-                                    </View>
-                                    {(notification.status === 'pending' || notification.status === 'sent') && (
                                       <TouchableOpacity
-                                        style={{ marginTop: 8 }}
+                                        style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', paddingHorizontal: 12, paddingVertical: 6 }]}
                                         onPress={(e) => {
                                           e.stopPropagation();
-                                          toggleCron(notification.id, metadata.cronEnabled === false);
+                                          setEditingNotificationId(notification.id);
+                                          setNotificationForm({
+                                            title: notification.title,
+                                            message: notification.message,
+                                            type: notification.type,
+                                            targetType: notification.targetType,
+                                            targetValue: notification.targetValue || '',
+                                            scheduledFor: notification.scheduledFor || '',
+                                            cronExpression: metadata.cronExpression || '',
+                                            scheduleType: 'cron',
+                                          });
+                                          setSelectedUserIds(notification.targetType === 'specific' && notification.targetValue 
+                                            ? notification.targetValue.split(',').map((id: string) => id.trim()).filter(Boolean)
+                                            : []);
+                                          if (notification.targetType === 'specific') {
+                                            loadUsersForSelection();
+                                          }
+                                          setShowNotificationModal(true);
                                         }}>
-                                        <ThemedText style={[styles.approvalItemDate, { color: metadata.cronEnabled === false ? '#34C759' : '#FF3B30' }]}>
-                                          {metadata.cronEnabled === false ? 'Enable Cron' : 'Disable Cron'}
-                                        </ThemedText>
+                                        <ThemedText style={styles.approvalBadgeText}>EDIT</ThemedText>
                                       </TouchableOpacity>
-                                    )}
+                                    </View>
+                                    <TouchableOpacity
+                                      style={{ marginTop: 8 }}
+                                      onPress={(e) => {
+                                        e.stopPropagation();
+                                        toggleCron(notification.id, metadata.cronEnabled === false);
+                                      }}>
+                                      <ThemedText style={[styles.approvalItemDate, { color: metadata.cronEnabled === false ? '#34C759' : '#FF3B30' }]}>
+                                        {metadata.cronEnabled === false ? 'Enable Cron' : 'Disable Cron'}
+                                      </ThemedText>
+                                    </TouchableOpacity>
                                   </View>
                                 )}
 
                                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
                                   <TouchableOpacity
-                                    style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', flex: 1, minWidth: 80 }]}
+                                    style={[styles.approvalBadgeButton, { backgroundColor: '#34C759', flex: 1, minWidth: 80, opacity: isLoading ? 0.6 : 1 }]}
                                     onPress={(e) => {
                                       e.stopPropagation();
-                                      handleReplay(notification);
-                                    }}>
-                                    <ThemedText style={styles.approvalBadgeText}>REPLAY</ThemedText>
+                                      sendNotification(notification.id);
+                                    }}
+                                    disabled={isLoading}>
+                                    <ThemedText style={styles.approvalBadgeText}>SEND NOW</ThemedText>
                                   </TouchableOpacity>
-                                  
-                                  {notification.status === 'pending' && (
-                                    <>
-                                      <TouchableOpacity
-                                        style={[styles.approvalBadgeButton, { backgroundColor: '#34C759', flex: 1, minWidth: 80, opacity: isLoading ? 0.6 : 1 }]}
-                                        onPress={(e) => {
-                                          e.stopPropagation();
-                                          sendNotification(notification.id);
-                                        }}
-                                        disabled={isLoading}>
-                                        <ThemedText style={styles.approvalBadgeText}>SEND</ThemedText>
-                                      </TouchableOpacity>
-                                      <TouchableOpacity
-                                        style={[styles.approvalBadgeButton, { backgroundColor: '#8E8E93', flex: 1, minWidth: 80, opacity: isLoading ? 0.6 : 1 }]}
-                                        onPress={(e) => {
-                                          e.stopPropagation();
-                                          cancelNotification(notification.id);
-                                        }}
-                                        disabled={isLoading}>
-                                        <ThemedText style={styles.approvalBadgeText}>CANCEL</ThemedText>
-                                      </TouchableOpacity>
-                                    </>
-                                  )}
                                   
                                   <TouchableOpacity
                                     style={[styles.approvalBadgeButton, { backgroundColor: '#FF3B30', flex: 1, minWidth: 80, opacity: isLoading ? 0.6 : 1 }]}
@@ -1674,16 +1591,11 @@ export default function AdminScreen() {
                             <View style={[
                               styles.approvalBadgeButton,
                               {
-                                backgroundColor:
-                                  notification.status === 'sent' ? '#34C759' :
-                                  notification.status === 'sending' ? '#FF9500' :
-                                  notification.status === 'failed' ? '#FF3B30' :
-                                  notification.status === 'cancelled' ? '#8E8E93' :
-                                  '#4a9eff',
+                                backgroundColor: metadata.cronEnabled === false ? '#8E8E93' : '#4a9eff',
                               }
                             ]}>
                               <ThemedText style={styles.approvalBadgeText}>
-                                {notification.status.toUpperCase()}
+                                {metadata.cronEnabled === false ? 'DISABLED' : 'ACTIVE'}
                               </ThemedText>
                             </View>
                           )}
@@ -1990,15 +1902,6 @@ export default function AdminScreen() {
                                 )}
 
                                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                                  <TouchableOpacity
-                                    style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', flex: 1, minWidth: 80 }]}
-                                    onPress={(e) => {
-                                      e.stopPropagation();
-                                      handleReplay(notification);
-                                    }}>
-                                    <ThemedText style={styles.approvalBadgeText}>REPLAY</ThemedText>
-                                  </TouchableOpacity>
-                                  
                                   {notification.status === 'pending' && (
                                     <>
                                       <TouchableOpacity
