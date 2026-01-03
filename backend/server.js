@@ -161,5 +161,4 @@ cron.schedule('*/5 * * * *', () => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`${appConfig.appName} backend running on http://localhost:${PORT}`);
-  console.log('📅 Notification processor scheduled to run every 5 minutes');
 });
