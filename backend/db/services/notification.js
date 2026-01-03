@@ -172,7 +172,16 @@ class NotificationService {
         },
       });
 
-      return notifications;
+      // Filter out disabled cron notifications
+      return notifications.filter(notification => {
+        const metadata = notification.metadata || {};
+        const hasCron = metadata.cronExpression;
+        if (hasCron) {
+          // If cron is explicitly disabled, skip it
+          return metadata.cronEnabled !== false;
+        }
+        return true;
+      });
     } catch (error) {
       console.error('Error fetching pending notifications:', error);
       throw new Error('Failed to fetch pending notifications');
