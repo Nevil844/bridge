@@ -16,6 +16,7 @@ if (Constants.executionEnvironment !== 'storeClient') {
 
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { usePushNotifications } from '@/hooks/use-push-notifications';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -31,6 +32,9 @@ export default function RootLayout() {
   
   // Always call useAuth (React hooks rule), but ignore it for join subdomain
   const { isAuthenticated, isLoading, login } = useAuth();
+  
+  // Initialize push notifications (hook must be called unconditionally)
+  usePushNotifications();
   
   // Disable auth for testing (set to true to skip login)
   const DISABLE_AUTH_FOR_TESTING = false;

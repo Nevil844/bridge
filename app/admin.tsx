@@ -8,7 +8,7 @@ import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { authenticatedFetch } from '@/utils/api';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 
 interface DashboardStats {
   totalCost: string;
@@ -62,7 +62,7 @@ export default function AdminScreen() {
   const { user } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'approvals' | 'integrations'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'approvals' | 'integrations' | 'notifications'>('dashboard');
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -75,6 +75,16 @@ export default function AdminScreen() {
   const [conversationMessages, setConversationMessages] = useState<any[]>([]);
   const [userIsAdmin, setUserIsAdmin] = useState<boolean>(false);
   const [integrationSettings, setIntegrationSettings] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [notificationForm, setNotificationForm] = useState({
+    title: '',
+    message: '',
+    type: 'email',
+    targetType: 'all',
+    targetValue: '',
+    scheduledFor: '',
+  });
 
   // Check if user is admin
   useEffect(() => {
@@ -320,6 +330,147 @@ export default function AdminScreen() {
     }
   };
 
+  // Load notifications
+  const loadNotifications = async () => {
+    try {
+      setIsLoading(true);
+      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.NOTIFICATIONS);
+      if (response.ok) {
+        const notificationsData = await response.json();
+        setNotifications(Array.isArray(notificationsData) ? notificationsData : []);
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('Notifications API error:', response.status, errorData);
+        throw new Error(errorData.error || `Failed to load notifications: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Error loading notifications:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load notifications';
+      setNotifications([]);
+      if (Platform.OS === 'web') {
+        console.warn(`Failed to load notifications: ${errorMessage}`);
+      } else {
+        Alert.alert('Warning', `Notifications not available: ${errorMessage}`);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Create notification
+  const createNotification = async () => {
+    try {
+      if (!notificationForm.title || !notificationForm.message) {
+        Alert.alert('Error', 'Title and message are required');
+        return;
+      }
+
+      setIsLoading(true);
+      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.NOTIFICATIONS, {
+        method: 'POST',
+        body: JSON.stringify({
+          title: notificationForm.title,
+          message: notificationForm.message,
+          type: notificationForm.type,
+          targetType: notificationForm.targetType,
+          targetValue: notificationForm.targetValue || null,
+          scheduledFor: notificationForm.scheduledFor || null,
+        }),
+      });
+
+      if (response.ok) {
+        setShowNotificationModal(false);
+        setNotificationForm({
+          title: '',
+          message: '',
+          type: 'email',
+          targetType: 'all',
+          targetValue: '',
+          scheduledFor: '',
+        });
+        loadNotifications();
+        if (Platform.OS === 'web') {
+          alert('Notification created successfully');
+        } else {
+          Alert.alert('Success', 'Notification created successfully');
+        }
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || 'Failed to create notification');
+      }
+    } catch (error) {
+      console.error('Error creating notification:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to create notification';
+      if (Platform.OS === 'web') {
+        alert(errorMessage);
+      } else {
+        Alert.alert('Error', errorMessage);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Cancel notification
+  const cancelNotification = async (id: string) => {
+    try {
+      setIsLoading(true);
+      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.CANCEL_NOTIFICATION(id), {
+        method: 'POST',
+      });
+
+      if (response.ok) {
+        loadNotifications();
+        if (Platform.OS === 'web') {
+          alert('Notification cancelled');
+        } else {
+          Alert.alert('Success', 'Notification cancelled');
+        }
+      } else {
+        throw new Error('Failed to cancel notification');
+      }
+    } catch (error) {
+      console.error('Error cancelling notification:', error);
+      if (Platform.OS === 'web') {
+        alert('Failed to cancel notification');
+      } else {
+        Alert.alert('Error', 'Failed to cancel notification');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Send notification manually
+  const sendNotification = async (id: string) => {
+    try {
+      setIsLoading(true);
+      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.SEND_NOTIFICATION(id), {
+        method: 'POST',
+      });
+
+      if (response.ok) {
+        loadNotifications();
+        if (Platform.OS === 'web') {
+          alert('Notification sending started');
+        } else {
+          Alert.alert('Success', 'Notification sending started');
+        }
+      } else {
+        throw new Error('Failed to send notification');
+      }
+    } catch (error) {
+      console.error('Error sending notification:', error);
+      if (Platform.OS === 'web') {
+        alert('Failed to send notification');
+      } else {
+        Alert.alert('Error', 'Failed to send notification');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Load data when tab changes
   useEffect(() => {
     if (!isAdmin) return;
@@ -332,6 +483,8 @@ export default function AdminScreen() {
       loadApprovals();
     } else if (activeTab === 'integrations') {
       loadIntegrationSettings();
+    } else if (activeTab === 'notifications') {
+      loadNotifications();
     }
   }, [activeTab, isAdmin]);
 
@@ -657,6 +810,17 @@ export default function AdminScreen() {
             onPress={() => setActiveTab('integrations')}>
             <ThemedText style={[styles.tabText, activeTab === 'integrations' && { color: '#FF9500', fontWeight: '600' }]}>
               Integrations
+            </ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.tab,
+              activeTab === 'notifications' && styles.activeTab,
+              { borderBottomColor: activeTab === 'notifications' ? '#FF9500' : 'transparent' },
+            ]}
+            onPress={() => setActiveTab('notifications')}>
+            <ThemedText style={[styles.tabText, activeTab === 'notifications' && { color: '#FF9500', fontWeight: '600' }]}>
+              Notifications
             </ThemedText>
           </TouchableOpacity>
         </View>
@@ -1077,6 +1241,137 @@ export default function AdminScreen() {
               <ThemedText style={styles.emptyText}>Loading conversation...</ThemedText>
             </View>
           )}
+        </ThemedView>
+      </Modal>
+
+      {/* Notification Creation Modal */}
+      <Modal
+        visible={showNotificationModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowNotificationModal(false)}>
+        <ThemedView style={styles.modalContainer}>
+          <View style={[styles.modalHeader, { paddingTop: topInset + 20 }]}>
+            <View style={styles.modalHeaderRow}>
+              <TouchableOpacity onPress={() => setShowNotificationModal(false)} style={styles.modalBackButton}>
+                <IconSymbol
+                  name="chevron.left"
+                  size={20}
+                  color={isDark ? '#FFFFFF' : '#000000'}
+                />
+              </TouchableOpacity>
+              <ThemedText style={styles.modalTitle}>Create Notification</ThemedText>
+              <View style={styles.placeholder} />
+            </View>
+          </View>
+
+          <ScrollView style={styles.modalContent} contentContainerStyle={{ paddingBottom: bottomInset + 24 }}>
+            <View style={[styles.modalCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+              <ThemedText style={styles.modalCardTitle}>Notification Details</ThemedText>
+              
+              <View style={{ marginBottom: 16 }}>
+                <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>Title *</ThemedText>
+                <TextInput
+                  style={[styles.textInput, { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7', color: isDark ? '#FFFFFF' : '#000000' }]}
+                  value={notificationForm.title}
+                  onChangeText={(text) => setNotificationForm({ ...notificationForm, title: text })}
+                  placeholder="Notification title"
+                  placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
+                />
+              </View>
+
+              <View style={{ marginBottom: 16 }}>
+                <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>Message *</ThemedText>
+                <TextInput
+                  style={[styles.textInput, { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7', color: isDark ? '#FFFFFF' : '#000000', minHeight: 100, textAlignVertical: 'top' }]}
+                  value={notificationForm.message}
+                  onChangeText={(text) => setNotificationForm({ ...notificationForm, message: text })}
+                  placeholder="Notification message"
+                  placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
+                  multiline
+                  numberOfLines={4}
+                />
+              </View>
+
+              <View style={{ marginBottom: 16 }}>
+                <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>Type</ThemedText>
+                <View style={styles.planButtons}>
+                  {['email', 'in_app', 'push', 'all'].map((type) => (
+                    <TouchableOpacity
+                      key={type}
+                      style={[
+                        styles.planButton,
+                        notificationForm.type === type && styles.planButtonActive,
+                        { backgroundColor: notificationForm.type === type ? '#FF9500' : (isDark ? '#2C2C2E' : '#F2F2F7') },
+                      ]}
+                      onPress={() => setNotificationForm({ ...notificationForm, type })}>
+                      <ThemedText style={[styles.planButtonText, notificationForm.type === type && { color: '#FFFFFF' }]}>
+                        {type.toUpperCase()}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={{ marginBottom: 16 }}>
+                <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>Target Audience</ThemedText>
+                <View style={styles.planButtons}>
+                  {['all', 'plan', 'waitlist', 'specific'].map((target) => (
+                    <TouchableOpacity
+                      key={target}
+                      style={[
+                        styles.planButton,
+                        notificationForm.targetType === target && styles.planButtonActive,
+                        { backgroundColor: notificationForm.targetType === target ? '#FF9500' : (isDark ? '#2C2C2E' : '#F2F2F7') },
+                      ]}
+                      onPress={() => setNotificationForm({ ...notificationForm, targetType: target, targetValue: '' })}>
+                      <ThemedText style={[styles.planButtonText, notificationForm.targetType === target && { color: '#FFFFFF' }]}>
+                        {target.toUpperCase()}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {(notificationForm.targetType === 'plan' || notificationForm.targetType === 'waitlist' || notificationForm.targetType === 'specific') && (
+                <View style={{ marginBottom: 16 }}>
+                  <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>
+                    {notificationForm.targetType === 'plan' ? 'Plan (e.g., free, pro, power)' :
+                     notificationForm.targetType === 'waitlist' ? 'Status (approved, pending, or leave empty for all)' :
+                     'User IDs (comma-separated)'}
+                  </ThemedText>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7', color: isDark ? '#FFFFFF' : '#000000' }]}
+                    value={notificationForm.targetValue}
+                    onChangeText={(text) => setNotificationForm({ ...notificationForm, targetValue: text })}
+                    placeholder={notificationForm.targetType === 'plan' ? 'free' : notificationForm.targetType === 'waitlist' ? 'approved' : 'user1, user2, user3'}
+                    placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
+                  />
+                </View>
+              )}
+
+              <View style={{ marginBottom: 16 }}>
+                <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>Schedule (optional)</ThemedText>
+                <TextInput
+                  style={[styles.textInput, { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7', color: isDark ? '#FFFFFF' : '#000000' }]}
+                  value={notificationForm.scheduledFor}
+                  onChangeText={(text) => setNotificationForm({ ...notificationForm, scheduledFor: text })}
+                  placeholder="YYYY-MM-DDTHH:mm (leave empty for immediate)"
+                  placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
+                />
+                <ThemedText style={[styles.approvalItemDate, { marginTop: 4 }]}>
+                  Leave empty to send immediately, or use ISO format: 2025-01-15T14:30
+                </ThemedText>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.approvalBadgeButton, { backgroundColor: '#FF9500', marginTop: 16, opacity: isLoading ? 0.6 : 1 }]}
+                onPress={createNotification}
+                disabled={isLoading}>
+                <ThemedText style={styles.approvalBadgeText}>CREATE NOTIFICATION</ThemedText>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
         </ThemedView>
       </Modal>
     </ThemedView>
@@ -1536,6 +1831,14 @@ const styles = StyleSheet.create({
   messageContent: {
     fontSize: 14,
     lineHeight: 20,
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: 'rgba(128, 128, 128, 0.3)',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    minHeight: 44,
   },
 });
 

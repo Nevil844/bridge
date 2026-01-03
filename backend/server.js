@@ -18,6 +18,7 @@ const waitlistRouter = require('./routes/waitlist');
 const sampleQuestionsRouter = require('./routes/sampleQuestions');
 const { router: transcribeRouter, setupTranscribeWebSocket } = require('./routes/transcribe');
 const adminRouter = require('./routes/admin');
+const notificationsRouter = require('./routes/notifications');
 
 // Services
 const integrationService = require('./db/services/integration');
@@ -58,6 +59,7 @@ app.use('/api/waitlist', waitlistRouter);
 app.use('/api/sample-questions', sampleQuestionsRouter);
 app.use('/api/transcribe', transcribeRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/notifications', notificationsRouter);
 
 // Setup WebSocket route for real-time transcription (must be after expressWs)
 setupTranscribeWebSocket(app);
