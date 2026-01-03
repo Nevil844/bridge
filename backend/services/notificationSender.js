@@ -49,15 +49,15 @@ class NotificationSender {
       const metadata = cronNotification.metadata || {};
       const cronExpression = metadata.cronExpression;
       if (cronExpression) {
-        const { getCronNextOccurrences } = require('../../utils/cronParser');
-        const result = getCronNextOccurrences(cronExpression, 1);
-        if (result.isValid && result.occurrences.length > 0) {
-          const nextOccurrence = result.occurrences[0];
-          // Update the cron notification's scheduledFor to the next occurrence
-          await notificationService.updateNotification(cronNotification.id, {
-            scheduledFor: nextOccurrence,
-          });
-        }
+        const parser = require('cron-parser');
+        const interval = parser.parseExpression(cronExpression, {
+          tz: 'Asia/Kolkata', // IST timezone
+        });
+        const nextOccurrence = interval.next().toDate();
+        // Update the cron notification's scheduledFor to the next occurrence
+        await notificationService.updateNotification(cronNotification.id, {
+          scheduledFor: nextOccurrence,
+        });
       }
 
       return {
