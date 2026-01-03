@@ -2509,14 +2509,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   emptyText: {
-    fontSize: 28,
+    fontSize: 18,
     fontWeight: '600',
     textAlign: 'center',
     marginTop: 48,
     marginBottom: 12,
+    lineHeight: 24,
   },
   emptySubtext: {
-    fontSize: 14,
+    fontSize: 12,
     textAlign: 'center',
     opacity: 0.5,
   },
