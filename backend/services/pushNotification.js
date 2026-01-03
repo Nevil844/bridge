@@ -18,13 +18,14 @@ class PushNotificationService {
   async sendToTokens(tokens, title, body, data = {}) {
     try {
       if (tokens.length === 0) {
-        return { sent: 0, failed: 0, results: [] };
+        return { sent: 0, failed: 0, successfulTokens: [] };
       }
 
       // Expo allows up to 100 messages per request
       const batchSize = 100;
       let sent = 0;
       let failed = 0;
+      const successfulTokens = [];
 
       for (let i = 0; i < tokens.length; i += batchSize) {
         const batch = tokens.slice(i, i + batchSize);
@@ -53,15 +54,17 @@ class PushNotificationService {
 
           // Process results
           if (result.data) {
-            for (let i = 0; i < result.data.length; i++) {
-              const item = result.data[i];
+            for (let j = 0; j < result.data.length; j++) {
+              const item = result.data[j];
+              const token = batch[j];
               if (item.status === 'ok') {
                 sent++;
+                successfulTokens.push(token);
               } else {
                 failed++;
                 // Handle invalid tokens
                 if (item.details?.error === 'DeviceNotRegistered') {
-                  await deviceTokenService.deactivateToken(batch[i]);
+                  await deviceTokenService.deactivateToken(token);
                 }
               }
             }
@@ -72,7 +75,7 @@ class PushNotificationService {
         }
       }
 
-      return { sent, failed };
+      return { sent, failed, successfulTokens };
     } catch (error) {
       console.error('Error sending push notifications:', error);
       throw error;
@@ -87,11 +90,20 @@ class PushNotificationService {
       const tokens = await deviceTokenService.getUserTokens(userId);
       
       if (tokens.length === 0) {
-        return { sent: 0, failed: 0, message: 'No active device tokens found' };
+        return { sent: 0, failed: 0, sentUserIds: [], message: 'No active device tokens found' };
       }
 
       const tokenList = tokens.map(t => t.token);
-      return await this.sendToTokens(tokenList, title, body, data);
+      const result = await this.sendToTokens(tokenList, title, body, data);
+      
+      // If any token was successful, include the user ID
+      const sentUserIds = result.sent > 0 ? [userId] : [];
+      
+      return {
+        sent: result.sent || 0,
+        failed: result.failed || 0,
+        sentUserIds,
+      };
     } catch (error) {
       console.error('Error sending to user:', error);
       throw error;
@@ -121,20 +133,22 @@ class PushNotificationService {
       const tokenList = tokens.map(t => t.token);
       const result = await this.sendToTokens(tokenList, title, body, data);
 
-      // Track which users had successful sends
+      // Track which users had successful sends based on successful tokens
       const sentUserIdsSet = new Set();
-      const tokenListWithResults = tokenList;
       
-      // For simplicity, if we sent successfully, assume all users with tokens got it
-      // In a more sophisticated implementation, we'd track per-token success
-      if (result.sent > 0) {
-        tokens.forEach(t => {
-          sentUserIdsSet.add(t.userId);
+      // Map successful tokens back to user IDs
+      if (result.successfulTokens && result.successfulTokens.length > 0) {
+        result.successfulTokens.forEach(token => {
+          const userIdsForToken = tokenToUserId[token] || [];
+          userIdsForToken.forEach(userId => {
+            sentUserIdsSet.add(userId);
+          });
         });
       }
 
       return {
-        ...result,
+        sent: result.sent || 0,
+        failed: result.failed || 0,
         sentUserIds: Array.from(sentUserIdsSet),
       };
     } catch (error) {
