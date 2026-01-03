@@ -462,7 +462,12 @@ export default function AdminScreen() {
           return hasCron;
         });
         const nextBatch = activeCron.slice(activeCronSkip, activeCronSkip + 5);
-        setActiveCronNotifications(prev => [...prev, ...nextBatch]);
+        // Deduplicate by ID to prevent duplicate keys
+        setActiveCronNotifications(prev => {
+          const existingIds = new Set(prev.map((n: any) => n.id));
+          const newItems = nextBatch.filter((n: any) => !existingIds.has(n.id));
+          return [...prev, ...newItems];
+        });
         setActiveCronSkip(prev => prev + 5);
         setActiveCronHasMore(activeCronSkip + 5 < activeCron.length);
       }
@@ -482,9 +487,19 @@ export default function AdminScreen() {
         const text = await response.text();
         const data = text ? JSON.parse(text) : { notifications: [] };
         const allNotifications = Array.isArray(data.notifications) ? data.notifications : (Array.isArray(data) ? data : []);
-        const history = allNotifications.filter((n: any) => n.status === 'sent');
+        const history = allNotifications.filter((n: any) => {
+          const metadata = n.metadata || {};
+          const hasCron = metadata && metadata.cronExpression;
+          // History = sent notifications WITHOUT cron expression (actual sent messages, not schedules)
+          return n.status === 'sent' && !hasCron;
+        });
         const nextBatch = history.slice(historySkip, historySkip + 5);
-        setNotificationHistory(prev => [...prev, ...nextBatch]);
+        // Deduplicate by ID to prevent duplicate keys
+        setNotificationHistory(prev => {
+          const existingIds = new Set(prev.map((n: any) => n.id));
+          const newItems = nextBatch.filter((n: any) => !existingIds.has(n.id));
+          return [...prev, ...newItems];
+        });
         setHistorySkip(prev => prev + 5);
         setHistoryHasMore(historySkip + 5 < history.length);
       }
@@ -506,10 +521,17 @@ export default function AdminScreen() {
         const allNotifications = Array.isArray(data.notifications) ? data.notifications : (Array.isArray(data) ? data : []);
         const pendingOneTime = allNotifications.filter((n: any) => {
           const metadata = n.metadata || {};
-          return !metadata || !metadata.cronExpression && (n.status === 'pending' || n.status === 'sending');
+          const hasCron = metadata && metadata.cronExpression;
+          // Pending one-time = no cron AND (pending or sending)
+          return !hasCron && (n.status === 'pending' || n.status === 'sending');
         });
         const nextBatch = pendingOneTime.slice(pendingOneTimeSkip, pendingOneTimeSkip + 5);
-        setPendingOneTimeNotifications(prev => [...prev, ...nextBatch]);
+        // Deduplicate by ID to prevent duplicate keys
+        setPendingOneTimeNotifications(prev => {
+          const existingIds = new Set(prev.map((n: any) => n.id));
+          const newItems = nextBatch.filter((n: any) => !existingIds.has(n.id));
+          return [...prev, ...newItems];
+        });
         setPendingOneTimeSkip(prev => prev + 5);
         setPendingOneTimeHasMore(pendingOneTimeSkip + 5 < pendingOneTime.length);
       }
