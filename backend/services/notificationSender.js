@@ -55,12 +55,10 @@ class NotificationSender {
           currentDate: now, // Start from current time
         });
         const nextOccurrence = interval.next().toDate();
-        console.log(`[${new Date().toISOString()}] 📅 Cron ${cronNotification.id}: Next occurrence calculated as ${nextOccurrence.toISOString()}`);
         // Update the cron notification's scheduledFor to the next occurrence
         await notificationService.updateNotification(cronNotification.id, {
           scheduledFor: nextOccurrence,
         });
-        console.log(`[${new Date().toISOString()}] ✅ Cron ${cronNotification.id}: Updated scheduledFor to ${nextOccurrence.toISOString()}`);
       }
 
       return {

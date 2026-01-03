@@ -398,7 +398,6 @@ router.patch('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => 
       // Ensure cron notifications are always 'pending' so they can be picked up by the processor
       if (existing.status !== 'pending') {
         updateData.status = 'pending';
-        console.log(`[${new Date().toISOString()}] 🔄 Resetting cron notification ${id} status from '${existing.status}' to 'pending'`);
       }
     } else if (!isMetadataOnlyUpdate && (existing.status === 'sent' || existing.status === 'sending')) {
       // For non-cron notifications, block updates if already sent/sending
@@ -442,11 +441,6 @@ router.patch('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => 
         const { CronExpressionParser } = require('cron-parser');
         const now = new Date();
         
-        console.log(`[${now.toISOString()}] 🔄 Updating cron expression for notification ${id}`);
-        console.log(`  Old cron: ${oldCronExpression || 'none'}`);
-        console.log(`  New cron: ${newCronExpression}`);
-        console.log(`  Current time: ${now.toISOString()}`);
-        
         // Parse the new cron expression starting from current time
         const interval = CronExpressionParser.parse(newCronExpression, {
           tz: 'Asia/Kolkata', // IST timezone
@@ -456,9 +450,6 @@ router.patch('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => 
         // Get the next occurrence
         const nextOccurrence = interval.next().toDate();
         const minutesUntilNext = (nextOccurrence - now) / 1000 / 60;
-        
-        console.log(`  Next occurrence: ${nextOccurrence.toISOString()}`);
-        console.log(`  Minutes until next: ${minutesUntilNext.toFixed(2)}`);
         
         // If the next occurrence is more than 5 minutes away, check if there was a recent occurrence
         // that should have triggered (e.g., if cron was updated to run more frequently)
@@ -485,24 +476,19 @@ router.patch('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => 
             // If the last occurrence was within the last 5 minutes, schedule for immediate execution
             // This handles the case where the cron was updated to run more frequently
             const minutesSinceLast = (now - lastOccurrence) / 1000 / 60;
-            console.log(`  Last occurrence: ${lastOccurrence.toISOString()}, minutes since: ${minutesSinceLast.toFixed(2)}`);
             if (minutesSinceLast >= 0 && minutesSinceLast <= 5) {
               // Schedule for immediate execution (within next minute so processor picks it up)
               updateData.scheduledFor = new Date(now.getTime() + 30 * 1000); // 30 seconds from now
-              console.log(`  ⚡ Scheduling for immediate execution: ${updateData.scheduledFor.toISOString()}`);
             } else {
               updateData.scheduledFor = nextOccurrence;
-              console.log(`  📅 Using calculated next occurrence: ${updateData.scheduledFor.toISOString()}`);
             }
           } catch (e) {
             // Fallback to next occurrence if we can't calculate previous
-            console.log(`  ⚠️  Error finding previous occurrence, using next: ${e.message}`);
             updateData.scheduledFor = nextOccurrence;
           }
         } else {
           // Next occurrence is soon (within 5 minutes), use it
           updateData.scheduledFor = nextOccurrence;
-          console.log(`  ✅ Next occurrence is soon, using: ${updateData.scheduledFor.toISOString()}`);
         }
       } catch (error) {
         console.error('Error parsing cron expression during update:', error);
@@ -511,17 +497,6 @@ router.patch('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => 
     }
 
     const notification = await notificationService.updateNotification(id, updateData);
-    
-    // Log the final state after update
-    if (newCronExpression && newCronExpression !== oldCronExpression) {
-      console.log(`[${new Date().toISOString()}] ✅ Cron notification ${id} updated:`);
-      console.log(`  Final scheduledFor: ${notification.scheduledFor ? notification.scheduledFor.toISOString() : 'null'}`);
-      console.log(`  Status: ${notification.status}`);
-      const finalMetadata = notification.metadata || {};
-      console.log(`  Cron expression: ${finalMetadata.cronExpression}`);
-      console.log(`  Cron enabled: ${finalMetadata.cronEnabled !== false ? 'true' : 'false'}`);
-    }
-    
     res.json(notification);
   } catch (error) {
     console.error('Error updating notification:', error);
