@@ -395,6 +395,11 @@ router.patch('/notifications/:id', verifyUser, verifyAdmin, async (req, res) => 
     if (isCronNotification) {
       // Allow all updates to cron notifications regardless of status
       // Cron notifications are schedules, not messages, so they can always be edited
+      // Ensure cron notifications are always 'pending' so they can be picked up by the processor
+      if (existing.status !== 'pending') {
+        updateData.status = 'pending';
+        console.log(`[${new Date().toISOString()}] 🔄 Resetting cron notification ${id} status from '${existing.status}' to 'pending'`);
+      }
     } else if (!isMetadataOnlyUpdate && (existing.status === 'sent' || existing.status === 'sending')) {
       // For non-cron notifications, block updates if already sent/sending
       return res.status(400).json({ error: 'Cannot update notification that is already sent or sending' });
