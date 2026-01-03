@@ -18,7 +18,7 @@ class NotificationService {
       const {
         title,
         message,
-        type = 'email',
+        type = 'push',
         targetType = 'all',
         targetValue = null,
         scheduledFor = null,
@@ -269,8 +269,18 @@ class NotificationService {
   /**
    * Mark notification as sent
    */
-  async markAsSent(id, sentCount, failedCount = 0) {
+  async markAsSent(id, sentCount, failedCount = 0, sentUserIds = []) {
     try {
+      const existing = await this.prisma.notification.findUnique({
+        where: { id },
+        select: { metadata: true },
+      });
+
+      const metadata = existing?.metadata || {};
+      if (sentUserIds.length > 0) {
+        metadata.sentUserIds = sentUserIds;
+      }
+
       await this.prisma.notification.update({
         where: { id },
         data: {
@@ -278,6 +288,7 @@ class NotificationService {
           sentAt: new Date(),
           sentCount,
           failedCount,
+          metadata,
         },
       });
     } catch (error) {

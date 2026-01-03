@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   message TEXT NOT NULL,
-  type TEXT NOT NULL DEFAULT 'email',
+  type TEXT NOT NULL DEFAULT 'push',
   "targetType" TEXT NOT NULL DEFAULT 'all',
   "targetValue" TEXT,
   "scheduledFor" TIMESTAMP,

@@ -106,11 +106,37 @@ class PushNotificationService {
       const tokens = await deviceTokenService.getUsersTokens(userIds);
       
       if (tokens.length === 0) {
-        return { sent: 0, failed: 0, message: 'No active device tokens found' };
+        return { sent: 0, failed: 0, sentUserIds: [], message: 'No active device tokens found' };
       }
 
+      // Create a map of token to userId
+      const tokenToUserId = {};
+      tokens.forEach(t => {
+        if (!tokenToUserId[t.token]) {
+          tokenToUserId[t.token] = [];
+        }
+        tokenToUserId[t.token].push(t.userId);
+      });
+
       const tokenList = tokens.map(t => t.token);
-      return await this.sendToTokens(tokenList, title, body, data);
+      const result = await this.sendToTokens(tokenList, title, body, data);
+
+      // Track which users had successful sends
+      const sentUserIdsSet = new Set();
+      const tokenListWithResults = tokenList;
+      
+      // For simplicity, if we sent successfully, assume all users with tokens got it
+      // In a more sophisticated implementation, we'd track per-token success
+      if (result.sent > 0) {
+        tokens.forEach(t => {
+          sentUserIdsSet.add(t.userId);
+        });
+      }
+
+      return {
+        ...result,
+        sentUserIds: Array.from(sentUserIdsSet),
+      };
     } catch (error) {
       console.error('Error sending to users:', error);
       throw error;

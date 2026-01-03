@@ -6,6 +6,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { authenticatedFetch } from '@/utils/api';
+import { getCronNextOccurrences, formatISTDate } from '@/utils/cronParser';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
@@ -77,13 +78,21 @@ export default function AdminScreen() {
   const [integrationSettings, setIntegrationSettings] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [expandedNotificationId, setExpandedNotificationId] = useState<string | null>(null);
+  const [expandedSentUsersId, setExpandedSentUsersId] = useState<string | null>(null);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [allUsersList, setAllUsersList] = useState<User[]>([]);
+  const [sentUsersMap, setSentUsersMap] = useState<Record<string, User[]>>({});
+  const [cronNextOccurrences, setCronNextOccurrences] = useState<Date[]>([]);
   const [notificationForm, setNotificationForm] = useState({
     title: '',
     message: '',
-    type: 'email',
+    type: 'push',
     targetType: 'all',
     targetValue: '',
     scheduledFor: '',
+    cronExpression: '',
+    scheduleType: 'datetime', // 'datetime' or 'cron'
   });
 
   // Check if user is admin
@@ -357,15 +366,170 @@ export default function AdminScreen() {
     }
   };
 
+  // Load users list for selection
+  const loadUsersForSelection = async () => {
+    try {
+      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.USERS);
+      if (response.ok) {
+        const usersData = await response.json();
+        setAllUsersList(Array.isArray(usersData) ? usersData : []);
+      }
+    } catch (error) {
+      console.error('Error loading users for selection:', error);
+    }
+  };
+
+  // Load sent users for a notification
+  const loadSentUsers = async (notificationId: string, userIds: string[]) => {
+    if (sentUsersMap[notificationId]) {
+      return; // Already loaded
+    }
+
+    try {
+      // Fetch user details for each user ID
+      const userPromises = userIds.map(async (userId) => {
+        try {
+          const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.USER_DETAILS(userId));
+          if (response.ok) {
+            const userData = await response.json();
+            return {
+              id: userData.id,
+              username: userData.username,
+              email: userData.email,
+            };
+          }
+        } catch (error) {
+          console.error(`Error loading user ${userId}:`, error);
+          return null;
+        }
+      });
+
+      const users = (await Promise.all(userPromises)).filter(u => u !== null) as User[];
+      setSentUsersMap(prev => ({
+        ...prev,
+        [notificationId]: users,
+      }));
+    } catch (error) {
+      console.error('Error loading sent users:', error);
+    }
+  };
+
+  // Handle replay to notification
+  const handleReplay = (notification: any) => {
+    const metadata = notification.metadata || {};
+    setNotificationForm({
+      title: notification.title, // No "Re:" prefix
+      message: notification.message,
+      type: 'push',
+      targetType: notification.targetType,
+      targetValue: notification.targetValue || '',
+      scheduledFor: '',
+      cronExpression: metadata.cronExpression || '',
+      scheduleType: metadata.cronExpression ? 'cron' : 'datetime',
+    });
+    if (notification.targetType === 'specific' && notification.targetValue) {
+      const userIds = notification.targetValue.split(',').map((id: string) => id.trim()).filter(Boolean);
+      setSelectedUserIds(userIds);
+    } else {
+      setSelectedUserIds([]);
+    }
+    setExpandedNotificationId(null);
+    setShowNotificationModal(true);
+  };
+
+  // Delete notification
+  const deleteNotification = async (id: string) => {
+    const confirmed = Platform.OS === 'web' 
+      ? window.confirm('Are you sure you want to delete this notification?')
+      : await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            'Delete Notification',
+            'Are you sure you want to delete this notification?',
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+            ]
+          );
+        });
+
+    if (!confirmed) return;
+
+    try {
+      setIsLoading(true);
+      const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.NOTIFICATION(id), {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        setNotifications(notifications.filter(n => n.id !== id));
+        if (Platform.OS === 'web') {
+          alert('Notification deleted successfully');
+        } else {
+          Alert.alert('Success', 'Notification deleted successfully');
+        }
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || 'Failed to delete notification');
+      }
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to delete notification';
+      if (Platform.OS === 'web') {
+        alert(errorMessage);
+      } else {
+        Alert.alert('Error', errorMessage);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Toggle user selection
+  const toggleUserSelection = (userId: string) => {
+    setSelectedUserIds(prev => 
+      prev.includes(userId) 
+        ? prev.filter(id => id !== userId)
+        : [...prev, userId]
+    );
+  };
+
+  // Update targetValue when selectedUserIds changes
+  useEffect(() => {
+    if (notificationForm.targetType === 'specific') {
+      setNotificationForm(prev => ({
+        ...prev,
+        targetValue: selectedUserIds.join(','),
+      }));
+    }
+  }, [selectedUserIds]);
+
   // Create notification
   const createNotification = async () => {
     try {
       if (!notificationForm.title || !notificationForm.message) {
-        Alert.alert('Error', 'Title and message are required');
+        if (Platform.OS === 'web') {
+          alert('Title and message are required');
+        } else {
+          Alert.alert('Error', 'Title and message are required');
+        }
+        return;
+      }
+
+      if (notificationForm.scheduleType === 'cron' && !notificationForm.cronExpression) {
+        if (Platform.OS === 'web') {
+          alert('Cron expression is required when using cron schedule');
+        } else {
+          Alert.alert('Error', 'Cron expression is required when using cron schedule');
+        }
         return;
       }
 
       setIsLoading(true);
+      const metadata: any = {};
+      if (notificationForm.scheduleType === 'cron') {
+        metadata.cronExpression = notificationForm.cronExpression;
+      }
+
       const response = await authenticatedFetch(API_ENDPOINTS.ADMIN.NOTIFICATIONS, {
         method: 'POST',
         body: JSON.stringify({
@@ -374,7 +538,8 @@ export default function AdminScreen() {
           type: notificationForm.type,
           targetType: notificationForm.targetType,
           targetValue: notificationForm.targetValue || null,
-          scheduledFor: notificationForm.scheduledFor || null,
+          scheduledFor: notificationForm.scheduleType === 'datetime' ? (notificationForm.scheduledFor || null) : null,
+          metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
         }),
       });
 
@@ -383,11 +548,14 @@ export default function AdminScreen() {
         setNotificationForm({
           title: '',
           message: '',
-          type: 'email',
+          type: 'push',
           targetType: 'all',
           targetValue: '',
           scheduledFor: '',
+          cronExpression: '',
+          scheduleType: 'datetime',
         });
+        setSelectedUserIds([]);
         loadNotifications();
         if (Platform.OS === 'web') {
           alert('Notification created successfully');
@@ -766,64 +934,42 @@ export default function AdminScreen() {
           </View>
         </View>
 
-        {/* Tabs */}
-        <View style={styles.tabs}>
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              activeTab === 'dashboard' && styles.activeTab,
-              { borderBottomColor: activeTab === 'dashboard' ? '#FF9500' : 'transparent' },
-            ]}
-            onPress={() => setActiveTab('dashboard')}>
-            <ThemedText style={[styles.tabText, activeTab === 'dashboard' && { color: '#FF9500', fontWeight: '600' }]}>
-              Dashboard
-            </ThemedText>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              activeTab === 'users' && styles.activeTab,
-              { borderBottomColor: activeTab === 'users' ? '#FF9500' : 'transparent' },
-            ]}
-            onPress={() => setActiveTab('users')}>
-            <ThemedText style={[styles.tabText, activeTab === 'users' && { color: '#FF9500', fontWeight: '600' }]}>
-              Users
-            </ThemedText>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              activeTab === 'approvals' && styles.activeTab,
-              { borderBottomColor: activeTab === 'approvals' ? '#FF9500' : 'transparent' },
-            ]}
-            onPress={() => setActiveTab('approvals')}>
-            <ThemedText style={[styles.tabText, activeTab === 'approvals' && { color: '#FF9500', fontWeight: '600' }]}>
-              Approvals
-            </ThemedText>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              activeTab === 'integrations' && styles.activeTab,
-              { borderBottomColor: activeTab === 'integrations' ? '#FF9500' : 'transparent' },
-            ]}
-            onPress={() => setActiveTab('integrations')}>
-            <ThemedText style={[styles.tabText, activeTab === 'integrations' && { color: '#FF9500', fontWeight: '600' }]}>
-              Integrations
-            </ThemedText>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              activeTab === 'notifications' && styles.activeTab,
-              { borderBottomColor: activeTab === 'notifications' ? '#FF9500' : 'transparent' },
-            ]}
-            onPress={() => setActiveTab('notifications')}>
-            <ThemedText style={[styles.tabText, activeTab === 'notifications' && { color: '#FF9500', fontWeight: '600' }]}>
-              Notifications
-            </ThemedText>
-          </TouchableOpacity>
-        </View>
+        {/* Tabs - Scrollable on mobile */}
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          style={styles.tabsContainer}
+          contentContainerStyle={styles.tabsContent}>
+          {[
+            { key: 'dashboard', label: 'Dashboard', icon: 'chart.bar' },
+            { key: 'users', label: 'Users', icon: 'person.fill' },
+            { key: 'approvals', label: 'Approvals', icon: 'checkmark.circle.fill' },
+            { key: 'integrations', label: 'Integrations', icon: 'link' },
+            { key: 'notifications', label: 'Notifications', icon: 'envelope' },
+          ].map((tab) => (
+            <TouchableOpacity
+              key={tab.key}
+              style={[
+                styles.tab,
+                activeTab === tab.key && styles.activeTab,
+                { 
+                  borderBottomColor: activeTab === tab.key ? '#FF9500' : 'transparent',
+                  backgroundColor: activeTab === tab.key ? (isDark ? 'rgba(255, 149, 0, 0.1)' : 'rgba(255, 149, 0, 0.05)') : 'transparent',
+                },
+              ]}
+              onPress={() => setActiveTab(tab.key as any)}>
+              <IconSymbol
+                name={tab.icon as any}
+                size={18}
+                color={activeTab === tab.key ? '#FF9500' : (isDark ? '#8E8E93' : '#8E8E93')}
+                style={{ marginRight: 6 }}
+              />
+              <ThemedText style={[styles.tabText, activeTab === tab.key && { color: '#FF9500', fontWeight: '600' }]}>
+                {tab.label}
+              </ThemedText>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
 
         {/* Content */}
         {isLoading ? (
@@ -1005,6 +1151,199 @@ export default function AdminScreen() {
                       </View>
                     </View>
                   ))
+                )}
+              </View>
+            )}
+
+            {activeTab === 'notifications' && (
+              <View style={styles.section}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <ThemedText style={styles.cardTitle}>Notifications</ThemedText>
+                  <TouchableOpacity
+                    style={[styles.approvalBadgeButton, { backgroundColor: '#FF9500', paddingHorizontal: 16, paddingVertical: 8 }]}
+                    onPress={() => {
+                      setNotificationForm({
+                        title: '',
+                        message: '',
+                        type: 'push',
+                        targetType: 'all',
+                        targetValue: '',
+                        scheduledFor: '',
+                        cronExpression: '',
+                        scheduleType: 'datetime',
+                      });
+                      setSelectedUserIds([]);
+                      setShowNotificationModal(true);
+                    }}>
+                    <ThemedText style={styles.approvalBadgeText}>+ New</ThemedText>
+                  </TouchableOpacity>
+                </View>
+                {notifications.length === 0 ? (
+                  <View style={[styles.card, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}>
+                    <ThemedText style={styles.emptyText}>No notifications found</ThemedText>
+                  </View>
+                ) : (
+                  notifications.map((notification) => {
+                    const isExpanded = expandedNotificationId === notification.id;
+                    const metadata = notification.metadata || {};
+                    const hasCron = metadata.cronExpression;
+                    const timeDisplay = notification.sentAt 
+                      ? new Date(notification.sentAt).toLocaleString()
+                      : hasCron
+                      ? `Cron: ${metadata.cronExpression}`
+                      : notification.scheduledFor
+                      ? `Scheduled: ${new Date(notification.scheduledFor).toLocaleString()}`
+                      : new Date(notification.createdAt).toLocaleString();
+
+                    return (
+                      <TouchableOpacity
+                        key={notification.id}
+                        style={[styles.approvalItem, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }]}
+                        onPress={() => setExpandedNotificationId(isExpanded ? null : notification.id)}>
+                        <View style={styles.approvalItemContent}>
+                          <View style={[styles.approvalItemLeft, { flex: 1 }]}>
+                            <ThemedText style={styles.approvalItemName}>{notification.title}</ThemedText>
+                            <ThemedText style={[styles.approvalItemEmail, { marginTop: 4 }]} numberOfLines={isExpanded ? undefined : 2}>
+                              {notification.message}
+                            </ThemedText>
+                            <ThemedText style={[styles.approvalItemDate, { marginTop: 4 }]}>
+                              {timeDisplay}
+                            </ThemedText>
+                            
+                            {isExpanded && (
+                              <View style={{ marginTop: 12, gap: 8 }}>
+                                <View style={styles.approvalItemMeta}>
+                                  <ThemedText style={styles.approvalItemDate}>
+                                    <ThemedText style={{ fontWeight: '600' }}>Target: </ThemedText>
+                                    {notification.targetType === 'all' && 'All Users'}
+                                    {notification.targetType === 'plan' && `Plan: ${notification.targetValue || 'N/A'}`}
+                                    {notification.targetType === 'waitlist' && `Waitlist: ${notification.targetValue || 'All'}`}
+                                    {notification.targetType === 'specific' && `Specific Users (${notification.targetValue?.split(',').length || 0})`}
+                                  </ThemedText>
+                                </View>
+                                
+                                {notification.status === 'sent' && (
+                                  <TouchableOpacity
+                                    onPress={(e) => {
+                                      e.stopPropagation();
+                                      const metadata = notification.metadata || {};
+                                      const sentUserIds = metadata.sentUserIds || [];
+                                      
+                                      if (sentUserIds.length > 0 && expandedSentUsersId !== notification.id) {
+                                        // Load user details
+                                        loadSentUsers(notification.id, sentUserIds);
+                                      }
+                                      setExpandedSentUsersId(expandedSentUsersId === notification.id ? null : notification.id);
+                                    }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                      <ThemedText style={styles.approvalItemDate}>
+                                        Sent to {notification.sentCount} users
+                                        {notification.failedCount > 0 && ` (${notification.failedCount} failed)`}
+                                      </ThemedText>
+                                      <IconSymbol
+                                        name={expandedSentUsersId === notification.id ? 'chevron.up' : 'chevron.down'}
+                                        size={16}
+                                        color={isDark ? '#8E8E93' : '#8E8E93'}
+                                      />
+                                    </View>
+                                    {expandedSentUsersId === notification.id && (
+                                      <View style={{ marginTop: 8, padding: 12, borderRadius: 8, backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }}>
+                                        {sentUsersMap[notification.id] ? (
+                                          sentUsersMap[notification.id].length > 0 ? (
+                                            <ScrollView style={{ maxHeight: 200 }}>
+                                              {sentUsersMap[notification.id].map((user) => (
+                                                <View key={user.id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)' }}>
+                                                  <ThemedText style={styles.approvalItemName}>{user.username || user.email}</ThemedText>
+                                                  <ThemedText style={styles.approvalItemEmail}>{user.email}</ThemedText>
+                                                </View>
+                                              ))}
+                                            </ScrollView>
+                                          ) : (
+                                            <ThemedText style={styles.approvalItemDate}>Loading users...</ThemedText>
+                                          )
+                                        ) : (
+                                          <ThemedText style={styles.approvalItemDate}>Loading users...</ThemedText>
+                                        )}
+                                      </View>
+                                    )}
+                                  </TouchableOpacity>
+                                )}
+
+                                {metadata.cronExpression && (
+                                  <ThemedText style={styles.approvalItemDate}>
+                                    <ThemedText style={{ fontWeight: '600' }}>Cron: </ThemedText>
+                                    {metadata.cronExpression}
+                                  </ThemedText>
+                                )}
+
+                                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                                  <TouchableOpacity
+                                    style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', flex: 1, minWidth: 80 }]}
+                                    onPress={(e) => {
+                                      e.stopPropagation();
+                                      handleReplay(notification);
+                                    }}>
+                                    <ThemedText style={styles.approvalBadgeText}>REPLAY</ThemedText>
+                                  </TouchableOpacity>
+                                  
+                                  {notification.status === 'pending' && (
+                                    <>
+                                      <TouchableOpacity
+                                        style={[styles.approvalBadgeButton, { backgroundColor: '#34C759', flex: 1, minWidth: 80, opacity: isLoading ? 0.6 : 1 }]}
+                                        onPress={(e) => {
+                                          e.stopPropagation();
+                                          sendNotification(notification.id);
+                                        }}
+                                        disabled={isLoading}>
+                                        <ThemedText style={styles.approvalBadgeText}>SEND</ThemedText>
+                                      </TouchableOpacity>
+                                      <TouchableOpacity
+                                        style={[styles.approvalBadgeButton, { backgroundColor: '#8E8E93', flex: 1, minWidth: 80, opacity: isLoading ? 0.6 : 1 }]}
+                                        onPress={(e) => {
+                                          e.stopPropagation();
+                                          cancelNotification(notification.id);
+                                        }}
+                                        disabled={isLoading}>
+                                        <ThemedText style={styles.approvalBadgeText}>CANCEL</ThemedText>
+                                      </TouchableOpacity>
+                                    </>
+                                  )}
+                                  
+                                  <TouchableOpacity
+                                    style={[styles.approvalBadgeButton, { backgroundColor: '#FF3B30', flex: 1, minWidth: 80, opacity: isLoading ? 0.6 : 1 }]}
+                                    onPress={(e) => {
+                                      e.stopPropagation();
+                                      deleteNotification(notification.id);
+                                    }}
+                                    disabled={isLoading}>
+                                    <ThemedText style={styles.approvalBadgeText}>DELETE</ThemedText>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            )}
+                          </View>
+                          
+                          {!isExpanded && (
+                            <View style={[
+                              styles.approvalBadgeButton,
+                              {
+                                backgroundColor:
+                                  notification.status === 'sent' ? '#34C759' :
+                                  notification.status === 'sending' ? '#FF9500' :
+                                  notification.status === 'failed' ? '#FF3B30' :
+                                  notification.status === 'cancelled' ? '#8E8E93' :
+                                  '#4a9eff',
+                              }
+                            ]}>
+                              <ThemedText style={styles.approvalBadgeText}>
+                                {notification.status.toUpperCase()}
+                              </ThemedText>
+                            </View>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })
                 )}
               </View>
             )}
@@ -1295,22 +1634,12 @@ export default function AdminScreen() {
 
               <View style={{ marginBottom: 16 }}>
                 <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>Type</ThemedText>
-                <View style={styles.planButtons}>
-                  {['email', 'in_app', 'push', 'all'].map((type) => (
-                    <TouchableOpacity
-                      key={type}
-                      style={[
-                        styles.planButton,
-                        notificationForm.type === type && styles.planButtonActive,
-                        { backgroundColor: notificationForm.type === type ? '#FF9500' : (isDark ? '#2C2C2E' : '#F2F2F7') },
-                      ]}
-                      onPress={() => setNotificationForm({ ...notificationForm, type })}>
-                      <ThemedText style={[styles.planButtonText, notificationForm.type === type && { color: '#FFFFFF' }]}>
-                        {type.toUpperCase()}
-                      </ThemedText>
-                    </TouchableOpacity>
-                  ))}
+                <View style={[styles.approvalBadgeButton, { backgroundColor: '#FF9500', paddingHorizontal: 16, paddingVertical: 8 }]}>
+                  <ThemedText style={styles.approvalBadgeText}>PUSH NOTIFICATIONS</ThemedText>
                 </View>
+                <ThemedText style={[styles.approvalItemDate, { marginTop: 8 }]}>
+                  Notifications will be sent as push notifications to user devices
+                </ThemedText>
               </View>
 
               <View style={{ marginBottom: 16 }}>
@@ -1324,7 +1653,14 @@ export default function AdminScreen() {
                         notificationForm.targetType === target && styles.planButtonActive,
                         { backgroundColor: notificationForm.targetType === target ? '#FF9500' : (isDark ? '#2C2C2E' : '#F2F2F7') },
                       ]}
-                      onPress={() => setNotificationForm({ ...notificationForm, targetType: target, targetValue: '' })}>
+                      onPress={() => {
+                        setNotificationForm({ ...notificationForm, targetType: target, targetValue: '' });
+                        if (target === 'specific') {
+                          loadUsersForSelection();
+                        } else {
+                          setSelectedUserIds([]);
+                        }
+                      }}>
                       <ThemedText style={[styles.planButtonText, notificationForm.targetType === target && { color: '#FFFFFF' }]}>
                         {target.toUpperCase()}
                       </ThemedText>
@@ -1333,35 +1669,162 @@ export default function AdminScreen() {
                 </View>
               </View>
 
-              {(notificationForm.targetType === 'plan' || notificationForm.targetType === 'waitlist' || notificationForm.targetType === 'specific') && (
+              {notificationForm.targetType === 'plan' && (
                 <View style={{ marginBottom: 16 }}>
-                  <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>
-                    {notificationForm.targetType === 'plan' ? 'Plan (e.g., free, pro, power)' :
-                     notificationForm.targetType === 'waitlist' ? 'Status (approved, pending, or leave empty for all)' :
-                     'User IDs (comma-separated)'}
-                  </ThemedText>
+                  <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>Plan</ThemedText>
                   <TextInput
                     style={[styles.textInput, { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7', color: isDark ? '#FFFFFF' : '#000000' }]}
                     value={notificationForm.targetValue}
                     onChangeText={(text) => setNotificationForm({ ...notificationForm, targetValue: text })}
-                    placeholder={notificationForm.targetType === 'plan' ? 'free' : notificationForm.targetType === 'waitlist' ? 'approved' : 'user1, user2, user3'}
+                    placeholder="free, pro, power, or enterprise"
                     placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
                   />
                 </View>
               )}
 
+              {notificationForm.targetType === 'waitlist' && (
+                <View style={{ marginBottom: 16 }}>
+                  <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>Status</ThemedText>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7', color: isDark ? '#FFFFFF' : '#000000' }]}
+                    value={notificationForm.targetValue}
+                    onChangeText={(text) => setNotificationForm({ ...notificationForm, targetValue: text })}
+                    placeholder="approved, pending, or leave empty for all"
+                    placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
+                  />
+                </View>
+              )}
+
+              {notificationForm.targetType === 'specific' && (
+                <View style={{ marginBottom: 16 }}>
+                  <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>Select Users</ThemedText>
+                  {allUsersList.length === 0 ? (
+                    <TouchableOpacity
+                      style={[styles.approvalBadgeButton, { backgroundColor: '#4a9eff', marginBottom: 8 }]}
+                      onPress={loadUsersForSelection}>
+                      <ThemedText style={styles.approvalBadgeText}>Load Users</ThemedText>
+                    </TouchableOpacity>
+                  ) : (
+                    <ScrollView style={{ maxHeight: 200, marginBottom: 8 }}>
+                      {allUsersList.map((user) => (
+                        <TouchableOpacity
+                          key={user.id}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            padding: 12,
+                            borderRadius: 8,
+                            marginBottom: 4,
+                            backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
+                          }}
+                          onPress={() => toggleUserSelection(user.id)}>
+                          <View style={{
+                            width: 24,
+                            height: 24,
+                            borderRadius: 4,
+                            borderWidth: 2,
+                            borderColor: selectedUserIds.includes(user.id) ? '#FF9500' : (isDark ? '#8E8E93' : '#8E8E93'),
+                            backgroundColor: selectedUserIds.includes(user.id) ? '#FF9500' : 'transparent',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            marginRight: 12,
+                          }}>
+                            {selectedUserIds.includes(user.id) && (
+                              <ThemedText style={{ color: '#FFFFFF', fontSize: 14, fontWeight: 'bold' }}>✓</ThemedText>
+                            )}
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <ThemedText style={styles.approvalItemName}>{user.username || user.email}</ThemedText>
+                            <ThemedText style={styles.approvalItemEmail}>{user.email}</ThemedText>
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  )}
+                  {selectedUserIds.length > 0 && (
+                    <ThemedText style={[styles.approvalItemDate, { marginTop: 4 }]}>
+                      {selectedUserIds.length} user{selectedUserIds.length !== 1 ? 's' : ''} selected
+                    </ThemedText>
+                  )}
+                </View>
+              )}
+
               <View style={{ marginBottom: 16 }}>
-                <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>Schedule (optional)</ThemedText>
-                <TextInput
-                  style={[styles.textInput, { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7', color: isDark ? '#FFFFFF' : '#000000' }]}
-                  value={notificationForm.scheduledFor}
-                  onChangeText={(text) => setNotificationForm({ ...notificationForm, scheduledFor: text })}
-                  placeholder="YYYY-MM-DDTHH:mm (leave empty for immediate)"
-                  placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
-                />
-                <ThemedText style={[styles.approvalItemDate, { marginTop: 4 }]}>
-                  Leave empty to send immediately, or use ISO format: 2025-01-15T14:30
-                </ThemedText>
+                <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>Schedule Type</ThemedText>
+                <View style={styles.planButtons}>
+                  {['datetime', 'cron'].map((type) => (
+                    <TouchableOpacity
+                      key={type}
+                      style={[
+                        styles.planButton,
+                        notificationForm.scheduleType === type && styles.planButtonActive,
+                        { backgroundColor: notificationForm.scheduleType === type ? '#FF9500' : (isDark ? '#2C2C2E' : '#F2F2F7') },
+                      ]}
+                      onPress={() => setNotificationForm({ ...notificationForm, scheduleType: type as any })}>
+                      <ThemedText style={[styles.planButtonText, notificationForm.scheduleType === type && { color: '#FFFFFF' }]}>
+                        {type.toUpperCase()}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {notificationForm.scheduleType === 'datetime' && (
+                  <>
+                    <TextInput
+                      style={[styles.textInput, { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7', color: isDark ? '#FFFFFF' : '#000000', marginTop: 12 }]}
+                      value={notificationForm.scheduledFor}
+                      onChangeText={(text) => setNotificationForm({ ...notificationForm, scheduledFor: text })}
+                      placeholder="YYYY-MM-DDTHH:mm (leave empty for immediate)"
+                      placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
+                    />
+                    <ThemedText style={[styles.approvalItemDate, { marginTop: 4 }]}>
+                      Leave empty to send immediately, or use ISO format: 2025-01-15T14:30
+                    </ThemedText>
+                  </>
+                )}
+
+                {notificationForm.scheduleType === 'cron' && (
+                  <>
+                    <TextInput
+                      style={[styles.textInput, { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7', color: isDark ? '#FFFFFF' : '#000000', marginTop: 12 }]}
+                      value={notificationForm.cronExpression}
+                      onChangeText={(text) => {
+                        setNotificationForm({ ...notificationForm, cronExpression: text });
+                        // Calculate next 3 occurrences in IST
+                        if (text.trim()) {
+                          const result = getCronNextOccurrences(text.trim(), 3);
+                          if (result.isValid) {
+                            setCronNextOccurrences(result.occurrences);
+                          } else {
+                            setCronNextOccurrences([]);
+                          }
+                        } else {
+                          setCronNextOccurrences([]);
+                        }
+                      }}
+                      placeholder="0 9 * * * (e.g., daily at 9 AM IST)"
+                      placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
+                    />
+                    {cronNextOccurrences.length > 0 && (
+                      <View style={{ marginTop: 12, padding: 12, borderRadius: 8, backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }}>
+                        <ThemedText style={[styles.modalInfoLabel, { marginBottom: 8 }]}>Next 3 occurrences (IST):</ThemedText>
+                        {cronNextOccurrences.map((date, index) => (
+                          <ThemedText key={index} style={[styles.approvalItemDate, { marginTop: 4 }]}>
+                            {index + 1}. {formatISTDate(date)}
+                          </ThemedText>
+                        ))}
+                      </View>
+                    )}
+                    <ThemedText style={[styles.approvalItemDate, { marginTop: 4 }]}>
+                      Cron expression format: minute hour day month weekday (all times in IST){'\n'}
+                      Examples:{'\n'}
+                      • 0 9 * * * - Daily at 9 AM IST{'\n'}
+                      • 0 0 * * 0 - Weekly on Sunday at midnight IST{'\n'}
+                      • 0 0 1 * * - Monthly on the 1st at midnight IST{'\n'}
+                      • */30 * * * * - Every 30 minutes
+                    </ThemedText>
+                  </>
+                )}
               </View>
 
               <TouchableOpacity
@@ -1405,23 +1868,28 @@ const styles = StyleSheet.create({
   placeholder: {
     width: 32,
   },
-  tabs: {
-    flexDirection: 'row',
+  tabsContainer: {
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(128, 128, 128, 0.2)',
+  },
+  tabsContent: {
     paddingHorizontal: 20,
+    alignItems: 'center',
   },
   tab: {
-    flex: 1,
-    paddingVertical: 16,
+    flexDirection: 'row',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderBottomWidth: 2,
     alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 100,
   },
   activeTab: {
     borderBottomWidth: 2,
   },
   tabText: {
-    fontSize: 14,
+    fontSize: 13,
     opacity: 0.7,
   },
   section: {
