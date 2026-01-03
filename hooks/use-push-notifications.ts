@@ -26,14 +26,15 @@ export function usePushNotifications() {
   useEffect(() => {
     if (!user?.id) return;
 
-    // On web, check if service workers are supported
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && !('serviceWorker' in navigator)) {
-      console.warn('⚠️ Push notifications not supported: Service Workers not available');
+    // Skip web push notifications (requires VAPID keys setup)
+    // TODO: Add VAPID keys to app.json for web support
+    if (Platform.OS === 'web') {
+      console.log('ℹ️ Push notifications on web require VAPID keys setup - skipping for now');
       return;
     }
 
     // On native, check if it's a physical device (simulators don't support push)
-    if (Platform.OS !== 'web' && !Device.isDevice) {
+    if (!Device.isDevice) {
       console.warn('⚠️ Push notifications require a physical device');
       return;
     }

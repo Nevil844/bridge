@@ -325,7 +325,7 @@ router.post('/notifications', verifyUser, verifyAdmin, async (req, res) => {
     const notification = await notificationService.createNotification({
       title,
       message,
-      type: type || 'email',
+      type: 'push', // Only push notifications supported
       targetType: targetType || 'all',
       targetValue,
       scheduledFor,
