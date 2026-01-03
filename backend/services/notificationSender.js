@@ -19,7 +19,8 @@ class NotificationSender {
         return { sent: 0, failed: 0, message: 'No target users found' };
       }
 
-      // Create a new notification entry for this cron execution
+      // Create a completely separate notification entry for this cron execution
+      // This is a NEW notification, not linked to the cron - they are separate entities
       const sentNotification = await notificationService.createNotification({
         title: cronNotification.title,
         message: cronNotification.message,
@@ -28,9 +29,7 @@ class NotificationSender {
         targetValue: cronNotification.targetValue,
         scheduledFor: null, // Already being sent
         createdBy: cronNotification.createdBy,
-        metadata: {
-          cronNotificationId: cronNotification.id, // Link back to the cron
-        },
+        metadata: {}, // No cronExpression - this is a regular sent notification, completely separate from cron
       });
 
       // Mark the new notification as sending
