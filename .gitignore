@@ -48,3 +48,7 @@ app-example
 
 # cache files
 backend/.cache
+
+# Firebase Service Account (sensitive)
+bridge-ai-*.json
+*.json.backup
