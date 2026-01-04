@@ -85,6 +85,15 @@ export default function AboutScreen() {
               <View style={styles.developerDivider} />
               <View style={styles.legalLinks}>
                 <TouchableOpacity 
+                  onPress={() => router.push('/support')}
+                  style={styles.legalLinkButton}
+                >
+                  <ThemedText style={[styles.legalLink, { color: isDark ? '#4A9EFF' : '#007AFF' }]}>
+                    Support
+                  </ThemedText>
+                </TouchableOpacity>
+                <ThemedText style={styles.developerSeparator}>•</ThemedText>
+                <TouchableOpacity 
                   onPress={() => router.push('/terms')}
                   style={styles.legalLinkButton}
                 >
