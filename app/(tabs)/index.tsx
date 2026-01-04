@@ -14,7 +14,6 @@ import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePreferences } from '@/hooks/use-preferences';
 import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
-import { useSpeechRecognition } from '@/hooks/use-speech-recognition';
 import { errorFeedback, lightImpact, mediumImpact, successFeedback } from '@/utils/haptics';
 import { storage, STORAGE_KEYS } from '@/utils/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -39,7 +38,6 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
-
 interface ThinkingData {
   isInternal: boolean;
   thinking: string;
@@ -119,38 +117,6 @@ export default function HomeScreen() {
   const transcribeWebSocketRef = useRef<WebSocket | null>(null);
   const [transcriptionText, setTranscriptionText] = useState('');
   const [isTranscribing, setIsTranscribing] = useState(false);
-  const [useOnDeviceSpeech, setUseOnDeviceSpeech] = useState(true); // Toggle for on-device vs server
-  const [onDeviceSpeechError, setOnDeviceSpeechError] = useState<string | null>(null);
-  
-  // On-device speech recognition hook
-  const {
-    isRecording: isOnDeviceRecording,
-    transcript: onDeviceTranscript,
-    error: onDeviceError,
-    start: startOnDeviceSpeech,
-    stop: stopOnDeviceSpeech,
-    destroy: destroyOnDeviceSpeech,
-  } = useSpeechRecognition({
-    onResult: (text) => {
-      setTranscriptionText(text);
-      setInputText(text);
-    },
-    onError: (error) => {
-      console.error('On-device speech recognition error:', error);
-      setOnDeviceSpeechError(error.message);
-      // Fallback to server-based transcription
-      if (useOnDeviceSpeech) {
-        console.log('Falling back to server-based transcription');
-        setUseOnDeviceSpeech(false);
-        // Start server-based recording as fallback
-        startRecordingServerBased();
-      }
-    },
-    onStart: () => {
-      setOnDeviceSpeechError(null);
-    },
-    language: 'en-US', // Can be made configurable
-  });
   const [showSidebar, setShowSidebar] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [chatHistory, setChatHistory] = useState<Array<{id: string, title: string, lastActive: string, messageCount: number}>>([]);
@@ -705,45 +671,9 @@ export default function HomeScreen() {
     }
   };
 
-  // Main recording function - tries on-device first, falls back to server
+  // Main recording function
   const startRecording = async () => {
-    try {
-      console.log('[HomeScreen] 🎤 Starting recording...');
-      mediumImpact(); // Haptic feedback when starting recording
-      setTranscriptionText('');
-      setOnDeviceSpeechError(null);
-
-      // Try on-device speech recognition first (if enabled and available)
-      if (useOnDeviceSpeech) {
-        console.log('[HomeScreen] 🔍 Attempting on-device speech recognition...');
-        try {
-          await startOnDeviceSpeech();
-          setIsRecording(true);
-          console.log('[HomeScreen] ✅ On-device speech recognition started successfully');
-          return; // Successfully started on-device
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'On-device speech failed';
-          console.warn('[HomeScreen] ⚠️ On-device speech recognition failed, falling back to server:', error);
-          setOnDeviceSpeechError(errorMessage);
-          
-          // If it's a native module error, disable on-device permanently for this session
-          if (errorMessage.includes('native module') || errorMessage.includes('development build') || errorMessage.includes('Expo Go')) {
-            console.log('[HomeScreen] ℹ️ Disabling on-device speech (not available in Expo Go)');
-            setUseOnDeviceSpeech(false);
-          }
-          
-          // Continue to server-based fallback
-        }
-      }
-
-      // Fallback to server-based transcription
-      console.log('[HomeScreen] 🔄 Falling back to server-based transcription...');
-      await startRecordingServerBased();
-    } catch (err) {
-      console.error('[HomeScreen] ❌ Failed to start recording:', err);
-      Alert.alert('Error', 'Failed to start recording');
-      setIsRecording(false);
-    }
+    await startRecordingServerBased();
   };
 
   // Stream audio file after recording stops
@@ -852,27 +782,6 @@ export default function HomeScreen() {
 
   const stopRecording = async () => {
     mediumImpact(); // Haptic feedback when stopping recording
-
-    // Handle on-device speech recognition
-    if (isOnDeviceRecording && useOnDeviceSpeech) {
-      try {
-        await stopOnDeviceSpeech();
-        setIsRecording(false);
-        setIsTranscribing(false);
-        // Transcript is already set via onResult callback
-        if (onDeviceTranscript.trim()) {
-          setInputText(onDeviceTranscript);
-        }
-        return;
-      } catch (error) {
-        console.error('Error stopping on-device speech recognition:', error);
-        setIsRecording(false);
-        setIsTranscribing(false);
-        return;
-      }
-    }
-
-    // Handle server-based recording
     if (!recording) return;
     // Store reference to recording before we potentially clear it
     const recordingToStop = recording;
