@@ -10,11 +10,12 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.nevil84.bridgeai",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSMicrophoneUsageDescription": "This app uses the microphone to record your voice for speech-to-text conversion.",
-        "NSSpeechRecognitionUsageDescription": "This app uses speech recognition to convert your voice to text."
+        "NSSpeechRecognitionUsageDescription": "This app uses speech recognition to convert your voice to text.",
+        "NSPhotoLibraryUsageDescription": "This app may access your photo library to allow you to share images in conversations with the AI assistant."
       }
     },
     "android": {

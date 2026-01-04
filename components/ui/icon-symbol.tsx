@@ -29,6 +29,7 @@ const MAPPING = {
   'square.and.pencil': 'create',
   trash: 'trash',
   envelope: 'mail',
+  'envelope.fill': 'mail',
   'arrow.right.square': 'arrow-forward-circle',
 
   // Settings / usage
