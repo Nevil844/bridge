@@ -64,10 +64,34 @@ export function usePushNotifications() {
 
         // Get token
         const projectId = '072b0e6b-d00e-4392-8330-9314b59dfd8b';
-        const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+        console.log(`[PushNotifications] 📱 Getting Expo push token for project: ${projectId}`);
+        
+        let token: string;
+        try {
+          const tokenData = await Notifications.getExpoPushTokenAsync({ 
+            projectId,
+            // For production builds, ensure we're using the correct experience
+            ...(Platform.OS === 'android' && {
+              // Android-specific options
+            }),
+          });
+          token = tokenData.data;
+          console.log(`[PushNotifications] ✅ Got token: ${token.substring(0, 20)}...`);
+        } catch (tokenError: any) {
+          console.error('[PushNotifications] ❌ Failed to get Expo push token:', tokenError);
+          // Check for common issues
+          if (tokenError?.message?.includes('getDevicePushTokenAsync')) {
+            console.error('[PushNotifications] ⚠️ This might be a production build issue. Make sure:');
+            console.error('  1. Google Services are properly configured');
+            console.error('  2. FCM credentials are set up in Expo');
+            console.error('  3. The app is signed with the correct keystore');
+          }
+          throw tokenError;
+        }
 
         // Register with backend
-        await authenticatedFetch(API_ENDPOINTS.NOTIFICATIONS.REGISTER, {
+        console.log(`[PushNotifications] 📤 Registering token with backend...`);
+        const response = await authenticatedFetch(API_ENDPOINTS.NOTIFICATIONS.REGISTER, {
           method: 'POST',
           body: JSON.stringify({
             token,
@@ -75,9 +99,20 @@ export function usePushNotifications() {
           }),
         });
 
-        console.log(`✅ Push notifications registered (${Platform.OS})`);
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(errorData.error || `Failed to register: ${response.status}`);
+        }
+
+        const result = await response.json();
+        console.log(`[PushNotifications] ✅ Push notifications registered (${Platform.OS})`, result);
       } catch (error) {
-        console.error('❌ Push notification registration failed:', error);
+        console.error('[PushNotifications] ❌ Push notification registration failed:', error);
+        // Log detailed error for debugging
+        if (error instanceof Error) {
+          console.error('[PushNotifications] Error message:', error.message);
+          console.error('[PushNotifications] Error stack:', error.stack);
+        }
       }
     })();
   }, [user?.id]);
