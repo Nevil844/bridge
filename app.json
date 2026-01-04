@@ -13,7 +13,8 @@
       "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSMicrophoneUsageDescription": "This app uses the microphone to record your voice for speech-to-text conversion."
+        "NSMicrophoneUsageDescription": "This app uses the microphone to record your voice for speech-to-text conversion.",
+        "NSSpeechRecognitionUsageDescription": "This app uses speech recognition to convert your voice to text."
       }
     },
     "android": {
@@ -57,6 +58,13 @@
           "icon": "./assets/images/logo-transparent.png",
           "color": "#FF9500",
           "mode": "production"
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "This app uses the microphone to record your voice for speech-to-text conversion.",
+          "speechRecognitionPermission": "This app uses speech recognition to convert your voice to text."
         }
       ]
     ],

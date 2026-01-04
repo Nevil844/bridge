@@ -14,10 +14,10 @@ import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePreferences } from '@/hooks/use-preferences';
 import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
+import { useSpeechRecognition } from '@/hooks/use-speech-recognition';
 import { errorFeedback, lightImpact, mediumImpact, successFeedback } from '@/utils/haptics';
 import { storage, STORAGE_KEYS } from '@/utils/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Audio } from 'expo-av';
 import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -112,11 +112,12 @@ export default function HomeScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState('anthropic.claude-sonnet-4-5-20250929-v1:0'); // Default to Claude Sonnet 4.5
   const [showModelPicker, setShowModelPicker] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  const transcribeWebSocketRef = useRef<WebSocket | null>(null);
-  const [transcriptionText, setTranscriptionText] = useState('');
-  const [isTranscribing, setIsTranscribing] = useState(false);
+  // Server-side transcription state (commented out - using on-device instead)
+  // const [isRecording, setIsRecording] = useState(false);
+  // const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  // const transcribeWebSocketRef = useRef<WebSocket | null>(null);
+  // const [transcriptionText, setTranscriptionText] = useState('');
+  // const [isTranscribing, setIsTranscribing] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [chatHistory, setChatHistory] = useState<Array<{id: string, title: string, lastActive: string, messageCount: number}>>([]);
@@ -150,6 +151,45 @@ export default function HomeScreen() {
   const slideAnim = useRef(new Animated.Value(0)).current;
   const activeWebSocketRef = useRef<WebSocket | null>(null);
   const inputRef = useRef<TextInput>(null);
+  
+  // On-device speech recognition (eliminates server latency)
+  const [isOnDeviceRecording, setIsOnDeviceRecording] = useState(false);
+  const [onDeviceTranscript, setOnDeviceTranscript] = useState('');
+  
+  const {
+    isListening: speechIsListening,
+    startListening: speechStartListening,
+    stopListening: speechStopListening,
+  } = useSpeechRecognition({
+    language: 'en-US',
+    onResult: (text, isFinal) => {
+      if (isFinal && text.trim()) {
+        // Final result - put text in input field
+        setInputText(prev => prev + (prev ? ' ' : '') + text.trim());
+        setOnDeviceTranscript('');
+        setIsOnDeviceRecording(false);
+        successFeedback(); // Haptic feedback on successful transcription
+      } else {
+        // Interim result - show in recording indicator
+        setOnDeviceTranscript(text);
+      }
+    },
+    onError: (error) => {
+      setIsOnDeviceRecording(false);
+      setOnDeviceTranscript('');
+      if (Platform.OS === 'web') {
+        Alert.alert('Speech Not Available', 'Speech recognition is not supported in this browser. Please use the mobile app.', [{ text: 'OK' }]);
+      } else {
+        Alert.alert('Speech Recognition Error', error, [{ text: 'OK' }]);
+      }
+    },
+  });
+
+  // Sync speech recognition state with our recording indicator
+  useEffect(() => {
+    setIsOnDeviceRecording(speechIsListening);
+  }, [speechIsListening]);
+  
   const { topInset, bottomInset } = useSafeAreaPadding({ top: 12, bottom: 16 });
   const headerPaddingTop = topInset + 20;
   const headerButtonTop = topInset + 24;
@@ -537,436 +577,61 @@ export default function HomeScreen() {
     }
   };
 
-  // Server-based transcription (fallback)
+  /* SERVER-BASED TRANSCRIPTION COMMENTED OUT - Using on-device speech recognition instead
   const startRecordingServerBased = async () => {
-    try {
-      const permission = await Audio.requestPermissionsAsync();
-      
-      if (permission.status !== 'granted') {
-        Alert.alert('Permission Required', 'Please grant microphone permission to use voice input.');
-        return;
-      }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
-
-      // Create recording with PCM format for real-time streaming
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-      
-      setRecording(recording);
-      setIsRecording(true);
-      setTranscriptionText('');
-
-      // Get access token for WebSocket authentication
-      const { getAccessToken } = require('@/utils/api');
-      const token = await getAccessToken();
-      
-      if (!token) {
-        Alert.alert('Error', 'No access token available. Please log in again.');
-        setIsRecording(false);
-        return;
-      }
-
-      // Create WebSocket connection for real-time transcription
-      const ws = new WebSocket(API_ENDPOINTS.TRANSCRIBE_WS);
-      transcribeWebSocketRef.current = ws;
-      
-      let transcriptionCompleted = false; // Track if transcription completed successfully
-
-      ws.onopen = () => {
-        // Authenticate first
-        ws.send(JSON.stringify({ type: 'auth', token }));
-      };
-
-      const messageHandler = (event: MessageEvent) => {
-        // Handle binary audio data (shouldn't come from server, but handle gracefully)
-        if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
-          return;
-        }
-
-        try {
-          const data = JSON.parse(event.data);
-          console.log('📨 Transcription WebSocket message:', data.type);
-          
-          if (data.type === 'authenticated') {
-            // Don't start here - let streamAudioChunks handle it
-            console.log('✅ Transcription WebSocket authenticated');
-          } else if (data.type === 'transcript') {
-            // Update transcription text (partial or final)
-            const transcriptText = data.text || '';
-            console.log('📝 Transcript received:', transcriptText, data.isPartial ? '(partial)' : '(final)');
-            
-            if (transcriptText.trim()) {
-              setTranscriptionText(transcriptText);
-              setInputText(transcriptText);
-            } else {
-              console.warn('⚠️ Received empty transcript');
-            }
-            
-            // If final transcript, mark as completed
-            if (!data.isPartial && transcriptText.trim()) {
-              transcriptionCompleted = true; // Mark transcription as successfully completed
-              console.log('✅ Final transcript ready:', transcriptText);
-              // Optionally auto-send final transcript
-              // handleSendWithText(transcriptText);
-            }
-          } else if (data.type === 'error') {
-            console.error('Transcription error:', data.message);
-            if (!transcriptionCompleted) {
-              Alert.alert('Transcription Error', data.message);
-            }
-            setIsTranscribing(false); // Reset on error
-          } else if (data.type === 'stopped') {
-            console.log('Transcription stopped');
-            setIsTranscribing(false); // Reset when stopped
-          }
-        } catch (error) {
-          // Not JSON, might be binary - ignore
-          console.warn('Non-JSON message received (likely binary audio):', error);
-        }
-      };
-
-      ws.addEventListener('message', messageHandler);
-      
-      // Store handler reference for cleanup
-      (ws as any)._transcribeMessageHandler = messageHandler;
-
-      ws.onerror = (error) => {
-        // Only show error if transcription hasn't completed successfully
-        if (!transcriptionCompleted) {
-          const wsState = ws.readyState;
-          // Only treat as real error if WebSocket is in a bad state (not CLOSED or CLOSING)
-          if (wsState !== 2 && wsState !== 3) { // Not CLOSING (2) or CLOSED (3)
-            console.error('Transcription WebSocket error (state:', wsState, '):', error);
-            Alert.alert('Error', 'Failed to connect to transcription service');
-          } else {
-            console.log('Transcription WebSocket closing/closed (normal):', wsState);
-          }
-        } else {
-          console.log('Transcription WebSocket error after successful completion (ignored)');
-        }
-      };
-
-      ws.onclose = () => {
-        const handler = (ws as any)?._transcribeMessageHandler;
-        if (handler) {
-          ws.removeEventListener('message', handler);
-          delete (ws as any)._transcribeMessageHandler;
-        }
-        transcribeWebSocketRef.current = null;
-        console.log('🔌 Transcription WebSocket closed');
-      };
-
-      // Don't stream yet - wait until recording stops
-      // Expo Audio's getURI() only works AFTER recording stops
-      // We'll stream the file in stopRecording()
-    } catch (err) {
-      console.error('Failed to start server-based recording', err);
-      Alert.alert('Error', 'Failed to start recording');
-      setIsRecording(false);
-    }
+    // ... server-based transcription code removed for brevity ...
+    // See git history if you need to restore this
   };
+  */
 
-  // Main recording function
+  // Main recording function - uses on-device speech recognition
   const startRecording = async () => {
-    await startRecordingServerBased();
-  };
-
-  // Stream audio file after recording stops
-  // Note: Expo Audio's getURI() only works AFTER recording stops
-  // This reads the m4a file and sends it to the backend for transcription
-  const streamAudioFile = async (recording: Audio.Recording, ws: WebSocket) => {
-    try {
-      // Get the recording URI (only available after recording stops)
-      const uri = recording.getURI();
-      if (!uri) {
-        throw new Error('Recording URI not available. Make sure recording has stopped.');
-      }
-
-      console.log(`📁 Reading audio file from: ${uri}`);
-
-      // Read the entire audio file using fetch (works better with local file URIs on Android/Expo Go)
-      let audioData: Uint8Array;
-      try {
-        const response = await fetch(uri);
-        if (!response.ok) {
-          throw new Error(`Failed to read audio file: ${response.status} ${response.statusText}`);
-        }
-        const arrayBuffer = await response.arrayBuffer();
-        audioData = new Uint8Array(arrayBuffer);
-      } catch (fetchError: any) {
-        // Fallback to XMLHttpRequest if fetch fails (for older React Native versions)
-        console.log('⚠️ Fetch failed, trying XMLHttpRequest fallback...');
-        audioData = await new Promise<Uint8Array>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open('GET', uri, true);
-          xhr.responseType = 'arraybuffer';
-          
-          xhr.onload = () => {
-            if (xhr.status === 200 || xhr.status === 0) { // Status 0 is OK for local files
-              const arrayBuffer = xhr.response as ArrayBuffer;
-              resolve(new Uint8Array(arrayBuffer));
-            } else {
-              reject(new Error(`Failed to read audio file: ${xhr.status} ${xhr.statusText}`));
-            }
-          };
-          
-          xhr.onerror = () => {
-            reject(new Error(`Failed to read audio file: ${fetchError?.message || 'network error'}`));
-          };
-          
-          xhr.send();
-        });
-      }
-
-      const fileSize = audioData.length;
-      console.log(`📦 Audio file size: ${fileSize} bytes`);
-
-      if (fileSize === 0) {
-        throw new Error('Audio file is empty');
-      }
-
-      // Start transcription stream
-      if (ws.readyState === WebSocket.OPEN) {
-        console.log('🎤 Starting transcription stream...');
-        ws.send(JSON.stringify({
-          type: 'start',
-          languageCode: 'en-US',
-          sampleRate: 16000,
-        }));
-
-        // Wait a bit for the stream to initialize
-        await new Promise(resolve => setTimeout(resolve, 200));
-
-        // Stream the file in chunks
-        // Note: This is m4a format, backend needs to convert to PCM
-        const chunkSize = 3200; // AWS Transcribe recommended chunk size
-        let offset = 0;
-        let chunksSent = 0;
-
-        while (offset < fileSize && ws.readyState === WebSocket.OPEN) {
-          const endOffset = Math.min(offset + chunkSize, fileSize);
-          const audioChunk = audioData.slice(offset, endOffset);
-          
-          if (audioChunk.length > 0) {
-            chunksSent++;
-            if (chunksSent <= 5 || chunksSent % 20 === 0) {
-              console.log(`📤 Sending audio chunk #${chunksSent}: ${audioChunk.length} bytes (${Math.round(offset / fileSize * 100)}%)`);
-            }
-            ws.send(audioChunk);
-          }
-          
-          offset += chunkSize;
-          
-          // Small delay to avoid overwhelming the connection
-          await new Promise(resolve => setTimeout(resolve, 10));
-        }
-
-        console.log(`✅ Finished streaming audio file. Total chunks: ${chunksSent}`);
-      }
-    } catch (error) {
-      console.error('❌ Error streaming audio file:', error);
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'error',
-          message: 'Failed to stream audio: ' + (error as Error).message,
-        }));
-      }
-      throw error;
+    lightImpact(); // Haptic feedback when starting recording
+    
+    // On web, show not supported message
+    if (Platform.OS === 'web') {
+      Alert.alert(
+        'Voice Input Not Available',
+        'Voice input is only available on the mobile app. Please type your message instead.',
+        [{ text: 'OK' }]
+      );
+      return;
     }
-  };
-
-  const stopRecording = async () => {
-    mediumImpact(); // Haptic feedback when stopping recording
-    if (!recording) return;
-    // Store reference to recording before we potentially clear it
-    const recordingToStop = recording;
-    let recordingUri: string | null = null;
-
+    
     try {
-      setIsRecording(false);
-      setIsTranscribing(true); // Disable buttons during transcription
-      setTranscriptionText('Transcribing...'); // Show loading state
-      
-      // Stop the recording first to get the URI
-      console.log('🛑 Stopping recording...');
-      
-      try {
-        // Check if recording is still valid before stopping
-        const status = await recordingToStop.getStatusAsync();
-        console.log('📊 Recording status:', status);
-        
-        // Try to stop the recording
-        if (status.isRecording) {
-          try {
-            await recordingToStop.stopAndUnloadAsync();
-            console.log('✅ Recording stopped successfully');
-          } catch (stopError: any) {
-            console.warn('⚠️ Error during stopAndUnloadAsync, but continuing:', stopError);
-            // Continue anyway - might still be able to get URI
-          }
-        } else {
-          console.log('⚠️ Recording already stopped');
-        }
-        
-        // Get URI after stopping (getURI() should work after stopAndUnloadAsync)
-        try {
-          recordingUri = recordingToStop.getURI();
-          if (!recordingUri) {
-            // On Android, sometimes getURI() returns null even after stopping
-            // Try waiting a bit and checking status
-            console.log('⚠️ URI is null, waiting and retrying...');
-            await new Promise(resolve => setTimeout(resolve, 200));
-            recordingUri = recordingToStop.getURI();
-          }
-          
-          if (!recordingUri) {
-            throw new Error('Recording URI not available after stopping');
-          }
-          console.log('✅ Got recording URI:', recordingUri);
-        } catch (uriError: any) {
-          console.error('❌ Failed to get recording URI:', uriError);
-          throw new Error(`Failed to get recording URI: ${uriError.message || 'Unknown error'}`);
-        }
-      } catch (error: any) {
-        console.error('❌ Error in stop recording process:', error);
-        // Re-throw with more context
-        throw error;
-      }
-      
-      if (!recordingUri) {
-        throw new Error('Recording URI not available after stopping');
-      }
-      
-      // Now get the URI and stream the file
-      const ws = transcribeWebSocketRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        // Wait for authentication if not already authenticated
-        let authenticated = false;
-        const checkAuth = () => {
-          // Check if we received authenticated message
-          return authenticated;
-        };
-        
-        // Set up a one-time auth check
-        const authCheckHandler = (event: MessageEvent) => {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.type === 'authenticated') {
-              authenticated = true;
-              ws.removeEventListener('message', authCheckHandler);
-            }
-          } catch (e) {
-            // Not JSON, ignore
-          }
-        };
-        
-        // If not authenticated yet, wait for it
-        if (!authenticated) {
-          ws.addEventListener('message', authCheckHandler);
-          // Wait up to 2 seconds for authentication
-          await new Promise((resolve) => {
-            const timeout = setTimeout(() => {
-              ws.removeEventListener('message', authCheckHandler);
-              resolve(undefined);
-            }, 2000);
-            
-            const checkInterval = setInterval(() => {
-              if (authenticated) {
-                clearTimeout(timeout);
-                clearInterval(checkInterval);
-                ws.removeEventListener('message', authCheckHandler);
-                resolve(undefined);
-              }
-            }, 100);
-          });
-        }
-        
-        // Now stream the audio file - create a mock recording object with the URI
-        // Since we already have the URI, we can pass it directly
-        const mockRecording = {
-          getURI: () => recordingUri,
-        } as Audio.Recording;
-        await streamAudioFile(mockRecording, ws);
-        
-        // Stop transcription stream (triggers batch processing)
-        console.log('🛑 Stopping transcription stream...');
-        ws.send(JSON.stringify({ type: 'stop' }));
-        
-        // Wait for transcript message (batch transcription takes time)
-        let transcriptReceived = false;
-        const transcriptHandler = (event: MessageEvent) => {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.type === 'transcript' && !data.isPartial) {
-              transcriptReceived = true;
-              console.log('✅ Received final transcript, closing WebSocket...');
-            }
-          } catch (e) {
-            // Not JSON, ignore
-          }
-        };
-        
-        ws.addEventListener('message', transcriptHandler);
-        
-        // Wait up to 30 seconds for transcript (batch transcription can take time)
-        const maxWaitTime = 30000; // 30 seconds
-        const checkInterval = 100; // Check every 100ms
-        let waited = 0;
-        
-        while (!transcriptReceived && waited < maxWaitTime && ws.readyState === WebSocket.OPEN) {
-          await new Promise(resolve => setTimeout(resolve, checkInterval));
-          waited += checkInterval;
-        }
-        
-        if (!transcriptReceived) {
-          console.warn('⚠️ Transcript not received within timeout, closing WebSocket anyway');
-        }
-        
-        ws.removeEventListener('message', transcriptHandler);
-        const handler = (ws as any)?._transcribeMessageHandler;
-        if (handler) {
-          ws.removeEventListener('message', handler);
-        }
-        ws.close();
-        transcribeWebSocketRef.current = null;
-      }
-
-      // Clean up audio mode
-      try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-        });
-      } catch (audioModeError) {
-        console.warn('⚠️ Failed to reset audio mode:', audioModeError);
-        // Non-critical error, continue
-      }
-
-      // Clean up recording reference
-      setRecording(null);
-      setIsTranscribing(false); // Re-enable buttons after transcription
-
-      // If we have final transcription text, use it
-      if (transcriptionText.trim()) {
-        setInputText(transcriptionText);
-      }
+      setIsOnDeviceRecording(true);
+      setOnDeviceTranscript('');
+      await speechStartListening();
     } catch (err: any) {
-      console.error('Failed to stop recording', err);
-      
-      // Clean up state even on error
-      setRecording(null);
-      setIsRecording(false);
-      setIsTranscribing(false);
-      
-      // Show user-friendly error message
-      const errorMessage = err?.message || 'Unknown error occurred';
-      Alert.alert('Error', `Failed to stop recording: ${errorMessage}`);
+      setIsOnDeviceRecording(false);
+      Alert.alert(
+        'Speech Recognition Error',
+        err?.message || 'Failed to start speech recognition. Please try again.',
+        [{ text: 'OK' }]
+      );
     }
   };
+  
+  // Stop on-device speech recognition
+  const stopRecordingAll = async () => {
+    mediumImpact();
+    await speechStopListening();
+    setIsOnDeviceRecording(false);
+  };
+
+  /* SERVER-BASED STREAMING COMMENTED OUT - Using on-device speech recognition instead
+  const streamAudioFile = async (recording: Audio.Recording, ws: WebSocket) => {
+    // ... server-based audio streaming code removed for brevity ...
+    // See git history if you need to restore this
+  };
+  */
+
+  /* SERVER-BASED STOP RECORDING COMMENTED OUT - Using on-device speech recognition instead
+  const stopRecording = async () => {
+    // ... server-based stop recording code removed for brevity ...
+    // See git history if you need to restore this
+  };
+  */
 
   const handleSendWithText = async (text: string) => {
     await handleSendWithWebSocket(text);
@@ -2119,16 +1784,12 @@ export default function HomeScreen() {
               paddingBottom: inputBottomPadding,
             },
           ]}>
-          {/* Recording/Transcribing Indicator */}
-          {(isRecording || isTranscribing || isOnDeviceRecording) && (
+          {/* Recording Indicator */}
+          {isOnDeviceRecording && (
             <View style={styles.recordingIndicator}>
               <View style={styles.recordingDot} />
               <ThemedText style={styles.recordingText}>
-                {isTranscribing 
-                  ? transcriptionText 
-                  : (isOnDeviceRecording && onDeviceTranscript)
-                    ? `🎤 ${onDeviceTranscript}`
-                    : (transcriptionText ? `🎤 ${transcriptionText}` : 'Recording...')}
+                {onDeviceTranscript ? `🎤 ${onDeviceTranscript}` : 'Listening...'}
               </ThemedText>
             </View>
           )}
@@ -2279,14 +1940,14 @@ export default function HomeScreen() {
               {/* Buttons inside input box */}
               <View style={styles.inputButtons}>
                 {/* Microphone Button - only show when no text and not recording */}
-                {inputText.trim().length === 0 && !isRecording && !isOnDeviceRecording && (
+                {inputText.trim().length === 0 && !isOnDeviceRecording && (
                   <TouchableOpacity 
                     style={[
                       styles.inputInnerButton,
-                      (isTranscribing || isLoading) && styles.sendButtonDisabled,
+                      isLoading && styles.sendButtonDisabled,
                     ]} 
                     onPress={startRecording}
-                    disabled={isLoading || isTranscribing}>
+                    disabled={isLoading}>
                     <IconSymbol 
                       name="mic.fill" 
                       size={18} 
@@ -2296,13 +1957,13 @@ export default function HomeScreen() {
                 )}
 
                 {/* Stop Recording Button */}
-                {(isRecording || isOnDeviceRecording) && (
+                {isOnDeviceRecording && (
                   <TouchableOpacity 
                     style={[
                       styles.inputInnerButton,
                       styles.stopRecordingButton,
                     ]} 
-                    onPress={stopRecording}>
+                    onPress={stopRecordingAll}>
                     <IconSymbol 
                       name="stop.circle.fill" 
                       size={20} 
@@ -2315,8 +1976,8 @@ export default function HomeScreen() {
                 <TouchableOpacity 
                   style={[
                     styles.sendButtonInner, 
-                    (inputText.trim().length === 0 || isLoading || isRecording || isTranscribing || isOnDeviceRecording) && styles.sendButtonInnerDisabled,
-                    inputText.trim().length > 0 && !isLoading && !isRecording && !isTranscribing && {
+                    (inputText.trim().length === 0 || isLoading || isOnDeviceRecording) && styles.sendButtonInnerDisabled,
+                    inputText.trim().length > 0 && !isLoading && !isOnDeviceRecording && {
                       backgroundColor: isDark ? '#FFFFFF' : '#000000',
                     },
                   ]} 
@@ -2324,11 +1985,11 @@ export default function HomeScreen() {
                     handleSend();
                     Keyboard.dismiss();
                   }}
-                  disabled={inputText.trim().length === 0 || isLoading || isRecording || isTranscribing || isOnDeviceRecording}>
+                  disabled={inputText.trim().length === 0 || isLoading || isOnDeviceRecording}>
                   <IconSymbol 
                     name="arrow.up" 
                     size={16} 
-                    color={inputText.trim().length > 0 && !isLoading && !isRecording && !isTranscribing 
+                    color={inputText.trim().length > 0 && !isLoading && !isOnDeviceRecording 
                       ? (isDark ? '#000000' : '#FFFFFF')
                       : (isDark ? '#555555' : '#AAAAAA')
                     } 

@@ -11,7 +11,9 @@
     "db:reset": "npx prisma migrate reset",
     "prisma:generate": "npx prisma generate",
     "test:models": "node scripts/test-models.js",
-    "test:models:stream": "node scripts/test-models.js --stream"
+    "test:models:stream": "node scripts/test-models.js --stream",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.922.0",
@@ -35,7 +37,10 @@
     "pgvector": "^0.2.1",
     "prisma": "^6.19.0",
     "uuid": "^9.0.1",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "expo": "~54.0.15",
+    "react": "19.1.0",
+    "react-native": "0.81.4"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
