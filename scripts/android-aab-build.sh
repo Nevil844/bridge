@@ -45,7 +45,7 @@ echo -e "${GREEN}✓${NC} Android SDK: $ANDROID_HOME"
 
 # Navigate to project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR/.."
 
 echo -e "${YELLOW}📦 Building $BUILD_TYPE AAB (App Bundle)...${NC}"
 echo ""
