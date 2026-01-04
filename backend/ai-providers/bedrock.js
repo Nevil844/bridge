@@ -32,15 +32,6 @@ class BedrockProvider {
       { id: 'anthropic.claude-sonnet-4-5-20250929-v1:0', name: 'Claude Sonnet 4.5', tier: 'premium' },
       { id: 'anthropic.claude-sonnet-4-20250514-v1:0', name: 'Claude Sonnet 4', tier: 'premium' },
       { id: 'anthropic.claude-3-5-sonnet-20241022-v2:0', name: 'Claude 3.5 Sonnet', tier: 'premium' },
-      { id: 'anthropic.claude-3-opus-20240229-v1:0', name: 'Claude 3 Opus', tier: 'premium' },
-      { id: 'anthropic.claude-3-sonnet-20240229-v1:0', name: 'Claude 3 Sonnet', tier: 'premium' },
-      { id: 'anthropic.claude-3-haiku-20240307-v1:0', name: 'Claude 3 Haiku', tier: 'premium' },
-      { id: 'anthropic.claude-instant-v1', name: 'Claude Instant', tier: 'premium' },
-      { id: 'meta.llama3-1-70b-instruct-v1:0', name: 'Llama 3.1 70B', tier: 'premium' },
-      { id: 'meta.llama3-1-8b-instruct-v1:0', name: 'Llama 3.1 8B', tier: 'premium' },
-      { id: 'amazon.titan-text-premier-v1:0', name: 'Amazon Titan Text Premier', tier: 'premium' },
-      { id: 'mistral.mistral-large-2407-v1:0', name: 'Mistral Large', tier: 'premium' },
-      { id: 'mistral.mistral-medium-2312-v1:0', name: 'Mistral Medium', tier: 'premium' },
     ];
   }
 

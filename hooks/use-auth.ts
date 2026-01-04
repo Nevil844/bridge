@@ -1,5 +1,7 @@
 import { API_ENDPOINTS } from '@/config/api';
+import { storage, STORAGE_KEYS } from '@/utils/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
@@ -31,7 +33,6 @@ export function useAuth() {
       const hasExplicitlyLoggedOut = loggedOutFlag === 'true';
       
       if (hasExplicitlyLoggedOut) {
-        console.log('🚪 User has logged out, showing login screen');
         setUser(null);
         setIsAuthenticated(false);
         setIsLoading(false);
@@ -41,15 +42,52 @@ export function useAuth() {
       // First, check if there's a stored user ID
       const storedUserId = await AsyncStorage.getItem('userId');
       
+      // Treat default-user as logged out: clear and show login
+      if (storedUserId === 'default-user') {
+        await AsyncStorage.removeItem('userId');
+        const { clearAccessToken } = require('@/utils/api');
+        await clearAccessToken();
+        setUser(null);
+        setIsAuthenticated(false);
+        setHasLoggedOut(true);
+        setIsLoading(false);
+        return;
+      }
+      
       // If user ID exists and is not default-user, use it (normal flow)
-      if (storedUserId && storedUserId !== 'default-user') {
-        console.log('📱 Found stored userId, loading user...');
+      if (storedUserId) {
+        // Fetch access token first
+        try {
+          const { setAccessToken } = require('@/utils/api');
+          const tokenResponse = await fetch(`${API_ENDPOINTS.AUTH.TOKEN}?userId=${storedUserId}`);
+          if (tokenResponse.ok) {
+            const tokenData = await tokenResponse.json();
+            if (tokenData.accessToken) {
+              await setAccessToken(tokenData.accessToken);
+            }
+          }
+        } catch (error) {
+          // Ignore token fetch errors
+        }
         
         // Fetch user info from backend
         const response = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${storedUserId}`);
         
         if (response.ok) {
           const userData = await response.json();
+          
+          // If backend somehow returns default-user, treat as logged out
+          if (userData.id === 'default-user') {
+            await AsyncStorage.removeItem('userId');
+            const { clearAccessToken } = require('@/utils/api');
+            await clearAccessToken();
+            setUser(null);
+            setIsAuthenticated(false);
+            setHasLoggedOut(true);
+            setIsLoading(false);
+            return;
+          }
+
           setUser({
             id: userData.id,
             email: userData.email,
@@ -62,49 +100,13 @@ export function useAuth() {
           return;
         } else {
           // User not found, clear storage
-          console.warn('⚠️ Stored user not found, clearing...');
           await AsyncStorage.removeItem('userId');
+          const { clearAccessToken } = require('@/utils/api');
+          await clearAccessToken();
           setUser(null);
           setIsAuthenticated(false);
           setIsLoading(false);
           return;
-        }
-      }
-      
-      // TEST MODE: Auto-login with existing user for mobile testing
-      // Only runs if NO userId in storage AND user hasn't explicitly logged out
-      // Platform-specific test emails: iOS = nevil, Android = kushal
-      const TEST_MODE_EMAIL = Platform.OS === 'ios' 
-        ? 'neviljobanputra34@gmail.com' 
-        : Platform.OS === 'android' 
-        ? 'kushalnandha26@gmail.com' 
-        : null;
-      
-      if (TEST_MODE_EMAIL && !storedUserId && !hasExplicitlyLoggedOut) {
-        console.log(`🧪 TEST MODE (${Platform.OS}): Auto-logging in with`, TEST_MODE_EMAIL);
-        
-        // Fetch user by email from backend
-        const response = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${TEST_MODE_EMAIL}`);
-        
-        if (response.ok) {
-          const userData = await response.json();
-          console.log('✅ Test user loaded:', userData);
-          
-          // Store user ID for future use
-          await AsyncStorage.setItem('userId', userData.id);
-          
-          setUser({
-            id: userData.id,
-            email: userData.email,
-            name: userData.username || userData.email,
-            picture: userData.picture || undefined,
-            plan: userData.plan || 'free',
-          });
-          setIsAuthenticated(true);
-          setIsLoading(false);
-          return;
-      } else {
-          console.warn('⚠️ Test user not found in database');
         }
       }
       
@@ -137,14 +139,26 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     try {
-      console.log('🚪 Logging out user...');
       await AsyncStorage.removeItem('userId');
+      // Clear access token
+      const { clearAccessToken } = require('@/utils/api');
+      await clearAccessToken();
+      
+      // Clear onboarding flag so it shows again on next login
+      await storage.removeItem(STORAGE_KEYS.ONBOARDING_COMPLETED);
+      
       // Persist logout flag so test mode doesn't auto-login again
       await AsyncStorage.setItem('hasLoggedOut', 'true');
       setUser(null);
       setIsAuthenticated(false);
       setHasLoggedOut(true);
-      console.log('✅ Logout complete - login screen should show');
+      
+      // Force navigation to login
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.replace('/login');
+      } else {
+        router.replace('/login');
+      }
     } catch (error) {
       console.error('Error logging out:', error);
     }

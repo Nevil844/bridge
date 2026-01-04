@@ -1,5 +1,6 @@
 const express = require('express');
 const mcpManager = require('../mcp/manager');
+const { verifyUser } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -19,62 +20,120 @@ const GENERIC_QUESTIONS = [
 ];
 
 // Integration-specific questions
+// Only include questions that match the actual tools available
+// Make questions specific and actionable with real examples
 const INTEGRATION_QUESTIONS = {
   spotify: [
-    "Play today's top song",
-    "What's my most played song this week?",
-    "Create a workout playlist",
-    "Play some relaxing music",
-    "What's trending in music right now?",
-    "Show me my Spotify playlists",
+    "Play Night Changes by One Direction",
+    "Play Senorita by Shawn Mendes",
+    "Play the last song I was listening to",
+    "What song is currently playing?",
+    "Skip to the next song",
+    "Pause Spotify",
+    "Add Blinding Lights by The Weeknd to my queue",
+    "Play songs by Ed Sheeran",
+    "Create a workout playlist called 'Gym Time'",
   ],
   github: [
-    "Show me my recent commits",
-    "What are my open pull requests?",
-    "List my repositories",
-    "Show me issues in my projects",
-    "What's my GitHub activity today?",
-    "Find repositories I starred",
+    "Show me my last 10 commits",
+    "What are my open pull requests in the main repository?",
+    "List all my private repositories",
+    "Show me issues assigned to me",
+    "What commits did I make today?",
+    "Find repositories I starred in the last month",
+    "Show me pull requests I created this week",
   ],
   gmail: [
-    "Show me unread emails",
-    "What emails did I receive today?",
-    "Search for emails from last week",
-    "Show me important emails",
-    "What's in my inbox?",
-    "Find emails with attachments",
+    "Show me my 10 most recent emails",
+    "Search for emails from Amazon in the last week",
+    "Find emails with attachments from today",
+    "Search for emails about 'meeting' from last month",
+    "Find emails with 'invoice' in the subject",
+    "Summarize the last 5 email threads",
   ],
   'google-drive': [
-    "Show me my recent files",
-    "What files did I upload today?",
-    "List my Google Drive folders",
-    "Find documents I shared",
-    "Show me my starred files",
-    "What's in my Drive?",
+    "List my 10 most recent files",
+    "Search for files named 'resume' or 'CV'",
+    "Show me all PDF files from last month",
+    "Find files shared with me in the last week",
+    "Search for files about 'AI' or 'machine learning'",
+    "Show me the last 5 files I modified",
+  ],
+  'google-calendar': [
+    "Show me my upcoming events for this week",
+    "What meetings do I have today?",
+    "Create a meeting with John at 3 PM tomorrow titled 'Project Review'",
+    "Schedule a dentist appointment for next Monday at 2 PM",
+    "Find all events with 'meeting' in the title",
+    "Show me events for the next 7 days",
+    "Create an all-day event for 'Team Offsite' on December 15th",
+    "What's on my calendar for tomorrow?",
+    "Schedule a 30-minute call with Sarah next Friday at 10 AM",
+    "Show me all my calendars",
   ],
   jira: [
-    "Show me my assigned tasks",
-    "What are my open Jira tickets?",
-    "List issues in my current sprint",
-    "Show me high priority issues",
-    "What's my Jira activity?",
-    "Find bugs assigned to me",
+    "List all projects I have access to",
+    "Show me all issues assigned to me",
+    "Search for high priority issues assigned to me",
+    "Find all issues due this week across all projects",
+    "Create a new bug issue titled 'Login button not working'",
+    "Show me issues ordered by creation date",
+    "Search for issues with 'bug' in the summary",
+    "Show me all open issues in my projects",
+    "Find issues assigned to me that are due today",
+    "List all users in my JIRA instance",
+    "Create a new task issue with summary 'Review code changes'",
   ],
   zerodha: [
-    "What's my portfolio value?",
-    "Show me my holdings",
+    "What's my total portfolio value?",
+    "Show me my Zerodha profile details",
+    "List all my stock holdings",
     "What stocks did I buy today?",
-    "Check my account balance",
-    "Show me my P&L",
-    "What's the market status?",
+    "Check my available account balance",
+    "Show me my profit and loss for today",
+    "What's the current market status?",
+    "Show me current market prices of RELIANCE and TCS",
   ],
   zomato: [
-    "Find restaurants near me",
-    "What are the top rated restaurants?",
-    "Show me food delivery options",
-    "Find restaurants by cuisine",
-    "What's popular in my area?",
-    "Show me restaurant reviews",
+    "Find Italian restaurants near me",
+    "Show me top rated pizza places in my area",
+    "Find restaurants serving biryani within 5 km",
+    "What are the best rated restaurants for dinner?",
+    "Show me restaurants open now near me",
+    "Find Chinese restaurants with 4+ star rating",
+    "What are the most popular restaurants in my area?",
+    "Show me restaurants that deliver to my location",
+  ],
+  slack: [
+    "List all public channels in my workspace",
+    "Read the last 20 messages from #general channel",
+    "Send a message 'Hello team!' to #general",
+    "List all users in my workspace",
+    "Show me my direct message conversations",
+    "Search for messages containing 'meeting' in #general",
+    "Send a DM to @nevil saying 'Can we sync up?'",
+  ],
+  youtube: [
+    "Get me Mr Beast's latest video",
+    "Search for videos about 'Python tutorial'",
+    "Show me the latest videos from 5 of my subscriptions",
+    "Show me videos in my 'Favorites' playlist",
+    "Search for 'cooking recipes' videos",
+    "Find me a good TMKOC episode",
+    "Get me videos from Tanmay Bhatt's channel",
+    "Show me my YouTube subscriptions",
+    "Search for 'React tutorial' videos sorted by view count",
+  ],
+  x: [
+    "Show me my last 5 tweets",
+    "Search for tweets about 'AI' from the last week",
+    "Get information about @elonmusk",
+    "Search for tweets with #JavaScript hashtag",
+    "Show me my profile information",
+    "Search for tweets containing 'machine learning' from the last month",
+    "Get the latest tweets from @github",
+    "Show me tweets I posted this week",
+    "Search for tweets from @openai",
   ],
 };
 
@@ -82,21 +141,19 @@ const INTEGRATION_QUESTIONS = {
  * GET /api/sample-questions
  * Get sample questions based on user's connected integrations
  */
-router.get('/', async (req, res) => {
+router.get('/', verifyUser, async (req, res) => {
   try {
-    const userId = req.query.userId || 'default-user';
-    
     // Get user's connected integrations
-    const userIntegrations = await mcpManager.getUserIntegrations(userId);
+    const userIntegrations = await mcpManager.getUserIntegrations(req.userId);
     const integrationTypes = userIntegrations.map(i => i.type);
     
     let questions = [];
     
-    if (integrationTypes.length === 0) {
-      // No integrations - return generic questions
-      questions = GENERIC_QUESTIONS;
-    } else {
-      // Build questions from connected integrations
+    // Always include generic questions
+    questions = [...GENERIC_QUESTIONS];
+    
+    if (integrationTypes.length > 0) {
+      // Add integration-specific questions when integrations are connected
       const integrationQuestions = [];
       
       integrationTypes.forEach(type => {
@@ -105,8 +162,8 @@ router.get('/', async (req, res) => {
         }
       });
       
-      // Only use integration-specific questions when integrations are connected
-      questions = integrationQuestions;
+      // Combine generic and integration-specific questions
+      questions = [...questions, ...integrationQuestions];
     }
     
     // Shuffle questions for variety

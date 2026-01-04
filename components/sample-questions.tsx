@@ -1,5 +1,7 @@
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { authenticatedFetch } from '@/utils/api';
+import { lightImpact } from '@/utils/haptics';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -20,7 +22,8 @@ export function SampleQuestions({ userId, onQuestionSelect }: SampleQuestionsPro
     // Fetch questions from API
     const fetchQuestions = async () => {
       try {
-        const response = await fetch(`${API_ENDPOINTS.SAMPLE_QUESTIONS}?userId=${userId}`);
+        // Use authenticated fetch - token is automatically added to headers
+        const response = await authenticatedFetch(`${API_ENDPOINTS.SAMPLE_QUESTIONS}`);
         const data = await response.json();
         if (data.questions && data.questions.length > 0) {
           setQuestions(data.questions);
@@ -30,7 +33,25 @@ export function SampleQuestions({ userId, onQuestionSelect }: SampleQuestionsPro
       }
     };
 
-    fetchQuestions();
+    if (userId) {
+      fetchQuestions();
+      
+      // Refetch questions after a delay to allow integrations to load
+      // This ensures questions update when integrations are initialized
+      const refetchTimer = setTimeout(() => {
+        fetchQuestions();
+      }, 3000); // Refetch after 3 seconds
+      
+      // Also refetch after 10 seconds to catch any late-loading integrations
+      const lateRefetchTimer = setTimeout(() => {
+        fetchQuestions();
+      }, 10000);
+      
+      return () => {
+        clearTimeout(refetchTimer);
+        clearTimeout(lateRefetchTimer);
+      };
+    }
   }, [userId]);
 
   useEffect(() => {
@@ -86,12 +107,15 @@ export function SampleQuestions({ userId, onQuestionSelect }: SampleQuestionsPro
     <View style={styles.container}>
       <TouchableOpacity
         activeOpacity={0.7}
-        onPress={() => onQuestionSelect(currentQuestion)}
+        onPress={() => {
+          lightImpact();
+          onQuestionSelect(currentQuestion);
+        }}
         style={[
           styles.questionContainer,
           {
-            backgroundColor: isDark ? '#151718' : '#FFFFFF',
-            borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+            backgroundColor: 'transparent',
+            borderColor: isDark ? 'rgba(0, 122, 255, 0.3)' : 'rgba(0, 122, 255, 0.2)',
           },
         ]}>
         <Animated.View
@@ -105,7 +129,7 @@ export function SampleQuestions({ userId, onQuestionSelect }: SampleQuestionsPro
           <Text
             style={[
               styles.questionText,
-              { color: isDark ? '#FFFFFF' : '#000000' },
+              { color: isDark ? '#5AC8FA' : '#007AFF' },
             ]}>
             {currentQuestion}
           </Text>
@@ -137,7 +161,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   questionText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '500',
     textAlign: 'center',
   },

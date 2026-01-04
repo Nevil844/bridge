@@ -1,20 +1,29 @@
+import AIDisclaimerModal from '@/components/ai-disclaimer-modal';
 import { GlowingOrb } from '@/components/glowing-orb';
 import { MarkdownText } from '@/components/markdown-text';
+import { OnboardingScreen } from '@/components/onboarding-screen';
 import { SampleQuestions } from '@/components/sample-questions';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ThinkingProcess } from '@/components/thinking-process';
+import ToolApprovalModal, { PendingTool } from '@/components/tool-approval-modal';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { API_ENDPOINTS } from '@/config/api';
+import { ExpertOrCharacter } from '@/config/expertsAndCharacters';
 import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { usePreferences } from '@/hooks/use-preferences';
+import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
+import { useSpeechRecognition } from '@/hooks/use-speech-recognition';
+import { errorFeedback, lightImpact, mediumImpact, successFeedback } from '@/utils/haptics';
+import { storage, STORAGE_KEYS } from '@/utils/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Audio } from 'expo-av';
 import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
   Image,
   Keyboard,
@@ -29,8 +38,6 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
 interface ThinkingData {
   isInternal: boolean;
   thinking: string;
@@ -41,11 +48,19 @@ interface ThinkingData {
   memoryCount?: number;
 }
 
+interface TokenUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  credits?: number;
+}
+
 interface Message {
   id: string;
   text: string;
   isUser: boolean;
   thinking?: ThinkingData[]; // Array of thinking data for AI messages (all internal calls)
+  tokenUsage?: TokenUsage;
 }
 
 interface Model {
@@ -55,32 +70,154 @@ interface Model {
   provider?: 'gemini' | 'openrouter' | 'bedrock';
 }
 
+// Greeting messages with placeholders
+const GREETING_MESSAGES = [
+  "What's on your mind today?",
+  "What can I help with?",
+  "Where should we begin?",
+  "Hey, {name}. Ready to dive in?",
+  "What's on the agenda today?",
+  "How can I help, {name}?",
+  "Back at it, {name}",
+];
+
+// Function to get a random greeting with name replacement
+function getRandomGreeting(userName?: string | null): string {
+  const randomIndex = Math.floor(Math.random() * GREETING_MESSAGES.length);
+  let greeting = GREETING_MESSAGES[randomIndex];
+  
+  // Extract first name only (split by space and take first part)
+  let name = 'there';
+  if (userName) {
+    const firstName = userName.split(' ')[0];
+    name = firstName || 'there';
+  }
+  
+  // Replace {name} and {username} with first name or fallback
+  greeting = greeting.replace(/{name}/g, name);
+  greeting = greeting.replace(/{username}/g, name);
+  
+  return greeting;
+}
+
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const screenHeight = Dimensions.get('window').height;
-  const { user, logout } = useAuth();
+  const { user, logout, isAuthenticated } = useAuth();
+  const { toolApprovalEnabled } = usePreferences();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [greeting, setGreeting] = useState<string>(() => getRandomGreeting(user?.name));
   const [inputText, setInputText] = useState('');
+  const [inputHeight, setInputHeight] = useState(44);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState('anthropic.claude-sonnet-4-5-20250929-v1:0'); // Default to Claude Sonnet 4.5
   const [showModelPicker, setShowModelPicker] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  // Server-side transcription state (commented out - using on-device instead)
+  // const [isRecording, setIsRecording] = useState(false);
+  // const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  // const transcribeWebSocketRef = useRef<WebSocket | null>(null);
+  // const [transcriptionText, setTranscriptionText] = useState('');
+  // const [isTranscribing, setIsTranscribing] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [chatHistory, setChatHistory] = useState<Array<{id: string, title: string, lastActive: string, messageCount: number}>>([]);
+  const [isLoadingChats, setIsLoadingChats] = useState(false);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string>('default-user');
   const [availableModels, setAvailableModels] = useState<Model[]>([]);
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set(['bedrock'])); // Default expand Bedrock (default model provider)
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [showWebSearchMenu, setShowWebSearchMenu] = useState(false);
+  const [pendingToolApproval, setPendingToolApproval] = useState<{
+    approvalId: string;
+    tools: PendingTool[];
+  } | null>(null);
+  const [approvalExpiresAt, setApprovalExpiresAt] = useState<number | null>(null);
+  const [approvalCountdown, setApprovalCountdown] = useState<string>('');
+  const [approvalRemainingMs, setApprovalRemainingMs] = useState<number>(0);
+  const TOOL_APPROVAL_TIMEOUT_MS = 45000;
+  const [isApprovingTool, setIsApprovingTool] = useState(false);
+  // Single boolean for onboarding flow (includes disclaimer)
+  const [showOnboardingFlow, setShowOnboardingFlow] = useState(true);
+  const [onboardingStep, setOnboardingStep] = useState<'onboarding' | 'disclaimer' | 'complete'>('onboarding');
+  const [isCheckingOnboarding, setIsCheckingOnboarding] = useState(true);
+  const hasCheckedOnboarding = useRef(false);
+  const [selectedExpertOrCharacter, setSelectedExpertOrCharacter] = useState<ExpertOrCharacter | null>(null);
+  const [showExpertCharacterModal, setShowExpertCharacterModal] = useState(false);
+  const [expertCharacterModalType, setExpertCharacterModalType] = useState<'expert' | 'character'>('expert');
+  const [expertsAndCharacters, setExpertsAndCharacters] = useState<ExpertOrCharacter[]>([]);
+  const [isLoadingExpertsCharacters, setIsLoadingExpertsCharacters] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
-  const insets = useSafeAreaInsets();
-  const topInset = Platform.OS === 'web' ? 16 : Math.max(insets.top, 12);
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const activeWebSocketRef = useRef<WebSocket | null>(null);
+  const inputRef = useRef<TextInput>(null);
+  
+  // On-device speech recognition (eliminates server latency)
+  const [isOnDeviceRecording, setIsOnDeviceRecording] = useState(false);
+  const [onDeviceTranscript, setOnDeviceTranscript] = useState('');
+  
+  const {
+    isListening: speechIsListening,
+    startListening: speechStartListening,
+    stopListening: speechStopListening,
+  } = useSpeechRecognition({
+    language: 'en-US',
+    onResult: (text, isFinal) => {
+      if (isFinal && text.trim()) {
+        // Final result - put text in input field
+        setInputText(prev => prev + (prev ? ' ' : '') + text.trim());
+        setOnDeviceTranscript('');
+        setIsOnDeviceRecording(false);
+        successFeedback(); // Haptic feedback on successful transcription
+      } else {
+        // Interim result - show in recording indicator
+        setOnDeviceTranscript(text);
+      }
+    },
+    onError: (error) => {
+      setIsOnDeviceRecording(false);
+      setOnDeviceTranscript('');
+      if (Platform.OS === 'web') {
+        Alert.alert('Speech Not Available', 'Speech recognition is not supported in this browser. Please use the mobile app.', [{ text: 'OK' }]);
+      } else {
+        Alert.alert('Speech Recognition Error', error, [{ text: 'OK' }]);
+      }
+    },
+  });
+
+  // Sync speech recognition state with our recording indicator
+  useEffect(() => {
+    setIsOnDeviceRecording(speechIsListening);
+  }, [speechIsListening]);
+  
+  const { topInset, bottomInset } = useSafeAreaPadding({ top: 12, bottom: 16 });
   const headerPaddingTop = topInset + 20;
   const headerButtonTop = topInset + 24;
-  const inputBottomPadding = Platform.OS === 'web' ? 16 : Math.max(insets.bottom, 16);
+  // Use minimal bottom padding - KeyboardAvoidingView will handle keyboard spacing automatically
+  // Only add safe area padding when keyboard is closed (handled by KeyboardAvoidingView)
+  const inputBottomPadding = Platform.OS === 'ios' ? Math.max(bottomInset, 8) : 8;
+  // Calculate credits from token usage (for display)
+  // Using Claude Sonnet 4.5 costs: $0.003/1K input, $0.015/1K output
+  const calculateCredits = (inputTokens: number, outputTokens: number): number => {
+    const inputCost = inputTokens * 0.000003;
+    const outputCost = outputTokens * 0.000015;
+    const totalCost = inputCost + outputCost;
+    return Math.round((totalCost / 0.01) * 100) / 100; // Round to 2 decimals
+  };
+
+  const normalizeTokenUsage = (usage?: { input_tokens?: number; output_tokens?: number }) => {
+    if (!usage) return undefined;
+    const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined;
+    const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined;
+    const totalTokens =
+      (inputTokens ?? 0) + (outputTokens ?? 0);
+    if (inputTokens === undefined && outputTokens === undefined) {
+      return undefined;
+    }
+    // Calculate credits for display
+    const credits = calculateCredits(inputTokens ?? 0, outputTokens ?? 0);
+    return { inputTokens, outputTokens, totalTokens, credits };
+  };
 
   useEffect(() => {
     loadUserId();
@@ -89,19 +226,92 @@ export default function HomeScreen() {
     cleanupOldData(); // Remove old AsyncStorage data
   }, []);
 
+  // Check if user has completed onboarding
+  useEffect(() => {
+    const checkOnboardingStatus = async () => {
+      // Wait for user to be loaded
+      if (!user || !isAuthenticated) {
+        setIsCheckingOnboarding(true);
+        setShowOnboardingFlow(true);
+        return;
+      }
+      
+      // Only check once per user
+      if (hasCheckedOnboarding.current) {
+        return;
+      }
+      
+      hasCheckedOnboarding.current = true;
+      
+      try {
+        // Simple check: has user completed onboarding?
+        const hasCompletedOnboarding = await storage.getItem(STORAGE_KEYS.ONBOARDING_COMPLETED);
+        
+        if (hasCompletedOnboarding === 'true') {
+          // Already completed - skip onboarding
+          setShowOnboardingFlow(false);
+          setOnboardingStep('complete');
+        } else {
+          // Not completed - show onboarding and mark as seen immediately
+          // This prevents the onboarding from appearing twice
+          await storage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETED, 'true');
+          setShowOnboardingFlow(true);
+          setOnboardingStep('onboarding');
+        }
+      } catch (error) {
+        console.error('Error checking onboarding status:', error);
+        // On error, show onboarding to be safe and mark as seen immediately
+        try {
+          await storage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETED, 'true');
+        } catch (saveError) {
+          console.error('Error saving onboarding completion:', saveError);
+        }
+        setShowOnboardingFlow(true);
+        setOnboardingStep('onboarding');
+      } finally {
+        setIsCheckingOnboarding(false);
+      }
+    };
+
+    checkOnboardingStatus();
+  }, [user, isAuthenticated]);
+
+  // Update greeting when user changes
+  useEffect(() => {
+    setGreeting(getRandomGreeting(user?.name));
+  }, [user?.name]);
+
+  const handleOnboardingComplete = () => {
+    // Move to disclaimer step
+    lightImpact();
+    setOnboardingStep('disclaimer');
+  };
+
+  const handleAIDisclaimerAcknowledge = async () => {
+    // Onboarding is already marked as completed when it first appears
+    // Just close the disclaimer and complete the flow
+    try {
+      successFeedback();
+      setOnboardingStep('complete');
+      setShowOnboardingFlow(false);
+    } catch (error) {
+      console.error('Error completing disclaimer:', error);
+      errorFeedback();
+      setOnboardingStep('complete');
+      setShowOnboardingFlow(false);
+    }
+  };
+
   const loadUserId = async () => {
     try {
       const storedUserId = await AsyncStorage.getItem('userId');
-      // Only use stored userId if it exists and is not default-user
       if (storedUserId && storedUserId !== 'default-user') {
-      setUserId(storedUserId);
+        setUserId(storedUserId);
+      } else if (user?.id) {
+        setUserId(user.id);
       } else {
-        // If no valid userId, use the one from useAuth hook
-        if (user?.id) {
-          setUserId(user.id);
-        } else {
-          setUserId('default-user');
-        }
+        // Fallback (should not happen if auth is working correctly)
+        setUserId('default-user');
       }
     } catch (error) {
       console.error('Error loading userId:', error);
@@ -119,7 +329,7 @@ export default function HomeScreen() {
   }, [messages.length]);
 
   useEffect(() => {
-    // Listen to keyboard events
+    // Listen to keyboard events to scroll when keyboard appears
     const keyboardWillShow = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       () => {
@@ -136,10 +346,13 @@ export default function HomeScreen() {
   }, []);
 
   // Load conversations from database
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async (showLoading = false) => {
     try {
       if (!userId) return; // Wait for userId to load
-      const response = await fetch(`${API_ENDPOINTS.CONVERSATIONS}?userId=${userId}`);
+      if (showLoading) setIsLoadingChats(true);
+      // Use authenticated fetch - token is automatically added to headers
+      const { authenticatedFetch } = require('@/utils/api');
+      const response = await authenticatedFetch(`${API_ENDPOINTS.CONVERSATIONS}`);
       if (response.ok) {
         const conversations = await response.json();
         setChatHistory(conversations.map((conv: any) => ({
@@ -151,20 +364,42 @@ export default function HomeScreen() {
       }
     } catch (error) {
       console.error('Error loading conversations:', error);
+    } finally {
+      if (showLoading) setIsLoadingChats(false);
     }
   }, [userId]);
+
+  // Load experts and characters from backend (without system prompts)
+  const loadExpertsAndCharacters = useCallback(async () => {
+    try {
+      setIsLoadingExpertsCharacters(true);
+      const { authenticatedFetch } = require('@/utils/api');
+      const response = await authenticatedFetch(`${API_ENDPOINTS.CHAT}/experts-characters`);
+      if (response.ok) {
+        const data = await response.json();
+        setExpertsAndCharacters(data);
+      }
+    } catch (error) {
+      console.error('Error loading experts and characters:', error);
+    } finally {
+      setIsLoadingExpertsCharacters(false);
+    }
+  }, []);
 
   // Load conversations when userId changes
   useEffect(() => {
     if (userId) {
       loadConversations();
+      loadExpertsAndCharacters();
     }
-  }, [userId, loadConversations]);
+  }, [userId, loadConversations, loadExpertsAndCharacters]);
 
   // Load messages for a conversation
   const loadConversationMessages = async (conversationId: string) => {
     try {
-      const response = await fetch(`${API_ENDPOINTS.CONVERSATIONS}/${conversationId}?userId=${userId}`);
+      // Use authenticated fetch - token is automatically added to headers
+      const { authenticatedFetch } = require('@/utils/api');
+      const response = await authenticatedFetch(`${API_ENDPOINTS.CONVERSATIONS}/${conversationId}`);
       if (response.ok) {
         const conversation = await response.json();
         const loadedMessages: Message[] = conversation.messages.map((msg: any) => ({
@@ -179,21 +414,26 @@ export default function HomeScreen() {
     }
   };
 
-  const startNewChat = () => {
+  const startNewChat = (expertOrCharacter?: ExpertOrCharacter | null) => {
+    lightImpact(); // Haptic feedback for new chat
     setCurrentChatId(null);
     setMessages([]);
+    setSelectedExpertOrCharacter(expertOrCharacter ?? null);
     setShowSidebar(false);
   };
 
   const loadChat = async (chatId: string) => {
     setCurrentChatId(chatId);
+    setSelectedExpertOrCharacter(null); // Clear selected expert/character when loading existing chat
     await loadConversationMessages(chatId);
     setShowSidebar(false);
   };
 
   const deleteChat = async (chatId: string) => {
     try {
-      const response = await fetch(`${API_ENDPOINTS.CONVERSATIONS}/${chatId}?userId=${userId}`, {
+      // Use authenticated fetch - token is automatically added to headers
+      const { authenticatedFetch } = require('@/utils/api');
+      const response = await authenticatedFetch(`${API_ENDPOINTS.CONVERSATIONS}/${chatId}`, {
         method: 'DELETE',
       });
       
@@ -225,7 +465,6 @@ export default function HomeScreen() {
   const cleanupOldData = async () => {
     try {
       await AsyncStorage.removeItem('chatHistory');
-      console.log('✅ Cleaned up old chat history from AsyncStorage');
     } catch (error) {
       console.error('Error cleaning up old data:', error);
     }
@@ -255,6 +494,78 @@ export default function HomeScreen() {
     }
   };
 
+  const submitToolApproval = useCallback(
+    async (decision: 'approve' | 'reject') => {
+      if (!pendingToolApproval) {
+        return;
+      }
+
+      try {
+        setIsApprovingTool(true);
+        
+        // Try to send via WebSocket if available, otherwise fall back to HTTP
+        if (activeWebSocketRef.current && activeWebSocketRef.current.readyState === WebSocket.OPEN) {
+          activeWebSocketRef.current.send(JSON.stringify({
+            type: 'tool_approval',
+            approvalId: pendingToolApproval.approvalId,
+            decision,
+          }));
+        } else {
+          // Fall back to HTTP
+          const { authenticatedFetch } = require('@/utils/api');
+          await authenticatedFetch(API_ENDPOINTS.CHAT_TOOL_APPROVAL, {
+            method: 'POST',
+            body: JSON.stringify({
+              approvalId: pendingToolApproval.approvalId,
+              decision,
+            }),
+          });
+        }
+      } catch (error) {
+        console.error('Tool approval failed:', error);
+        Alert.alert('Tool approval failed', 'Please try again.');
+      } finally {
+        setIsApprovingTool(false);
+        setPendingToolApproval(null);
+        setApprovalExpiresAt(null);
+        setApprovalCountdown('');
+        setApprovalRemainingMs(0);
+      }
+    },
+    [pendingToolApproval]
+  );
+
+  useEffect(() => {
+    if (pendingToolApproval && approvalExpiresAt) {
+      const updateCountdown = () => {
+        const remaining = Math.max(0, approvalExpiresAt - Date.now());
+        setApprovalRemainingMs(remaining);
+        const seconds = Math.ceil(remaining / 1000);
+        const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
+        const ss = String(seconds % 60).padStart(2, '0');
+        setApprovalCountdown(`${mm}:${ss}`);
+      };
+
+      updateCountdown();
+      const timer = setInterval(updateCountdown, 500);
+      return () => clearInterval(timer);
+    }
+
+    setApprovalCountdown('');
+    setApprovalRemainingMs(0);
+    return undefined;
+  }, [pendingToolApproval, approvalExpiresAt]);
+
+  const approvalProgress = approvalExpiresAt
+    ? Math.max(0, Math.min(1, approvalRemainingMs / TOOL_APPROVAL_TIMEOUT_MS))
+    : 0;
+
+  const approvalColor = approvalProgress > 0.66
+    ? '#34C759' // green
+    : approvalProgress > 0.33
+      ? '#FFD60A' // yellow
+      : '#FF3B30'; // red
+
   const selectModel = async (modelId: string, tier?: 'free' | 'premium') => {
     // Allow selection of both free and premium models
     setSelectedModel(modelId);
@@ -266,186 +577,64 @@ export default function HomeScreen() {
     }
   };
 
+  /* SERVER-BASED TRANSCRIPTION COMMENTED OUT - Using on-device speech recognition instead
+  const startRecordingServerBased = async () => {
+    // ... server-based transcription code removed for brevity ...
+    // See git history if you need to restore this
+  };
+  */
+
+  // Main recording function - uses on-device speech recognition
   const startRecording = async () => {
-    try {
-      console.log('Requesting audio permissions...');
-      const permission = await Audio.requestPermissionsAsync();
-      
-      if (permission.status !== 'granted') {
-        Alert.alert('Permission Required', 'Please grant microphone permission to use voice input.');
-        return;
-      }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
-
-      console.log('Starting recording...');
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
+    lightImpact(); // Haptic feedback when starting recording
+    
+    // On web, show not supported message
+    if (Platform.OS === 'web') {
+      Alert.alert(
+        'Voice Input Not Available',
+        'Voice input is only available on the mobile app. Please type your message instead.',
+        [{ text: 'OK' }]
       );
-      
-      setRecording(recording);
-      setIsRecording(true);
-    } catch (err) {
-      console.error('Failed to start recording', err);
-      Alert.alert('Error', 'Failed to start recording');
+      return;
+    }
+    
+    try {
+      setIsOnDeviceRecording(true);
+      setOnDeviceTranscript('');
+      await speechStartListening();
+    } catch (err: any) {
+      setIsOnDeviceRecording(false);
+      Alert.alert(
+        'Speech Recognition Error',
+        err?.message || 'Failed to start speech recognition. Please try again.',
+        [{ text: 'OK' }]
+      );
     }
   };
+  
+  // Stop on-device speech recognition
+  const stopRecordingAll = async () => {
+    mediumImpact();
+    await speechStopListening();
+    setIsOnDeviceRecording(false);
+  };
 
+  /* SERVER-BASED STREAMING COMMENTED OUT - Using on-device speech recognition instead
+  const streamAudioFile = async (recording: Audio.Recording, ws: WebSocket) => {
+    // ... server-based audio streaming code removed for brevity ...
+    // See git history if you need to restore this
+  };
+  */
+
+  /* SERVER-BASED STOP RECORDING COMMENTED OUT - Using on-device speech recognition instead
   const stopRecording = async () => {
-    if (!recording) return;
-
-    try {
-      console.log('Stopping recording...');
-      setIsRecording(false);
-      await recording.stopAndUnloadAsync();
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-      });
-
-      const uri = recording.getURI();
-      setRecording(null);
-
-      if (uri) {
-        console.log('Recording saved to', uri);
-        await transcribeAudio(uri);
-      }
-    } catch (err) {
-      console.error('Failed to stop recording', err);
-      Alert.alert('Error', 'Failed to stop recording');
-    }
+    // ... server-based stop recording code removed for brevity ...
+    // See git history if you need to restore this
   };
-
-  const transcribeAudio = async (audioUri: string) => {
-    try {
-      setIsLoading(true);
-      // Show immediate feedback
-      setInputText('🎤 Transcribing...');
-      
-      // userId is already in state from loadUserId()
-
-      // Create form data - handle web and mobile differently
-      const formData = new FormData();
-      
-      if (Platform.OS === 'web') {
-        // For web: fetch the audio file and create a File object
-        try {
-          const response = await fetch(audioUri);
-          const blob = await response.blob();
-          const file = new File([blob], 'recording.m4a', { type: 'audio/m4a' });
-          formData.append('audio', file);
-        } catch (fetchError) {
-          console.error('Failed to fetch audio file:', fetchError);
-          // Fallback: try to use the URI directly (might work for some cases)
-          formData.append('audio', audioUri as any);
-        }
-      } else {
-        // For mobile (React Native): use the object format
-        formData.append('audio', {
-          uri: audioUri,
-          type: 'audio/m4a',
-          name: 'recording.m4a',
-        } as any);
-      }
-      
-      formData.append('userId', userId);
-
-      const startTime = Date.now();
-      const response = await fetch(`${API_ENDPOINTS.CHAT}/transcribe`, {
-        method: 'POST',
-        body: formData,
-        // Don't set Content-Type header - let FormData set it automatically with boundary
-      });
-
-      const data = await response.json();
-      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-
-      if (response.ok && data.text) {
-        // Set the transcribed text and send it
-        setInputText(data.text);
-        console.log(`✅ Transcription completed in ${duration}s`);
-        // Auto-send after transcription
-        setTimeout(() => {
-          handleSendWithText(data.text);
-        }, 100);
-      } else {
-        setInputText('');
-        Alert.alert('Error', data.error || 'Failed to transcribe audio');
-      }
-    } catch (error) {
-      console.error('Transcription error:', error);
-      setInputText('');
-      Alert.alert('Error', 'Failed to transcribe audio');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  */
 
   const handleSendWithText = async (text: string) => {
-    if (text.trim() && !isLoading) {
-      setShowWebSearchMenu(false);
-      const userMessage: Message = {
-        id: Date.now().toString(),
-        text: text,
-        isUser: true,
-      };
-      
-      const newMessages = [...messages, userMessage];
-      setMessages(newMessages);
-      setInputText('');
-      setIsLoading(true);
-
-      try {
-        const response = await fetch(API_ENDPOINTS.CHAT, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            message: text,
-            model: selectedModel,
-            userId,
-            conversationId: currentChatId,
-            webSearch: webSearchEnabled,
-          }),
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-          const aiMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            text: data.message,
-            isUser: false,
-          };
-          setMessages([...newMessages, aiMessage]);
-          
-          // Update conversationId if this was a new conversation
-          if (data.conversationId && !currentChatId) {
-            setCurrentChatId(data.conversationId);
-            await loadConversations();
-          }
-        } else {
-          const errorMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            text: `Error: ${data.error || 'Failed to get response'}`,
-            isUser: false,
-          };
-          setMessages([...newMessages, errorMessage]);
-        }
-      } catch (error) {
-        const errorMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          text: 'Error: Could not connect to server. Make sure the backend is running.',
-          isUser: false,
-        };
-        setMessages([...newMessages, errorMessage]);
-      } finally {
-        setIsLoading(false);
-      }
-    }
+    await handleSendWithWebSocket(text);
   };
 
   const handleRetry = (messageIndex: number) => {
@@ -476,18 +665,20 @@ export default function HomeScreen() {
     }, 100);
   };
 
-  const handleSend = async () => {
-    if (inputText.trim() && !isLoading) {
+  const handleSendWithWebSocket = async (text: string) => {
+    if (text.trim() && !isLoading) {
+      lightImpact(); // Haptic feedback when sending message
       setShowWebSearchMenu(false);
       const userMessage: Message = {
         id: Date.now().toString(),
-        text: inputText,
+        text: text,
         isUser: true,
       };
       
       const newMessages = [...messages, userMessage];
       setMessages(newMessages);
       setInputText('');
+      setInputHeight(44);
       setIsLoading(true);
 
       // Create placeholder for AI response
@@ -500,314 +691,222 @@ export default function HomeScreen() {
       setMessages([...newMessages, aiMessagePlaceholder]);
 
       try {
-        const response = await fetch(API_ENDPOINTS.CHAT, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            message: userMessage.text,
-            model: selectedModel,
-            userId,
-            conversationId: currentChatId, // Pass conversationId to continue existing or create new
-            stream: true, // Enable streaming for better UX
-            webSearch: webSearchEnabled,
-          }),
-        });
-
-        // Handle quota exceeded (429)
-        if (response.status === 429) {
-          const errorData = await response.json();
-          
-          // Show quota exceeded alert
-          Alert.alert(
-            'Quota Exceeded',
-            errorData.message || 'You have exceeded your monthly token limit.',
-            [
-              { text: 'OK', style: 'cancel' },
-              { text: 'View Usage', onPress: () => {
-                // Navigate to settings to see usage
-                // @ts-ignore - navigation exists in tab context
-                navigation?.navigate?.('settings');
-              }},
-              { text: 'Upgrade Plan', onPress: () => {
-                // Navigate to pricing
-                // @ts-ignore - navigation exists in tab context
-                navigation?.navigate?.('pricing');
-              }},
-            ]
-          );
-          
-          // Update messages to show error
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.id === aiMessageId
-                ? { ...msg, text: `⚠️ ${errorData.message}\n\nYou've used ${errorData.usage?.percentage || '100'}% of your ${errorData.usage?.plan || 'free'} plan.\n\nPlease upgrade or wait until next month.` }
-                : msg
-            )
-          );
-          
-          setIsLoading(false);
-          return;
+        // Get access token for WebSocket authentication
+        const { getAccessToken } = require('@/utils/api');
+        const token = await getAccessToken();
+        
+        if (!token) {
+          throw new Error('No access token available. Please log in again.');
         }
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('Response error:', errorText);
-          throw new Error(`Server error: ${response.status}`);
+        // Read tool approval preference directly from storage to ensure we have the latest value
+        // This is important on Android where AsyncStorage might be slower to load in the hook
+        let requireToolApproval = toolApprovalEnabled;
+        try {
+          const savedApproval = await storage.getItem(STORAGE_KEYS.TOOL_APPROVAL);
+          if (savedApproval !== null) {
+            requireToolApproval = savedApproval === 'true';
+            console.log(`🔧 Tool approval: ${requireToolApproval} (read from storage)`);
+          } else {
+            // Storage not set yet, use hook value
+            console.log(`🔧 Tool approval: ${requireToolApproval} (using hook value, storage not set)`);
+          }
+        } catch (error) {
+          console.warn('⚠️ Failed to read tool approval from storage, using hook value:', error);
         }
 
-        // Check if response is streaming (SSE)
-        const contentType = response.headers.get('content-type');
-        const isStreaming = contentType?.includes('text/event-stream');
-        console.log('📡 Response type check:', { contentType, isStreaming, hasBody: !!response.body });
+        // Create WebSocket connection
+        const ws = new WebSocket(API_ENDPOINTS.CHAT_WS);
+        activeWebSocketRef.current = ws;
+        
+        let accumulatedContent = '';
+        let accumulatedThinking = '';
+        let currentThinkingIndex = -1;
+        let authenticated = false;
+        let responseCompleted = false; // Track if we successfully received a 'done' message
 
-        if (isStreaming) {
-          console.log('🌊 Starting to read streaming response...');
-          // Handle streaming response (Server-Sent Events)
-          // React Native compatibility: check if getReader exists, otherwise use text() stream
-          let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-          
+        ws.onopen = () => {
+          // Authenticate first
+          ws.send(JSON.stringify({ type: 'auth', token }));
+        };
+
+        ws.onmessage = (event) => {
           try {
-            // Try to get reader (works in browsers and some React Native versions)
-            if (response.body && typeof response.body.getReader === 'function') {
-              reader = response.body.getReader();
-            } else {
-              // Fallback: React Native might not support getReader, use text() instead
-              console.log('⚠️  getReader not available, using text() fallback');
-              const text = await response.text();
-              // Parse SSE manually
-              const lines = text.split('\n');
-              let accumulatedContent = '';
-              
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  try {
-                    const data = JSON.parse(line.slice(6));
-                    
-                    if (data.type === 'start') {
-                      if (data.conversationId && !currentChatId) {
-                        setCurrentChatId(data.conversationId);
-                        await loadConversations();
-                      }
-                  } else if (data.type === 'chunk') {
-                    accumulatedContent += data.content;
-                    setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { ...msg, text: accumulatedContent }
-                          : msg
-                      )
-                    );
-                  } else if (data.type === 'thinking') {
-                    // Add thinking event to the array
-                    setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { 
-                              ...msg, 
-                              thinking: [...(msg.thinking || []), data.thinking]
-                            }
-                          : msg
-                      )
-                    );
-                  } else if (data.type === 'done') {
-                    const finalContent = data.message !== undefined ? data.message : accumulatedContent;
-                    setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { 
-                              ...msg, 
-                              text: finalContent,
-                              thinking: data.thinking 
-                                ? [...(msg.thinking || []), data.thinking]
-                                : msg.thinking
-                            }
-                          : msg
-                      )
-                    );
-                      
-                      if (data.conversationId && !currentChatId) {
-                        setCurrentChatId(data.conversationId);
-                        await loadConversations();
-                      }
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'authenticated') {
+              authenticated = true;
+              // Send chat message after authentication
+              ws.send(JSON.stringify({
+                type: 'chat',
+                message: userMessage.text,
+                model: selectedModel,
+                conversationId: currentChatId,
+                requireToolApproval: requireToolApproval,
+                expertOrCharacterId: selectedExpertOrCharacter?.id || undefined,
+              }));
+              return;
+            }
+            
+            if (data.type === 'start') {
+              if (data.conversationId && !currentChatId) {
+                setCurrentChatId(data.conversationId);
+                loadConversations();
+              }
+            } else if (data.type === 'chunk') {
+              accumulatedContent += data.content;
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.id === aiMessageId
+                    ? { ...msg, text: accumulatedContent }
+                    : msg
+                )
+              );
+            } else if (data.type === 'thinking_chunk') {
+              accumulatedThinking += data.content;
+              setMessages(prev =>
+                prev.map(msg => {
+                  if (msg.id === aiMessageId) {
+                    const thinking = msg.thinking || [];
+                    if (currentThinkingIndex === -1) {
+                      currentThinkingIndex = thinking.length;
+                      return {
+                        ...msg,
+                        thinking: [...thinking, { 
+                          isInternal: true,
+                          thinking: accumulatedThinking, 
+                          action: '', 
+                          toolCalls: [],
+                          data: null
+                        }]
+                      };
                     }
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e, line);
+                    const updatedThinking = [...thinking];
+                    updatedThinking[currentThinkingIndex] = {
+                      ...updatedThinking[currentThinkingIndex],
+                      thinking: accumulatedThinking
+                    };
+                    return { ...msg, thinking: updatedThinking };
                   }
-                }
+                  return msg;
+                })
+              );
+            } else if (data.type === 'thinking_done') {
+              setMessages(prev =>
+                prev.map(msg => {
+                  if (msg.id === aiMessageId && currentThinkingIndex !== -1) {
+                    const thinking = msg.thinking || [];
+                    const updatedThinking = [...thinking];
+                    updatedThinking[currentThinkingIndex] = {
+                      ...data.thinking,
+                      thinking: accumulatedThinking
+                    };
+                    return { ...msg, thinking: updatedThinking };
+                  }
+                  return msg;
+                })
+              );
+              accumulatedThinking = '';
+              currentThinkingIndex = -1;
+            } else if (data.type === 'thinking') {
+              setMessages(prev =>
+                prev.map(msg => {
+                  if (msg.id === aiMessageId) {
+                    const currentThinking = msg.thinking || [];
+                    const newThinking = [...currentThinking, data.thinking];
+                    return { 
+                      ...msg, 
+                      thinking: newThinking
+                    };
+                  }
+                  return msg;
+                })
+              );
+            } else if (data.type === 'tool_confirmation') {
+              setPendingToolApproval({
+                approvalId: data.approvalId,
+                tools: data.tools || [],
+              });
+              setApprovalExpiresAt(Date.now() + TOOL_APPROVAL_TIMEOUT_MS);
+            } else if (data.type === 'done') {
+              responseCompleted = true; // Mark response as successfully completed
+              const finalContent = data.message !== undefined ? data.message : accumulatedContent || '';
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.id === aiMessageId
+                    ? { 
+                        ...msg, 
+                        text: finalContent,
+                        thinking: data.thinking 
+                          ? [...(msg.thinking || []), data.thinking]
+                          : msg.thinking,
+                        tokenUsage: normalizeTokenUsage(data.usage)
+                      }
+                    : msg
+                )
+              );
+              
+              if (data.conversationId && !currentChatId) {
+                setCurrentChatId(data.conversationId);
+                loadConversations();
               }
               
               setIsLoading(false);
-              return;
-            }
-          } catch (readerError) {
-            console.error('Error getting reader:', readerError);
-            // Fall back to non-streaming
-            const data = await response.json();
-            const aiMessage = data.message || data.content;
-            setMessages(prev =>
-              prev.map(msg =>
-                msg.id === aiMessageId
-                  ? { ...msg, text: aiMessage, thinking: data.thinking || undefined }
-                  : msg
-              )
-            );
-            setIsLoading(false);
-            return;
-          }
-
-          if (!reader) {
-            throw new Error('No response body reader available');
-          }
-
-          const decoder = new TextDecoder();
-          let buffer = '';
-          let accumulatedContent = '';
-
-          while (true) {
-            const { done, value } = await reader.read();
-            
-            if (done) {
-              console.log('✅ Stream complete');
-              break;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                try {
-                  const data = JSON.parse(line.slice(6)); // Remove 'data: ' prefix
-                  
-                  if (data.type === 'start') {
-                    // Stream started
-                    console.log('🚀 Stream started');
-                    if (data.conversationId && !currentChatId) {
-                      setCurrentChatId(data.conversationId);
-                      await loadConversations();
-                    }
-                  } else if (data.type === 'chunk') {
-                    // Content chunk - update message incrementally
-                    accumulatedContent += data.content;
-                    console.log('📝 Received chunk, total length:', accumulatedContent.length);
-                    
-                    // Try to parse JSON and extract response field if it's complete JSON
-                    // This handles cases where AI streams JSON structure
-                    let displayContent = accumulatedContent;
-                    try {
-                      // Try to parse as JSON (might fail if incomplete)
-                      const parsed = JSON.parse(accumulatedContent);
-                      if (parsed.response && typeof parsed.response === 'string') {
-                        // We have complete JSON with response field - use it
-                        displayContent = parsed.response;
-                        console.log('✅ Extracted response from JSON');
-                      }
-                    } catch (e) {
-                      // Not valid JSON yet or not JSON at all - use raw content
-                      // Also try to extract from markdown code blocks
-                      const jsonMatch = accumulatedContent.match(/```json\s*\n([\s\S]*?)\n```/);
-                      if (jsonMatch) {
-                        try {
-                          const parsed = JSON.parse(jsonMatch[1]);
-                          if (parsed.response && typeof parsed.response === 'string') {
-                            displayContent = parsed.response;
-                            console.log('✅ Extracted response from JSON code block');
-                          }
-                        } catch (e2) {
-                          // Ignore parse errors
-                        }
-                      }
-                    }
-                    
-                    setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { ...msg, text: displayContent }
-                          : msg
-                      )
-                    );
-                  } else if (data.type === 'thinking') {
-                    // Add thinking event to the array in real-time
-                    console.log('🧠 Received thinking event');
-                    setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { 
-                              ...msg, 
-                              thinking: [...(msg.thinking || []), data.thinking]
-                            }
-                          : msg
-                      )
-                    );
-                  } else if (data.type === 'done') {
-                    // Stream complete - use accumulated content (which was built from chunks) or fallback to message
-                    // Prefer accumulatedContent since it's the clean streamed text
-                    console.log('✅ Stream done');
-                    const finalContent = data.message !== undefined ? data.message : accumulatedContent || '';
-                    setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === aiMessageId
-                          ? { 
-                              ...msg, 
-                              text: finalContent, // Use accumulated content from chunks
-                              thinking: data.thinking 
-                                ? [...(msg.thinking || []), data.thinking]
-                                : msg.thinking
-                            }
-                          : msg
-                      )
-                    );
-                    
-                    if (data.conversationId && !currentChatId) {
-                      setCurrentChatId(data.conversationId);
-                      await loadConversations();
-                    }
-                  } else if (data.type === 'error') {
-                    throw new Error(data.error || 'Streaming error');
-                  }
-                } catch (e) {
-                  console.error('Error parsing SSE data:', e, line);
+              // Close WebSocket after a small delay to ensure state updates complete
+              setTimeout(() => {
+                if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+                  ws.close();
                 }
-              }
+                activeWebSocketRef.current = null;
+              }, 100);
+            } else if (data.type === 'error') {
+              throw new Error(data.error || 'WebSocket error');
             }
+          } catch (error) {
+            console.error('Error parsing WebSocket message:', error);
           }
-          
-          setIsLoading(false);
-          return;
-        } else {
-          // Handle non-streaming response (fallback)
-          const data = await response.json();
+        };
 
-          const aiMessage = data.message || data.content;
-          
-          if (!aiMessage) {
-            console.error('No message in response:', data);
-            throw new Error('No response received from AI');
-          }
-
-          // Update AI message with actual response (including thinking data)
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.id === aiMessageId
-                ? { 
-                    ...msg, 
-                    text: aiMessage, 
-                    thinking: data.thinking ? [data.thinking] : undefined 
+        ws.onerror = (error) => {
+          // Only log and handle errors if we haven't successfully completed
+          // In Expo Go, WebSocket errors can sometimes be false positives from normal closures
+          if (!responseCompleted) {
+            const wsState = ws.readyState;
+            // WebSocket states: CONNECTING=0, OPEN=1, CLOSING=2, CLOSED=3
+            // Only treat as real error if WebSocket is in a bad state (not CLOSED or CLOSING)
+            const isClosingOrClosed = wsState === 2 || wsState === 3; // CLOSING or CLOSED
+            if (!isClosingOrClosed) {
+              console.error('WebSocket error (state:', wsState, '):', error);
+              setMessages(prev =>
+                prev.map(msg => {
+                  // Only update if message is still empty or doesn't have meaningful content
+                  if (msg.id === aiMessageId && (!msg.text || msg.text.trim() === '')) {
+                    return { ...msg, text: 'Connection error. Please try again.' };
                   }
-                : msg
-            )
-          );
-          
-          // Update conversationId if this was a new conversation
-          if (data.conversationId && !currentChatId) {
-            setCurrentChatId(data.conversationId);
-            // Reload conversations list to show the new one
-            await loadConversations();
+                  return msg;
+                })
+              );
+              setIsLoading(false);
+            } else {
+              // WebSocket is closing/closed - this is likely normal, just log for debugging
+              console.log('WebSocket closing/closed (normal):', wsState);
+            }
+          } else {
+            // Response completed successfully, ignore error (likely from normal close)
+            console.log('WebSocket error after successful completion (ignored)');
           }
-        }
+          activeWebSocketRef.current = null;
+        };
+
+        ws.onclose = () => {
+          // Only update loading state if response wasn't completed
+          if (!responseCompleted && isLoading) {
+            setIsLoading(false);
+          }
+          if (activeWebSocketRef.current === ws) {
+            activeWebSocketRef.current = null;
+          }
+        };
 
       } catch (error) {
         console.error('Chat error:', error);
@@ -821,36 +920,135 @@ export default function HomeScreen() {
               : msg
           )
         );
-      } finally {
         setIsLoading(false);
       }
     }
   };
 
+  const handleSend = async () => {
+    await handleSendWithWebSocket(inputText);
+  };
+
   const isDark = colorScheme === 'dark';
+
+  // Get icon name for expert/character
+  const getExpertCharacterIcon = (item: ExpertOrCharacter) => {
+    const iconMap: Record<string, string> = {
+      // Experts
+      'health-advisor': 'cross.case.fill',
+      'ca-tax-expert': 'chart.bar.fill',
+      'legal-assistant': 'scale.3d',
+      'software-engineer': 'laptopcomputer',
+      'ai-data-science': 'cpu.fill',
+      'career-resume-coach': 'doc.text.fill',
+      'startup-mentor': 'rocket.fill',
+      'fitness-nutrition': 'figure.run',
+      'academic-research': 'book.fill',
+      'mental-wellbeing': 'heart.fill',
+      'yoga-guru': 'figure.yoga',
+      'motivational-coach': 'star.fill',
+      // Characters
+      'sherlock-holmes': 'magnifyingglass',
+      'albert-einstein': 'atom',
+      'chanakya': 'scroll.fill',
+      'tony-stark': 'bolt.fill',
+      'mahatma-gandhi': 'peace.fill',
+      'apj-abdul-kalam': 'airplane',
+      'bhagavad-gita-ai': 'hands.sparkles.fill',
+      'virat-kohli': 'sportscourt.fill',
+      'osho': 'leaf.fill',
+      'bhagat-singh': 'hand.raised.fill',
+      'leo-messi': 'sportscourt.fill',
+      'ronaldo': 'sportscourt.fill',
+      'ms-dhoni': 'sportscourt.fill',
+      'djokovic': 'sportscourt.fill',
+      'federer': 'sportscourt.fill',
+    };
+    return iconMap[item.id] || (item.type === 'expert' ? 'person.fill' : 'theatermasks.fill');
+  };
+
+  // While checking onboarding status or showing onboarding flow, hide main content
+  // This prevents any flash of the main screen
+  const shouldHideMainContent = isCheckingOnboarding || showOnboardingFlow;
+
+  // Show loading screen while checking onboarding (before user loads)
+  if (isCheckingOnboarding && (!user || !isAuthenticated)) {
+    return (
+      <ThemedView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={isDark ? '#4A9EFF' : '#007AFF'} />
+      </ThemedView>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
       style={styles.container}
-      keyboardVerticalOffset={topInset}>
+      keyboardVerticalOffset={0}>
       <ThemedView style={styles.container}>
-        {/* Header */}
+        {/* Onboarding Screen - Shows immediately on first load to prevent flash */}
+        <OnboardingScreen
+          visible={onboardingStep === 'onboarding'}
+          onComplete={handleOnboardingComplete}
+        />
+
+        {/* Header - Hide when onboarding is shown or checking */}
+        {!shouldHideMainContent && (
         <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
-          {/* Hamburger Menu */}
-          <TouchableOpacity 
-            style={[styles.hamburgerButton, { top: headerButtonTop }]}
-            onPress={() => setShowSidebar(true)}>
-            <IconSymbol name="line.3.horizontal" size={24} color={isDark ? '#FFFFFF' : '#000000'} />
+          <TouchableOpacity
+            style={styles.headerIconButton}
+            onPress={() => {
+              setShowSidebar(true);
+              loadConversations(true); // Reload chats when sidebar opens
+            }}
+          >
+            <IconSymbol
+              name="line.3.horizontal"
+              size={24}
+              color={isDark ? '#FFFFFF' : '#000000'}
+            />
           </TouchableOpacity>
 
           <View style={styles.headerCenter}>
-            <Text style={[
-              styles.title,
-              { color: isDark ? '#4A9EFF' : '#007AFF' }
-            ]}>Bridge AI</Text>
+            <Text
+              style={[
+                styles.title,
+                { color: isDark ? '#4A9EFF' : '#007AFF' },
+              ]}
+            >
+              Bridge AI
+            </Text>
             
-            {/* Model Selector */}
+            {/* Show selected expert/character below Bridge AI */}
+            {selectedExpertOrCharacter && (
+              <View style={[
+                styles.headerExpertCharacter,
+                {
+                  backgroundColor: isDark ? 'rgba(74, 158, 255, 0.12)' : 'rgba(0, 122, 255, 0.08)',
+                  borderColor: isDark ? 'rgba(74, 158, 255, 0.25)' : 'rgba(0, 122, 255, 0.2)',
+                }
+              ]}>
+                <IconSymbol 
+                  name={getExpertCharacterIcon(selectedExpertOrCharacter) as any} 
+                  size={16} 
+                  color={isDark ? '#4A9EFF' : '#007AFF'} 
+                />
+                <ThemedText style={styles.headerExpertCharacterText} numberOfLines={1}>
+                  {selectedExpertOrCharacter.name}
+                </ThemedText>
+                <TouchableOpacity
+                  onPress={() => {
+                    lightImpact();
+                    setSelectedExpertOrCharacter(null);
+                  }}
+                  style={styles.headerClearButton}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <IconSymbol name="xmark.circle.fill" size={16} color={isDark ? '#888' : '#666'} />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Model Selector temporarily disabled
             <TouchableOpacity
               style={[
                 styles.modelSelector,
@@ -859,21 +1057,28 @@ export default function HomeScreen() {
                   borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
                 },
               ]}
-              onPress={() => setShowModelPicker(true)}>
+              onPress={() => setShowModelPicker(true)}
+            >
               <ThemedText style={styles.modelSelectorText}>
                 {availableModels.find((m) => m.id === selectedModel)?.name || 'Loading...'}
               </ThemedText>
               <ThemedText style={styles.dropdownIcon}>▼</ThemedText>
             </TouchableOpacity>
+            */}
           </View>
 
-          {/* New Chat Button */}
-          <TouchableOpacity 
-            style={[styles.newChatHeaderButton, { top: headerButtonTop }]}
-            onPress={startNewChat}>
-            <IconSymbol name="square.and.pencil" size={22} color={isDark ? '#FFFFFF' : '#000000'} />
+          <TouchableOpacity
+            style={styles.headerIconButton}
+            onPress={() => startNewChat()}
+          >
+            <IconSymbol
+              name="square.and.pencil"
+              size={22}
+              color={isDark ? '#FFFFFF' : '#000000'}
+            />
           </TouchableOpacity>
         </View>
+        )}
 
         {/* Sidebar Modal for Chat History */}
         <Modal
@@ -884,99 +1089,189 @@ export default function HomeScreen() {
           <View style={styles.sidebarOverlay}>
             <View style={[
               styles.sidebar,
-              { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' },
+              { 
+                backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                paddingTop: headerPaddingTop,
+                paddingBottom: inputBottomPadding,
+              },
             ]}>
-              {/* Sidebar Header */}
-              <View style={styles.sidebarHeader}>
-                <View style={styles.sidebarTopBar}>
-                  <TouchableOpacity 
-                    style={styles.closeIcon}
-                    onPress={() => setShowSidebar(false)}>
-                    <IconSymbol name="chevron.left" size={20} color={isDark ? '#FFFFFF' : '#000000'} />
-                  </TouchableOpacity>
-                  <Text style={[
-                    styles.sidebarTitle,
-                    { color: isDark ? '#4A9EFF' : '#007AFF' }
-                  ]}>Bridge AI</Text>
-                </View>
-                <TouchableOpacity 
-                  style={[
-                    styles.newChatButton,
-                    {
-                      backgroundColor: 'transparent',
-                      borderWidth: 1,
-                      borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-                    },
-                  ]}
-                  onPress={startNewChat}>
-                  <IconSymbol name="square.and.pencil" size={18} color={isDark ? '#FFFFFF' : '#000000'} />
-                  <ThemedText style={styles.newChatText}>New Chat</ThemedText>
-                </TouchableOpacity>
-              </View>
-
-              {/* Chat History List */}
-              <ScrollView style={styles.chatList}>
-                <ThemedText style={styles.chatListTitle}>Recent Chats</ThemedText>
-                
-                {chatHistory.length === 0 ? (
-                  <View style={styles.emptyChats}>
-                    <ThemedText style={styles.emptyChatsText}>No chat history yet</ThemedText>
+              <View style={styles.sidebarContent}>
+                {/* Sidebar Header */}
+                <View style={styles.sidebarHeader}>
+                  <View style={styles.sidebarTopBar}>
+                    <TouchableOpacity 
+                      style={styles.closeIcon}
+                      onPress={() => setShowSidebar(false)}>
+                      <IconSymbol name="chevron.left" size={24} color={isDark ? '#FFFFFF' : '#000000'} />
+                    </TouchableOpacity>
+                    <Text style={[
+                      styles.sidebarTitle,
+                      { color: isDark ? '#4A9EFF' : '#007AFF' }
+                    ]}>Bridge AI</Text>
                   </View>
-                ) : (
-                  chatHistory.map((chat) => (
-                    <View
-                      key={chat.id}
+                  <TouchableOpacity 
+                    style={[
+                      styles.newChatButton,
+                      {
+                        backgroundColor: 'transparent',
+                        borderWidth: 1,
+                        borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                      },
+                    ]}
+                    onPress={() => startNewChat()}>
+                    <IconSymbol name="square.and.pencil" size={18} color={isDark ? '#FFFFFF' : '#000000'} />
+                    <ThemedText style={styles.newChatText}>New Chat</ThemedText>
+                  </TouchableOpacity>
+                  
+                  {/* Experts and Characters Buttons */}
+                  <View style={styles.expertCharacterButtons}>
+                    <TouchableOpacity 
                       style={[
-                        styles.chatItem,
-                        chat.id === currentChatId && {
-                          backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
+                        styles.expertCharacterButton,
+                        {
+                          backgroundColor: 'transparent',
+                          borderWidth: 1,
+                          borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
                         },
-                      ]}>
-                      <View style={styles.chatItemContainer}>
-                        <TouchableOpacity 
-                          style={styles.chatItemContent}
-                          onPress={() => loadChat(chat.id)}
-                          activeOpacity={0.7}>
-                          <ThemedText style={styles.chatItemTitle} numberOfLines={1}>
-                            {chat.title}
-                          </ThemedText>
-                          <ThemedText style={styles.chatItemDate}>
-                            {new Date(chat.lastActive).toLocaleDateString()}
-                          </ThemedText>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.deleteButton}
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            if (Platform.OS === 'web') {
-                              const confirmed = window.confirm('Are you sure you want to delete this chat?');
-                              if (confirmed) {
-                                deleteChat(chat.id);
-                              }
-                            } else {
-                            Alert.alert(
-                              'Delete Chat',
-                              'Are you sure you want to delete this chat?',
-                              [
-                                { text: 'Cancel', style: 'cancel' },
-                                { text: 'Delete', style: 'destructive', onPress: () => deleteChat(chat.id) }
-                              ]
-                            );
-                            }
-                          }}>
-                          <IconSymbol name="trash" size={16} color="#FF3B30" />
-                        </TouchableOpacity>
-                      </View>
+                      ]}
+                      onPress={() => {
+                        lightImpact();
+                        setExpertCharacterModalType('expert');
+                        // Close sidebar first, then open modal after animation completes
+                        setShowSidebar(false);
+                        setTimeout(() => {
+                          setShowExpertCharacterModal(true);
+                        }, 300);
+                      }}>
+                      <IconSymbol name={"person.fill" as any} size={16} color={isDark ? '#FFFFFF' : '#000000'} />
+                      <ThemedText style={styles.expertCharacterButtonText}>Experts</ThemedText>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity 
+                      style={[
+                        styles.expertCharacterButton,
+                        {
+                          backgroundColor: 'transparent',
+                          borderWidth: 1,
+                          borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                        },
+                      ]}
+                      onPress={() => {
+                        lightImpact();
+                        setExpertCharacterModalType('character');
+                        // Close sidebar first, then open modal after animation completes
+                        setShowSidebar(false);
+                        setTimeout(() => {
+                          setShowExpertCharacterModal(true);
+                        }, 300);
+                      }}>
+                      <IconSymbol name={"theatermasks.fill" as any} size={16} color={isDark ? '#FFFFFF' : '#000000'} />
+                      <ThemedText style={styles.expertCharacterButtonText}>Characters</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                  
+                  {/* Show selected expert/character */}
+                  {selectedExpertOrCharacter && (
+                    <View style={[
+                      styles.selectedExpertCharacter,
+                      {
+                        backgroundColor: isDark ? 'rgba(74, 158, 255, 0.1)' : 'rgba(0, 122, 255, 0.1)',
+                        borderColor: isDark ? 'rgba(74, 158, 255, 0.3)' : 'rgba(0, 122, 255, 0.3)',
+                      }
+                    ]}>
+                      <IconSymbol 
+                        name={getExpertCharacterIcon(selectedExpertOrCharacter) as any} 
+                        size={16} 
+                        color={isDark ? '#4A9EFF' : '#007AFF'} 
+                      />
+                      <ThemedText style={styles.selectedExpertCharacterText} numberOfLines={1}>
+                        {selectedExpertOrCharacter.name}
+                      </ThemedText>
+                      <TouchableOpacity
+                        onPress={() => {
+                          lightImpact();
+                          setSelectedExpertOrCharacter(null);
+                        }}
+                        style={styles.clearExpertCharacterButton}>
+                        <IconSymbol name="xmark.circle.fill" size={18} color={isDark ? '#FFFFFF' : '#000000'} />
+                      </TouchableOpacity>
                     </View>
-                  ))
-                )}
-              </ScrollView>
+                  )}
+                </View>
+
+                {/* Chat History List */}
+                <ScrollView
+                  style={styles.chatList}
+                  contentContainerStyle={{ paddingBottom: 8 }}
+                >
+                  <ThemedText style={styles.chatListTitle}>Recent Chats</ThemedText>
+                  
+                  {isLoadingChats ? (
+                    <View style={styles.emptyChats}>
+                      <ActivityIndicator size="small" color="#007AFF" />
+                      <ThemedText style={[styles.emptyChatsText, { marginTop: 8 }]}>Loading chats...</ThemedText>
+                    </View>
+                  ) : chatHistory.length === 0 ? (
+                    <View style={styles.emptyChats}>
+                      <ThemedText style={styles.emptyChatsText}>No chat history yet</ThemedText>
+                    </View>
+                  ) : (
+                    chatHistory.map((chat) => (
+                      <View
+                        key={chat.id}
+                        style={[
+                          styles.chatItem,
+                          chat.id === currentChatId && {
+                            backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
+                          },
+                        ]}>
+                        <View style={styles.chatItemContainer}>
+                          <TouchableOpacity 
+                            style={styles.chatItemContent}
+                            onPress={() => loadChat(chat.id)}
+                            activeOpacity={0.7}>
+                            <ThemedText style={styles.chatItemTitle} numberOfLines={1}>
+                              {chat.title}
+                            </ThemedText>
+                            <ThemedText style={styles.chatItemDate}>
+                              {new Date(chat.lastActive).toLocaleDateString()}
+                            </ThemedText>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.deleteButton}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              if (Platform.OS === 'web') {
+                                const confirmed = window.confirm('Are you sure you want to delete this chat?');
+                                if (confirmed) {
+                                  deleteChat(chat.id);
+                                }
+                              } else {
+                              Alert.alert(
+                                'Delete Chat',
+                                'Are you sure you want to delete this chat?',
+                                [
+                                  { text: 'Cancel', style: 'cancel' },
+                                  { text: 'Delete', style: 'destructive', onPress: () => deleteChat(chat.id) }
+                                ]
+                              );
+                              }
+                            }}>
+                            <IconSymbol name="trash" size={16} color="#FF3B30" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ))
+                  )}
+                </ScrollView>
+              </View>
 
               {/* Profile Section */}
               <View style={[
                 styles.profileSection,
                 {
                   borderTopColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                  paddingBottom: 8,
                 },
               ]}>
                 <TouchableOpacity
@@ -1178,13 +1473,195 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </Modal>
 
+        {/* Expert/Character Selection Modal */}
+        <Modal
+          visible={showExpertCharacterModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowExpertCharacterModal(false)}>
+          <View style={styles.centeredModalOverlay}>
+            <TouchableOpacity 
+              style={StyleSheet.absoluteFill} 
+              activeOpacity={1}
+              onPress={() => setShowExpertCharacterModal(false)} 
+            />
+            <View
+              style={[
+                styles.centeredModalContent,
+                { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' },
+              ]}>
+              {/* Close button */}
+              <TouchableOpacity
+                style={styles.centeredModalClose}
+                onPress={() => setShowExpertCharacterModal(false)}>
+                <IconSymbol name="xmark.circle.fill" size={24} color={isDark ? '#555' : '#999'} />
+              </TouchableOpacity>
+              
+              {/* Tab Switch */}
+              <View style={styles.tabSwitchContainer}>
+                <View style={[
+                  styles.tabSwitchBackground,
+                  { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }
+                ]}>
+                  <TouchableOpacity
+                    style={[
+                      styles.tabSwitchButton,
+                      expertCharacterModalType === 'expert' && [
+                        styles.tabSwitchButtonActive,
+                        { backgroundColor: isDark ? '#3A3A3C' : '#FFFFFF' }
+                      ]
+                    ]}
+                    onPress={() => setExpertCharacterModalType('expert')}>
+                    <IconSymbol 
+                      name={"person.fill" as any} 
+                      size={16} 
+                      color={expertCharacterModalType === 'expert' 
+                        ? (isDark ? '#4A9EFF' : '#007AFF')
+                        : (isDark ? '#888' : '#666')} 
+                    />
+                    <ThemedText style={[
+                      styles.tabSwitchText,
+                      expertCharacterModalType === 'expert' && { 
+                        color: isDark ? '#4A9EFF' : '#007AFF',
+                        fontWeight: '600' 
+                      }
+                    ]}>
+                      Experts
+                    </ThemedText>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[
+                      styles.tabSwitchButton,
+                      expertCharacterModalType === 'character' && [
+                        styles.tabSwitchButtonActive,
+                        { backgroundColor: isDark ? '#3A3A3C' : '#FFFFFF' }
+                      ]
+                    ]}
+                    onPress={() => setExpertCharacterModalType('character')}>
+                    <IconSymbol 
+                      name={"theatermasks.fill" as any} 
+                      size={16} 
+                      color={expertCharacterModalType === 'character' 
+                        ? (isDark ? '#4A9EFF' : '#007AFF')
+                        : (isDark ? '#888' : '#666')} 
+                    />
+                    <ThemedText style={[
+                      styles.tabSwitchText,
+                      expertCharacterModalType === 'character' && { 
+                        color: isDark ? '#4A9EFF' : '#007AFF',
+                        fontWeight: '600' 
+                      }
+                    ]}>
+                      Characters
+                    </ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              {/* Grid */}
+              <ScrollView 
+                style={styles.centeredModalScroll}
+                contentContainerStyle={styles.centeredModalGrid}
+                showsVerticalScrollIndicator={false}>
+                {expertsAndCharacters
+                  .filter(item => item.type === expertCharacterModalType)
+                  .map((item) => {
+                    const isSelected = selectedExpertOrCharacter?.id === item.id;
+                    return (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={[
+                          styles.centeredModalCard,
+                          { 
+                            backgroundColor: isSelected 
+                              ? (isDark ? 'rgba(74, 158, 255, 0.15)' : 'rgba(0, 122, 255, 0.08)')
+                              : (isDark ? '#2C2C2E' : '#F5F5F7'),
+                            borderColor: isSelected 
+                              ? (isDark ? '#4A9EFF' : '#007AFF')
+                              : 'transparent',
+                          },
+                        ]}
+                        activeOpacity={0.7}
+                        onPress={() => {
+                          lightImpact();
+                          // If selecting a different expert/character, start a new chat
+                          if (selectedExpertOrCharacter?.id !== item.id) {
+                            startNewChat(item);
+                          } else {
+                            // Same one selected, just close modal
+                            setSelectedExpertOrCharacter(item);
+                          }
+                          setShowExpertCharacterModal(false);
+                        }}>
+                        <View style={[
+                          styles.centeredModalCardIcon,
+                          { 
+                            backgroundColor: isSelected
+                              ? (isDark ? 'rgba(74, 158, 255, 0.2)' : 'rgba(0, 122, 255, 0.12)')
+                              : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'),
+                          }
+                        ]}>
+                          <IconSymbol 
+                            name={getExpertCharacterIcon(item) as any} 
+                            size={22} 
+                            color={isSelected 
+                              ? (isDark ? '#4A9EFF' : '#007AFF')
+                              : (isDark ? '#FFFFFF' : '#333333')} 
+                          />
+                        </View>
+                        <ThemedText 
+                          style={[
+                            styles.centeredModalCardName,
+                            isSelected && { color: isDark ? '#4A9EFF' : '#007AFF', fontWeight: '600' }
+                          ]}
+                          numberOfLines={1}>
+                          {item.name}
+                        </ThemedText>
+                        {isSelected && (
+                          <IconSymbol 
+                            name="checkmark.circle.fill" 
+                            size={16} 
+                            color={isDark ? '#4A9EFF' : '#007AFF'} 
+                            style={{ marginLeft: 4 }}
+                          />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        <ToolApprovalModal
+          visible={!!pendingToolApproval}
+          isDark={isDark}
+          tools={pendingToolApproval?.tools || []}
+          approvalCountdown={approvalCountdown}
+          approvalRemainingMs={approvalRemainingMs}
+          approvalProgress={approvalProgress}
+          approvalColor={approvalColor}
+          onApprove={() => submitToolApproval('approve')}
+          onReject={() => submitToolApproval('reject')}
+          isApproving={isApprovingTool}
+        />
+
+        <AIDisclaimerModal
+          visible={onboardingStep === 'disclaimer'}
+          onUnderstand={handleAIDisclaimerAcknowledge}
+        />
+
+        {/* Main Content - Hide when onboarding is shown or checking */}
+        {!shouldHideMainContent && (
+        <>
         {/* Messages Area */}
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           {messages.length === 0 ? (
             <View style={styles.emptyState}>
               <GlowingOrb />
               <ThemedText style={styles.emptyText}>
-                What's on your mind today?
+                {greeting}
               </ThemedText>
               <ThemedText style={styles.emptySubtext}>
                 Connect integrations to make it more fun!
@@ -1226,6 +1703,18 @@ export default function HomeScreen() {
                     isUser={message.isUser}
                   />
                   </View>
+                  {!message.isUser && message.tokenUsage && (
+                    <Text
+                      style={[
+                        styles.tokenUsageText,
+                        { color: isDark ? '#9CA3AF' : '#6B7280' },
+                      ]}
+                    >
+                      Credits: {message.tokenUsage.credits !== undefined
+                        ? message.tokenUsage.credits.toFixed(2)
+                        : '—'}
+                    </Text>
+                  )}
                   <View
                     style={[
                       styles.messageActions,
@@ -1280,163 +1769,238 @@ export default function HomeScreen() {
           )}
         </TouchableWithoutFeedback>
 
-        {/* Sample Questions Button - Only shown when chat is new */}
-        {messages.length === 0 && (
+        {/* Sample Questions Button - Only shown when chat is new, no expert/character selected, and input is empty */}
+        {messages.length === 0 && !shouldHideMainContent && !selectedExpertOrCharacter && inputText.trim().length === 0 && (
           <SampleQuestions userId={userId} onQuestionSelect={handleQuestionSelect} />
         )}
 
         {/* Input Area */}
+        {!shouldHideMainContent && (
         <View
           style={[
             styles.inputContainer,
             { 
-              borderTopColor: isDark ? '#2C2C2E' : '#E5E5EA',
               backgroundColor: isDark ? '#000000' : '#FFFFFF',
               paddingBottom: inputBottomPadding,
             },
           ]}>
-          <View style={styles.webSearchWrapper}>
-            <TouchableOpacity
-              style={[
-                styles.webSearchButton,
-                {
-                  borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-                  backgroundColor: showWebSearchMenu
-                    ? (isDark ? 'rgba(0, 122, 255, 0.2)' : 'rgba(0, 122, 255, 0.1)')
-                    : 'transparent',
-                },
-                showWebSearchMenu && styles.webSearchButtonActive,
-              ]}
-              onPress={() => setShowWebSearchMenu(prev => !prev)}
-              accessibilityLabel="Toggle web search menu"
-              accessibilityRole="button"
-            >
-              <Text
-                style={[
-                  styles.webSearchPlus,
-                  { color: isDark ? '#FFFFFF' : '#000000' },
-                ]}
-              >
-                +
-              </Text>
-            </TouchableOpacity>
+          {/* Recording Indicator */}
+          {isOnDeviceRecording && (
+            <View style={styles.recordingIndicator}>
+              <View style={styles.recordingDot} />
+              <ThemedText style={styles.recordingText}>
+                {onDeviceTranscript ? `🎤 ${onDeviceTranscript}` : 'Listening...'}
+              </ThemedText>
+            </View>
+          )}
 
-            {showWebSearchMenu && (
-              <View
+          {/* Main Input Row */}
+          <View style={styles.inputRow}>
+            {/* Plus/Attachments Button */}
+            <View style={styles.webSearchWrapper}>
+              <TouchableOpacity
                 style={[
-                  styles.webSearchMenu,
+                  styles.webSearchButton,
                   {
-                    backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
-                    borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                    borderColor: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)',
+                    backgroundColor: showWebSearchMenu
+                      ? (isDark ? 'rgba(0, 122, 255, 0.2)' : 'rgba(0, 122, 255, 0.1)')
+                      : 'transparent',
                   },
+                  showWebSearchMenu && styles.webSearchButtonActive,
                 ]}
+                onPress={() => setShowWebSearchMenu(prev => !prev)}
+                accessibilityLabel="Toggle web search menu"
+                accessibilityRole="button"
               >
-                <TouchableOpacity
-                  style={styles.webSearchToggleRow}
-                  onPress={() => {
-                    setWebSearchEnabled(prev => !prev);
-                  }}
-                  activeOpacity={0.8}
+                <Text
+                  style={[
+                    styles.webSearchPlus,
+                    { color: isDark ? '#FFFFFF' : '#000000' },
+                  ]}
                 >
-                  <ThemedText style={styles.webSearchLabel}>Web Search</ThemedText>
-                  <View
-                    style={[
-                      styles.webSearchSwitch,
-                      {
-                        backgroundColor: webSearchEnabled
-                          ? '#34C759'
-                          : (isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'),
-                      },
-                    ]}
+                  +
+                </Text>
+              </TouchableOpacity>
+
+              {showWebSearchMenu && (
+                <View
+                  style={[
+                    styles.webSearchMenu,
+                    {
+                      backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                      borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                    },
+                  ]}
+                >
+                  <TouchableOpacity
+                    style={styles.webSearchToggleRow}
+                    onPress={() => {
+                      setWebSearchEnabled(prev => !prev);
+                    }}
+                    activeOpacity={0.8}
                   >
+                    <ThemedText style={styles.webSearchLabel}>Web Search</ThemedText>
                     <View
                       style={[
-                        styles.webSearchSwitchKnob,
-                        webSearchEnabled && styles.webSearchSwitchKnobOn,
+                        styles.webSearchSwitch,
+                        {
+                          backgroundColor: webSearchEnabled
+                            ? '#34C759'
+                            : (isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'),
+                        },
                       ]}
+                    >
+                      <View
+                        style={[
+                          styles.webSearchSwitchKnob,
+                          webSearchEnabled && styles.webSearchSwitchKnobOn,
+                        ]}
+                      />
+                    </View>
+                  </TouchableOpacity>
+                  <ThemedText style={styles.webSearchHint}>
+                    Coming soon
+                  </ThemedText>
+                </View>
+              )}
+            </View>
+
+            {/* Input Box with embedded buttons */}
+            <View
+              style={[
+                styles.inputWrapper,
+                {
+                  backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
+                  minHeight: 44,
+                  height: Math.max(44, inputHeight),
+                  maxHeight: 140,
+                },
+              ]}
+            >
+              <TextInput
+                ref={inputRef}
+                style={[
+                  styles.input,
+                  {
+                    color: isDark ? '#FFFFFF' : '#000000',
+                    textAlignVertical: 'top',
+                    height: '100%' as unknown as number,
+                  },
+                  // @ts-ignore - web-specific styles
+                  Platform.OS === 'web' && {
+                    overflow: 'auto',
+                    resize: 'none',
+                    outline: 'none',
+                    border: 'none',
+                  },
+                ]}
+                placeholder="Ask Anything"
+                placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
+                value={inputText}
+                onChangeText={(text) => {
+                  setInputText(text);
+                  // For web, calculate height after a brief delay
+                  if (Platform.OS === 'web') {
+                    requestAnimationFrame(() => {
+                      const element = inputRef.current as unknown as HTMLTextAreaElement | null;
+                      if (element) {
+                        // Temporarily reset height to get accurate scrollHeight
+                        const prevHeight = element.style.height;
+                        element.style.height = '0px';
+                        const scrollHeight = element.scrollHeight;
+                        element.style.height = prevHeight;
+                        const newHeight = Math.min(Math.max(44, scrollHeight + 16), 140);
+                        setInputHeight(newHeight);
+                      }
+                    });
+                  }
+                }}
+                onSubmitEditing={() => {
+                  handleSend();
+                  Keyboard.dismiss();
+                }}
+                returnKeyType="send"
+                blurOnSubmit={false}
+                multiline={true}
+                onContentSizeChange={(e) => {
+                  if (Platform.OS !== 'web') {
+                    const contentHeight = e.nativeEvent.contentSize.height;
+                    const newHeight = Math.min(Math.max(44, contentHeight + 22), 140);
+                    setInputHeight(newHeight);
+                  }
+                }}
+                onFocus={() => {
+                  setTimeout(() => {
+                    scrollViewRef.current?.scrollToEnd({ animated: true });
+                  }, 300);
+                }}
+              />
+
+              {/* Buttons inside input box */}
+              <View style={styles.inputButtons}>
+                {/* Microphone Button - only show when no text and not recording */}
+                {inputText.trim().length === 0 && !isOnDeviceRecording && (
+                  <TouchableOpacity 
+                    style={[
+                      styles.inputInnerButton,
+                      isLoading && styles.sendButtonDisabled,
+                    ]} 
+                    onPress={startRecording}
+                    disabled={isLoading}>
+                    <IconSymbol 
+                      name="mic.fill" 
+                      size={18} 
+                      color={isDark ? '#8E8E93' : '#8E8E93'} 
                     />
-                  </View>
+                  </TouchableOpacity>
+                )}
+
+                {/* Stop Recording Button */}
+                {isOnDeviceRecording && (
+                  <TouchableOpacity 
+                    style={[
+                      styles.inputInnerButton,
+                      styles.stopRecordingButton,
+                    ]} 
+                    onPress={stopRecordingAll}>
+                    <IconSymbol 
+                      name="stop.circle.fill" 
+                      size={20} 
+                      color="#FF3B30" 
+                    />
+                  </TouchableOpacity>
+                )}
+
+                {/* Send Button */}
+                <TouchableOpacity 
+                  style={[
+                    styles.sendButtonInner, 
+                    (inputText.trim().length === 0 || isLoading || isOnDeviceRecording) && styles.sendButtonInnerDisabled,
+                    inputText.trim().length > 0 && !isLoading && !isOnDeviceRecording && {
+                      backgroundColor: isDark ? '#FFFFFF' : '#000000',
+                    },
+                  ]} 
+                  onPress={() => {
+                    handleSend();
+                    Keyboard.dismiss();
+                  }}
+                  disabled={inputText.trim().length === 0 || isLoading || isOnDeviceRecording}>
+                  <IconSymbol 
+                    name="arrow.up" 
+                    size={16} 
+                    color={inputText.trim().length > 0 && !isLoading && !isOnDeviceRecording 
+                      ? (isDark ? '#000000' : '#FFFFFF')
+                      : (isDark ? '#555555' : '#AAAAAA')
+                    } 
+                  />
                 </TouchableOpacity>
-                <ThemedText style={styles.webSearchHint}>
-                  Coming soon
-                </ThemedText>
               </View>
-            )}
+            </View>
           </View>
-
-          <TextInput
-            style={[
-              styles.input,
-              {
-                backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7',
-                color: isDark ? '#FFFFFF' : '#000000',
-              },
-            ]}
-            placeholder="Type a message..."
-            placeholderTextColor={isDark ? '#8E8E93' : '#8E8E93'}
-            value={inputText}
-            onChangeText={setInputText}
-            onSubmitEditing={() => {
-              handleSend();
-              Keyboard.dismiss();
-            }}
-            returnKeyType="send"
-            blurOnSubmit={false}
-            multiline={false}
-            onFocus={() => {
-              // Scroll to bottom when input is focused (keyboard opens)
-              setTimeout(() => {
-                scrollViewRef.current?.scrollToEnd({ animated: true });
-              }, 300);
-            }}
-          />
-          
-          {/* Microphone Button */}
-          <TouchableOpacity 
-            style={[
-              styles.micButton,
-              isRecording && styles.micButtonRecording,
-              {
-                borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-              },
-            ]} 
-            onPress={isRecording ? stopRecording : startRecording}
-            disabled={isLoading}>
-            <IconSymbol 
-              name={isRecording ? 'stop.circle.fill' : 'mic.fill'} 
-              size={20} 
-              color={isDark ? '#FFFFFF' : '#000000'} 
-            />
-          </TouchableOpacity>
-
-          {/* Send Button */}
-          <TouchableOpacity 
-            style={[
-              styles.sendButton, 
-              (isLoading || isRecording) && styles.sendButtonDisabled,
-              {
-                borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-              },
-            ]} 
-            onPress={() => {
-              handleSend();
-              Keyboard.dismiss();
-            }}
-            disabled={isLoading || isRecording}>
-            <IconSymbol 
-              name="arrow.up" 
-              size={18} 
-              color={isDark ? '#FFFFFF' : '#000000'} 
-            />
-          </TouchableOpacity>
         </View>
-        
-        {/* Recording Indicator */}
-        {isRecording && (
-          <View style={styles.recordingIndicator}>
-            <View style={styles.recordingDot} />
-            <ThemedText style={styles.recordingText}>Recording...</ThemedText>
-          </View>
+        )}
+        </>
         )}
       </ThemedView>
     </KeyboardAvoidingView>
@@ -1448,34 +2012,53 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingTop: 60,
     paddingBottom: 20,
     paddingHorizontal: 16,
     position: 'relative',
   },
   hamburgerButton: {
-    position: 'absolute',
-    left: 16,
-    top: 64,
     padding: 8,
-    zIndex: 10,
+  },
+  headerIconButton: {
+    padding: 8,
   },
   newChatHeaderButton: {
-    position: 'absolute',
-    right: 16,
-    top: 64,
     padding: 8,
-    zIndex: 10,
-    opacity: 0.7,
   },
   headerCenter: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
   },
   title: {
-    fontSize: 20,
+    fontSize: 30,
     fontWeight: '600',
-    marginBottom: 8,
+    letterSpacing: 0.5,
+  },
+  headerExpertCharacter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 6,
+    marginTop: 6,
+    maxWidth: '80%',
+  },
+  headerExpertCharacterText: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginRight: 2,
+  },
+  headerClearButton: {
+    padding: 0,
+    marginLeft: 2,
   },
   modelSelector: {
     flexDirection: 'row',
@@ -1509,8 +2092,6 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: '600',
-    paddingHorizontal: 20,
-    marginBottom: 16,
   },
   modalScroll: {
     paddingHorizontal: 20,
@@ -1596,14 +2177,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   emptyText: {
-    fontSize: 28,
+    fontSize: 18,
     fontWeight: '600',
     textAlign: 'center',
     marginTop: 48,
     marginBottom: 12,
+    lineHeight: 24,
   },
   emptySubtext: {
-    fontSize: 14,
+    fontSize: 12,
     textAlign: 'center',
     opacity: 0.5,
   },
@@ -1617,6 +2199,10 @@ const styles = StyleSheet.create({
   },
   aiMessage: {
     alignSelf: 'flex-start',
+  },
+  tokenUsageText: {
+    fontSize: 12,
+    marginTop: 4,
   },
   messageActions: {
     flexDirection: 'row',
@@ -1635,25 +2221,62 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 16,
-    borderTopWidth: 1,
+    paddingBottom: 8,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  inputWrapper: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    borderRadius: 24,
+    paddingLeft: 16,
+    paddingRight: 6,
+    paddingTop: 10,
+    paddingBottom: 6,
   },
   input: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 24,
     fontSize: 16,
-    minWidth: 0,
+    lineHeight: 22,
+    paddingVertical: 0,
+    paddingRight: 8,
+  },
+  inputButtons: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 4,
+    paddingBottom: 2,
+  },
+  inputInnerButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stopRecordingButton: {
+    backgroundColor: 'rgba(255, 59, 48, 0.1)',
+  },
+  sendButtonInner: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  sendButtonInnerDisabled: {
+    opacity: 0.4,
   },
   webSearchWrapper: {
     position: 'relative',
-    marginRight: 8,
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     alignItems: 'center',
     zIndex: 5,
   },
@@ -1719,42 +2342,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     opacity: 0.6,
   },
-  micButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 8,
-  },
-  micButtonRecording: {
-    borderColor: 'rgba(255, 59, 48, 0.3)',
-    backgroundColor: 'rgba(255, 59, 48, 0.1)',
-  },
-  sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 8,
-  },
   sendButtonDisabled: {
     opacity: 0.3,
   },
   recordingIndicator: {
-    position: 'absolute',
-    top: -40,
-    left: 0,
-    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
+    paddingVertical: 8,
   },
   recordingDot: {
     width: 12,
@@ -1778,12 +2374,14 @@ const styles = StyleSheet.create({
   },
   sidebar: {
     width: 280,
-    paddingTop: 60,
     shadowColor: '#000',
     shadowOffset: { width: 2, height: 0 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
     elevation: 10,
+  },
+  sidebarContent: {
+    flex: 1,
   },
   sidebarBackdrop: {
     flex: 1,
@@ -1791,8 +2389,8 @@ const styles = StyleSheet.create({
   },
   sidebarHeader: {
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 16,
+    paddingTop: 0,
+    paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(128, 128, 128, 0.2)',
   },
@@ -1801,9 +2399,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
     gap: 12,
+    paddingTop: 0,
   },
   closeIcon: {
-    padding: 4,
+    padding: 8,
   },
   sidebarTitle: {
     fontSize: 20,
@@ -1822,9 +2421,152 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
+  expertCharacterButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  expertCharacterButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    gap: 6,
+  },
+  expertCharacterButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  selectedExpertCharacter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    gap: 8,
+  },
+  selectedExpertCharacterText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  clearExpertCharacterButton: {
+    padding: 4,
+  },
+  centeredModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  centeredModalContent: {
+    width: '100%',
+    maxWidth: 400,
+    maxHeight: '80%',
+    borderRadius: 20,
+    paddingTop: 20,
+    paddingBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  centeredModalClose: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  centeredModalHeader: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+  expertModalIconBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  centeredModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  centeredModalScroll: {
+    flexGrow: 0,
+  },
+  centeredModalGrid: {
+    paddingHorizontal: 16,
+  },
+  centeredModalCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    marginBottom: 8,
+    borderWidth: 2,
+  },
+  centeredModalCardIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  centeredModalCardName: {
+    fontSize: 15,
+    fontWeight: '500',
+    flex: 1,
+  },
+  tabSwitchContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  tabSwitchBackground: {
+    flexDirection: 'row',
+    borderRadius: 10,
+    padding: 3,
+  },
+  tabSwitchButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    gap: 6,
+  },
+  tabSwitchButtonActive: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  tabSwitchText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
   chatList: {
     flex: 1,
-    paddingTop: 16,
+    paddingTop: 8,
   },
   chatListTitle: {
     fontSize: 12,
@@ -1876,7 +2618,6 @@ const styles = StyleSheet.create({
   profileSection: {
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 30,
     borderTopWidth: 1,
   },
   profileButton: {

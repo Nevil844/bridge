@@ -1,19 +1,22 @@
 /**
- * Token Usage Service
- * Client-side service for fetching user token usage and quota information
+ * Credit Usage Service
+ * Client-side service for fetching user credit usage and quota information
+ * Credits are cost-based units (1 credit = $0.01)
  */
 
 import { API_ENDPOINTS } from '../config/api';
+import { authenticatedFetch } from '../utils/api';
 
 export interface TokenUsage {
   userId: string;
   month: string;
   inputTokens: number;
   outputTokens: number;
-  totalTokens: number;
+  totalTokens: number; // Raw token count (for reference)
+  creditsUsed: number; // Credits consumed (primary metric for limits)
   plan: string;
-  limit: number;
-  remainingTokens: number;
+  limit: number; // Credit limit
+  remainingTokens: number; // Remaining credits
   usagePercentage: string;
   warningLevel: 'none' | 'low' | 'medium' | 'high' | 'critical';
   isOverLimit: boolean;
@@ -52,9 +55,12 @@ export interface ModelUsage {
  * Get current month's token usage for a user
  */
 export async function getUserUsage(userId: string, plan: string = 'free'): Promise<TokenUsage> {
-  const response = await fetch(`${API_ENDPOINTS.USAGE}/${userId}?plan=${plan}`);
+  // Use authenticated fetch - token is automatically added to headers
+  const response = await authenticatedFetch(`${API_ENDPOINTS.USAGE}/${userId}?plan=${plan}`);
   
   if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Usage API error:', errorText);
     throw new Error('Failed to fetch usage data');
   }
   
@@ -68,9 +74,12 @@ export async function getUserUsageHistory(
   userId: string, 
   months: number = 6
 ): Promise<UsageHistory> {
-  const response = await fetch(`${API_ENDPOINTS.USAGE}/${userId}/history?months=${months}`);
+  // Use authenticated fetch - token is automatically added to headers
+  const response = await authenticatedFetch(`${API_ENDPOINTS.USAGE}/${userId}/history?months=${months}`);
   
   if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Usage history API error:', errorText);
     throw new Error('Failed to fetch usage history');
   }
   
@@ -81,9 +90,12 @@ export async function getUserUsageHistory(
  * Get usage breakdown by model
  */
 export async function getUserUsageByModel(userId: string): Promise<ModelUsage> {
-  const response = await fetch(`${API_ENDPOINTS.USAGE}/${userId}/by-model`);
+  // Use authenticated fetch - token is automatically added to headers
+  const response = await authenticatedFetch(`${API_ENDPOINTS.USAGE}/${userId}/by-model`);
   
   if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Usage by model API error:', errorText);
     throw new Error('Failed to fetch usage by model');
   }
   
@@ -109,14 +121,21 @@ export function getWarningColor(warningLevel: string): string {
 }
 
 /**
- * Format token count for display (e.g., 1234567 → "1.23M")
+ * Format credit count for display (e.g., 1234.56 → "1,234.56")
+ * Credits are typically smaller numbers, so we format with commas and 2 decimals
  */
-export function formatTokenCount(tokens: number): string {
-  if (tokens >= 1000000) {
-    return `${(tokens / 1000000).toFixed(2)}M`;
-  } else if (tokens >= 1000) {
-    return `${(tokens / 1000).toFixed(1)}K`;
+export function formatTokenCount(credits: number): string {
+  // For credits, show 2 decimal places if not whole number
+  if (credits % 1 === 0) {
+    return credits.toLocaleString(); // Whole number: "100"
   }
-  return tokens.toString();
+  return credits.toFixed(2); // Decimal: "123.45"
+}
+
+/**
+ * Format credit count with label
+ */
+export function formatCredits(credits: number): string {
+  return `${formatTokenCount(credits)} credits`;
 }
 

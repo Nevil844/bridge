@@ -1,25 +1,42 @@
-import { Tabs } from 'expo-router';
+import { Redirect, Tabs } from 'expo-router';
 import React from 'react';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
+import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { ActivityIndicator, View } from 'react-native';
 
 export default function TabLayout() {
+  const { isAuthenticated, isLoading } = useAuth();
   const colorScheme = useColorScheme();
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect href="/login" />;
+  }
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        tabBarActiveTintColor: Colors[colorScheme ?? 'dark'].tint,
         headerShown: false,
         tabBarButton: HapticTab,
+        title: '',
       }}>
       <Tabs.Screen
         name="index"
         options={{
           title: 'Chat',
+          headerShown: false,
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="message.fill" color={color} />,
         }}
       />
@@ -27,6 +44,7 @@ export default function TabLayout() {
         name="integrations"
         options={{
           title: 'Integrations',
+          headerShown: false,
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="link" color={color} />,
         }}
       />
@@ -34,6 +52,7 @@ export default function TabLayout() {
         name="settings"
         options={{
           title: 'Settings',
+          headerShown: false,
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="gearshape.fill" color={color} />,
         }}
       />
@@ -41,6 +60,8 @@ export default function TabLayout() {
         name="pricing"
         options={{
           href: null, // Hide from tab bar
+          headerShown: false,
+          title: '',
         }}
       />
     </Tabs>

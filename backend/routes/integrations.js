@@ -6,15 +6,16 @@
 const express = require('express');
 const router = express.Router();
 const integrationService = require('../db/services/integration');
+const adminService = require('../db/services/admin');
+const { verifyUser } = require('../middleware/auth');
 
 /**
  * GET /api/user-integrations
  * Get all active integrations for a user
  */
-router.get('/', async (req, res) => {
+router.get('/', verifyUser, async (req, res) => {
   try {
-    const userId = req.query.userId || 'default-user';
-    const integrations = await integrationService.getUserIntegrations(userId);
+    const integrations = await integrationService.getUserIntegrations(req.userId);
     
     // Don't expose full credentials in list view
     const sanitized = integrations.map(int => ({
@@ -34,15 +35,30 @@ router.get('/', async (req, res) => {
 });
 
 /**
+ * GET /api/integrations/available
+ * Get all integrations with their enabled/disabled status
+ * Returns ALL integrations (both enabled and disabled) so frontend can categorize them
+ */
+router.get('/available', verifyUser, async (req, res) => {
+  try {
+    const settings = await adminService.getIntegrationSettings();
+    // Return ALL integrations with their enabled status
+    res.json({ integrations: settings });
+  } catch (error) {
+    console.error('Error fetching available integrations:', error);
+    res.status(500).json({ error: 'Failed to fetch available integrations' });
+  }
+});
+
+/**
  * GET /api/user-integrations/:provider
  * Get specific integration with credentials
  */
-router.get('/:provider', async (req, res) => {
+router.get('/:provider', verifyUser, async (req, res) => {
   try {
     const { provider } = req.params;
-    const userId = req.query.userId || 'default-user';
 
-    const integration = await integrationService.getIntegration(userId, provider);
+    const integration = await integrationService.getIntegration(req.userId, provider);
     
     if (!integration) {
       return res.status(404).json({ error: 'Integration not found' });
@@ -59,18 +75,18 @@ router.get('/:provider', async (req, res) => {
  * POST /api/user-integrations
  * Store or update integration
  */
-router.post('/', async (req, res) => {
+router.post('/', verifyUser, async (req, res) => {
   try {
-    const { userId, provider, credentials, metadata } = req.body;
+    const { provider, credentials, metadata } = req.body;
 
-    if (!userId || !provider || !credentials) {
+    if (!provider || !credentials) {
       return res.status(400).json({ 
-        error: 'userId, provider, and credentials are required' 
+        error: 'provider and credentials are required' 
       });
     }
 
     const integration = await integrationService.storeIntegration(
-      userId, 
+      req.userId, 
       provider, 
       credentials, 
       metadata
@@ -93,12 +109,11 @@ router.post('/', async (req, res) => {
  * DELETE /api/user-integrations/:provider
  * Deactivate integration
  */
-router.delete('/:provider', async (req, res) => {
+router.delete('/:provider', verifyUser, async (req, res) => {
   try {
     const { provider } = req.params;
-    const userId = req.query.userId || 'default-user';
 
-    await integrationService.deleteIntegration(userId, provider);
+    await integrationService.deleteIntegration(req.userId, provider);
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting integration:', error);
@@ -110,12 +125,11 @@ router.delete('/:provider', async (req, res) => {
  * GET /api/user-integrations/check/:provider
  * Check if user has integration
  */
-router.get('/check/:provider', async (req, res) => {
+router.get('/check/:provider', verifyUser, async (req, res) => {
   try {
     const { provider } = req.params;
-    const userId = req.query.userId || 'default-user';
 
-    const hasIntegration = await integrationService.hasIntegration(userId, provider);
+    const hasIntegration = await integrationService.hasIntegration(req.userId, provider);
     res.json({ hasIntegration });
   } catch (error) {
     console.error('Error checking integration:', error);

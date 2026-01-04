@@ -2,13 +2,18 @@ import { GlowingOrb } from '@/components/glowing-orb';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { API_ENDPOINTS } from '@/config/api';
+import { useAuth } from '@/hooks/use-auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
+import { setAccessToken } from '@/utils/api';
 import { secureStorage, storage, STORAGE_KEYS } from '@/utils/storage';
+import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Image,
   Linking,
   Platform,
@@ -22,13 +27,66 @@ import {
 WebBrowser.maybeCompleteAuthSession();
 
 interface LoginScreenProps {
-  onLoginSuccess: (user: { id: string; email: string; name: string; picture?: string; plan?: string }) => void;
+  onLoginSuccess?: (user: { id: string; email: string; name: string; picture?: string; plan?: string }) => void;
 }
 
-export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
+export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const router = useRouter();
+  const { login: authLogin } = useAuth();
+  const { paddingStyle } = useSafeAreaPadding({ top: 24, bottom: 24 });
+  
+  // Animation values for glowing "Bridge AI" text
+  const bridgeGlow = useRef(new Animated.Value(0)).current;
+  const bridgeTranslateY = useRef(new Animated.Value(0)).current;
+  
+  useEffect(() => {
+    // Glow and up/down animation for "Bridge AI"
+    Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(bridgeGlow, {
+            toValue: 1,
+            duration: 1500,
+            useNativeDriver: false, // shadowRadius can't use native driver
+          }),
+          Animated.timing(bridgeTranslateY, {
+            toValue: -8,
+            duration: 1500,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(bridgeGlow, {
+            toValue: 0,
+            duration: 1500,
+            useNativeDriver: false,
+          }),
+          Animated.timing(bridgeTranslateY, {
+            toValue: 8,
+            duration: 1500,
+            useNativeDriver: true,
+          }),
+        ]),
+      ])
+    ).start();
+  }, []);
+  
+  // Use provided callback or auth hook, with web reload wrapper
+  const handleLoginSuccess = async (userData: { id: string; email: string; name: string; picture?: string; plan?: string }) => {
+    const loginFn = onLoginSuccess || authLogin;
+    await loginFn(userData);
+    
+    // On web, force reload to reset navigation state
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.href = '/';
+    } else {
+      // On native, ensure we leave the login route
+      router.replace('/');
+    }
+  };
 
   const pollForSession = async (state: string) => {
     try {
@@ -69,7 +127,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             const userResponse = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${session.userId}`);
             if (userResponse.ok) {
               const userData = await userResponse.json();
-              onLoginSuccess({
+              handleLoginSuccess({
                 id: userData.id,
                 email: userData.email,
                 name: userData.username || userData.email,
@@ -137,21 +195,41 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               console.log('✅ Session found via secure storage state:', session);
               // Use session userId
               await storage.setItem(STORAGE_KEYS.USER_ID, session.userId);
+              
+              // Store access token if provided in session
+              if (session.accessToken) {
+                await setAccessToken(session.accessToken);
+                console.log('✅ Access token stored from session');
+              }
             }
           } catch (e) {
             console.log('⚠️ Could not fetch session, using secure storage userId');
           }
         }
         
+        // Fetch access token if not already stored
+        try {
+          const tokenResponse = await fetch(`${API_ENDPOINTS.AUTH.TOKEN}?userId=${oauthUserId}`);
+          if (tokenResponse.ok) {
+            const tokenData = await tokenResponse.json();
+            if (tokenData.accessToken) {
+              await setAccessToken(tokenData.accessToken);
+              console.log('✅ Access token stored');
+            }
+          }
+        } catch (e) {
+          console.warn('⚠️ Could not fetch access token:', e);
+        }
+        
         const userResponse = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${oauthUserId}`);
         if (userResponse.ok) {
           const userData = await userResponse.json();
-          onLoginSuccess({
-            id: userData.id,
-            email: userData.email,
-            name: userData.username || userData.email,
-            plan: userData.plan || 'free',
-          });
+            handleLoginSuccess({
+              id: userData.id,
+              email: userData.email,
+              name: userData.username || userData.email,
+              plan: userData.plan || 'free',
+            });
           setIsLoading(false);
           // Clear secure storage
           await secureStorage.removeItem(STORAGE_KEYS.OAUTH_USER_ID);
@@ -190,13 +268,28 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         return;
       }
       
-      // We have a stored userId, fetch user info
-      console.log('✅ Found stored userId, fetching user info...');
+      // We have a stored userId, fetch access token and user info
+      console.log('✅ Found stored userId, fetching access token and user info...');
+      
+      // Fetch access token
+      try {
+        const tokenResponse = await fetch(`${API_ENDPOINTS.AUTH.TOKEN}?userId=${storedUserId}`);
+        if (tokenResponse.ok) {
+          const tokenData = await tokenResponse.json();
+          if (tokenData.accessToken) {
+            await setAccessToken(tokenData.accessToken);
+            console.log('✅ Access token stored');
+          }
+        }
+      } catch (e) {
+        console.warn('⚠️ Could not fetch access token:', e);
+      }
+      
       const userResponse = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${storedUserId}`);
       if (userResponse.ok) {
         const userData = await userResponse.json();
         console.log('✅ User data retrieved:', userData);
-        onLoginSuccess({
+        await handleLoginSuccess({
           id: userData.id,
           email: userData.email,
           name: userData.username || userData.email,
@@ -256,7 +349,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             const userResponse = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${params.userId}`);
             if (userResponse.ok) {
               const userData = await userResponse.json();
-              onLoginSuccess({
+              handleLoginSuccess({
                 id: userData.id,
                 email: userData.email,
                 name: userData.username || userData.email,
@@ -281,17 +374,29 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         console.log('✅ Found userId in callback:', userId);
         await storage.setItem(STORAGE_KEYS.USER_ID, userId);
         
+        // Fetch access token and user info
+        const tokenResponse = await fetch(`${API_ENDPOINTS.AUTH.TOKEN}?userId=${userId}`);
+        if (tokenResponse.ok) {
+          const tokenData = await tokenResponse.json();
+          if (tokenData.accessToken) {
+            // Store access token securely
+            const { setAccessToken } = require('@/utils/api');
+            await setAccessToken(tokenData.accessToken);
+            console.log('✅ Access token stored');
+          }
+        }
+        
         // Fetch full user info
         const userResponse = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${userId}`);
         if (userResponse.ok) {
           const userData = await userResponse.json();
           console.log('✅ User data fetched:', userData);
-          onLoginSuccess({
-            id: userData.id,
-            email: userData.email,
-            name: userData.username || userData.email,
-            plan: userData.plan || 'free',
-          });
+            handleLoginSuccess({
+              id: userData.id,
+              email: userData.email,
+              name: userData.username || userData.email,
+              plan: userData.plan || 'free',
+            });
           setIsLoading(false);
           return;
         } else {
@@ -304,12 +409,12 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         if (userResponse.ok) {
           const userData = await userResponse.json();
           await storage.setItem(STORAGE_KEYS.USER_ID, userData.id);
-          onLoginSuccess({
-            id: userData.id,
-            email: userData.email,
-            name: userData.username || userData.email,
-            plan: userData.plan || 'free',
-          });
+            handleLoginSuccess({
+              id: userData.id,
+              email: userData.email,
+              name: userData.username || userData.email,
+              plan: userData.plan || 'free',
+            });
           setIsLoading(false);
           return;
         }
@@ -367,66 +472,6 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     try {
       setIsLoading(true);
 
-      // MOBILE TEST MODE: Auto-login with existing user credentials
-      // Skip OAuth flow on mobile for testing
-      // Platform-specific test emails: iOS = nevil, Android = kushal
-      const TEST_EMAIL = Platform.OS === 'ios' 
-        ? 'neviljobanputra34@gmail.com' 
-        : Platform.OS === 'android' 
-        ? 'kushalnandha26@gmail.com' 
-        : null;
-      const IS_MOBILE = Platform.OS !== 'web';
-      
-      if (IS_MOBILE && TEST_EMAIL) {
-        console.log(`📱 MOBILE TEST MODE (${Platform.OS}): Auto-logging in with`, TEST_EMAIL);
-        
-        try {
-          // Fetch user by email from backend
-          const userResponse = await fetch(`${API_ENDPOINTS.AUTH.ME}?userId=${TEST_EMAIL}`);
-          
-          if (userResponse.ok) {
-            const userData = await userResponse.json();
-            console.log('✅ Test user loaded:', userData);
-            
-            // Check if user is invited (invite-only mode)
-            const inviteCheck = await fetch(`${API_ENDPOINTS.WAITLIST}/check?email=${encodeURIComponent(TEST_EMAIL)}`);
-            if (inviteCheck.ok) {
-              const inviteData = await inviteCheck.json();
-              if (!inviteData.isInvited) {
-                Alert.alert(
-                  'Access Restricted',
-                  'This app is currently invite-only. Please join the waitlist and wait for an invitation.',
-                  [{ text: 'OK' }]
-                );
-                setIsLoading(false);
-                return;
-              }
-            }
-            
-            // Store user ID
-            await storage.setItem(STORAGE_KEYS.USER_ID, userData.id);
-            
-            // Call login success callback
-            onLoginSuccess({
-              id: userData.id,
-              email: userData.email,
-              name: userData.username || userData.email,
-              picture: userData.picture || undefined,
-              plan: userData.plan || 'free',
-            });
-            
-            setIsLoading(false);
-            return;
-          } else {
-            console.warn('⚠️ Test user not found, falling back to OAuth');
-            // Fall through to normal OAuth flow
-          }
-        } catch (error) {
-          console.error('❌ Error in test mode login:', error);
-          // Fall through to normal OAuth flow
-        }
-      }
-
       // Normal OAuth flow (web or if test mode fails)
       console.log('🌐 Starting OAuth flow...');
 
@@ -453,19 +498,20 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         API_ENDPOINTS.AUTH.GOOGLE_CALLBACK
       );
 
-      console.log('🌐 OAuth result:', result.type, result.url ? 'has URL' : 'no URL');
-      if (result.url) {
-        console.log('📋 Callback URL:', result.url);
+      const resultUrl = result.type === 'success' ? result.url : undefined;
+      console.log('🌐 OAuth result:', result.type, resultUrl ? 'has URL' : 'no URL');
+      if (resultUrl) {
+        console.log('📋 Callback URL:', resultUrl);
       }
       
-      if (result.type === 'success' && result.url) {
+      if (result.type === 'success' && resultUrl) {
         // Parse the callback URL to extract user info
         console.log('✅ OAuth success, processing callback...');
-        await handleAuthCallback(result.url);
+        await handleAuthCallback(resultUrl);
       } else if (result.type === 'cancel') {
-        console.log('❌ User cancelled OAuth');
-        Alert.alert('Login Cancelled', 'You cancelled the login process.');
-        setIsLoading(false);
+        console.log('⚠️ User cancelled OAuth (checking if callback still completed)...');
+        // Sometimes the browser returns cancel even though the user finished in Safari
+        await pollForSession(oauthState);
       } else if (result.type === 'dismiss') {
         // Browser was dismissed - check if we're on the callback page (web mode)
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -517,7 +563,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   };
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView style={[styles.container, paddingStyle]}>
       <View style={styles.content}>
         <View style={styles.logoContainer}>
           <View style={styles.orbContainer}>
@@ -525,12 +571,41 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           </View>
           <View style={styles.titleContainer}>
             <ThemedText style={styles.titleLine1}>Welcome to</ThemedText>
-            <Text style={[
-              styles.titleLine2,
-              { color: isDark ? '#4A9EFF' : '#007AFF' }
-            ]}>
-              Bridge AI
-            </Text>
+            <Animated.View
+              style={[
+                {
+                  transform: [{ translateY: bridgeTranslateY }],
+                },
+              ]}
+            >
+              <Animated.View
+                style={[
+                  {
+                    shadowColor: isDark ? '#4A9EFF' : '#007AFF',
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: bridgeGlow.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.3, 1],
+                    }),
+                    shadowRadius: bridgeGlow.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [10, 25],
+                    }),
+                    elevation: bridgeGlow.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [5, 15],
+                    }),
+                  },
+                ]}
+              >
+                <Text style={[
+                  styles.titleLine2,
+                  { color: isDark ? '#4A9EFF' : '#007AFF' }
+                ]}>
+                  Bridge AI
+                </Text>
+              </Animated.View>
+            </Animated.View>
           </View>
           <ThemedText style={styles.subtitle}>
             Sign in with Google to get started
@@ -555,9 +630,24 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           )}
         </TouchableOpacity>
 
-        <ThemedText style={styles.footerText}>
-          By continuing, you agree to our Terms of Service and Privacy Policy
-        </ThemedText>
+        <View style={styles.footerContainer}>
+          <ThemedText style={styles.footerText}>
+            By continuing, you agree to our{' '}
+            <Text
+              style={[styles.linkText, { color: isDark ? '#4A9EFF' : '#007AFF' }]}
+              onPress={() => router.push('/terms')}
+            >
+              Terms of Service
+            </Text>
+            {' '}and{' '}
+            <Text
+              style={[styles.linkText, { color: isDark ? '#4A9EFF' : '#007AFF' }]}
+              onPress={() => router.push('/privacy')}
+            >
+              Privacy Policy
+            </Text>
+          </ThemedText>
+        </View>
       </View>
     </ThemedView>
   );
@@ -568,7 +658,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 20,
   },
   content: {
     width: '100%',
@@ -634,11 +724,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  footerContainer: {
+    marginTop: 20,
+    paddingHorizontal: 20,
+  },
   footerText: {
     fontSize: 12,
     opacity: 0.5,
     textAlign: 'center',
-    marginTop: 20,
+  },
+  linkText: {
+    textDecorationLine: 'underline',
+    fontWeight: '500',
   },
 });
 

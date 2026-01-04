@@ -17,6 +17,7 @@ const express = require('express');
 const router = express.Router();
 const memoryService = require('../db/services/memory');
 const embeddingService = require('../ai-providers/embeddings');
+const { verifyUser } = require('../middleware/auth');
 
 /**
  * Helper: Generate embedding for text (uses unified embedding service)
@@ -29,14 +30,14 @@ async function generateEmbedding(text) {
  * POST /api/memory
  * Store a memory with embedding (auto-generated)
  * 
- * Body: {userId, content, conversationId?, messageId?, metadata?}
+ * Body: {content, conversationId?, messageId?, metadata?}
  */
-router.post('/', async (req, res) => {
+router.post('/', verifyUser, async (req, res) => {
   try {
-    const { userId, content, conversationId, messageId, metadata } = req.body;
+    const { content, conversationId, messageId, metadata } = req.body;
 
-    if (!userId || !content) {
-      return res.status(400).json({ error: 'userId and content are required' });
+    if (!content) {
+      return res.status(400).json({ error: 'content is required' });
     }
 
     // Generate embedding
@@ -44,7 +45,7 @@ router.post('/', async (req, res) => {
 
     // Store memory
     const memory = await memoryService.storeMemory(
-      userId,
+      req.userId,
       content,
       embedding,
       conversationId,
@@ -64,15 +65,15 @@ router.post('/', async (req, res) => {
  * Store a memory with pre-computed embedding
  * For LangChain integration where embeddings are generated client-side
  * 
- * Body: {userId, content, embedding, conversationId?, messageId?, metadata?}
+ * Body: {content, embedding, conversationId?, messageId?, metadata?}
  * - embedding: Array of 1536 floats (text-embedding-3-small)
  */
-router.post('/vector', async (req, res) => {
+router.post('/vector', verifyUser, async (req, res) => {
   try {
-    const { userId, content, embedding, conversationId, messageId, metadata } = req.body;
+    const { content, embedding, conversationId, messageId, metadata } = req.body;
 
-    if (!userId || !content || !embedding) {
-      return res.status(400).json({ error: 'userId, content, and embedding are required' });
+    if (!content || !embedding) {
+      return res.status(400).json({ error: 'content and embedding are required' });
     }
 
     if (!Array.isArray(embedding) || embedding.length !== 1536) {
@@ -81,7 +82,7 @@ router.post('/vector', async (req, res) => {
 
     // Store memory with provided embedding
     const memory = await memoryService.storeMemory(
-      userId,
+      req.userId,
       content,
       embedding,
       conversationId,
@@ -100,18 +101,18 @@ router.post('/vector', async (req, res) => {
  * POST /api/memory/search
  * Semantic search for similar memories (query text)
  * 
- * Body: {userId, query, conversationId?, limit?, topK?}
+ * Body: {query, conversationId?, limit?, topK?}
  * - query: Text to search for
  * - limit/topK: Number of results (default: 5)
  * 
  * Uses pgvector cosine similarity: embedding <-> query_embedding
  */
-router.post('/search', async (req, res) => {
+router.post('/search', verifyUser, async (req, res) => {
   try {
-    const { userId, query, conversationId, limit, topK } = req.body;
+    const { query, conversationId, limit, topK } = req.body;
 
-    if (!userId || !query) {
-      return res.status(400).json({ error: 'userId and query are required' });
+    if (!query) {
+      return res.status(400).json({ error: 'query is required' });
     }
 
     // Generate embedding for query
@@ -120,7 +121,7 @@ router.post('/search', async (req, res) => {
     // Search similar memories
     const resultLimit = limit || topK || 5;
     const results = await memoryService.searchSimilar(
-      userId,
+      req.userId,
       embedding,
       resultLimit,
       conversationId
@@ -138,18 +139,18 @@ router.post('/search', async (req, res) => {
  * Semantic search with pre-computed embedding
  * For LangChain integration
  * 
- * Body: {userId, queryEmbedding, conversationId?, topK?}
+ * Body: {queryEmbedding, conversationId?, topK?}
  * - queryEmbedding: Array of 1536 floats
  * - topK: Number of results (default: 5)
  * 
  * Returns: Top K semantically similar results with similarity scores
  */
-router.post('/search/vector', async (req, res) => {
+router.post('/search/vector', verifyUser, async (req, res) => {
   try {
-    const { userId, queryEmbedding, conversationId, topK } = req.body;
+    const { queryEmbedding, conversationId, topK } = req.body;
 
-    if (!userId || !queryEmbedding) {
-      return res.status(400).json({ error: 'userId and queryEmbedding are required' });
+    if (!queryEmbedding) {
+      return res.status(400).json({ error: 'queryEmbedding is required' });
     }
 
     if (!Array.isArray(queryEmbedding) || queryEmbedding.length !== 1536) {
@@ -158,7 +159,7 @@ router.post('/search/vector', async (req, res) => {
 
     // Search similar memories
     const results = await memoryService.searchSimilar(
-      userId,
+      req.userId,
       queryEmbedding,
       topK || 5,
       conversationId
@@ -175,12 +176,12 @@ router.post('/search/vector', async (req, res) => {
  * POST /api/memory/hybrid-search
  * Hybrid search: vector similarity + keyword matching
  */
-router.post('/hybrid-search', async (req, res) => {
+router.post('/hybrid-search', verifyUser, async (req, res) => {
   try {
-    const { userId, query, keywords, conversationId, limit } = req.body;
+    const { query, keywords, conversationId, limit } = req.body;
 
-    if (!userId || !query || !keywords) {
-      return res.status(400).json({ error: 'userId, query, and keywords are required' });
+    if (!query || !keywords) {
+      return res.status(400).json({ error: 'query and keywords are required' });
     }
 
     // Generate embedding for query
@@ -188,7 +189,7 @@ router.post('/hybrid-search', async (req, res) => {
 
     // Hybrid search
     const results = await memoryService.hybridSearch(
-      userId,
+      req.userId,
       embedding,
       keywords,
       limit || 10,
@@ -223,13 +224,12 @@ router.get('/conversation/:id', async (req, res) => {
  * GET /api/memory/user
  * Get user's memories
  */
-router.get('/user', async (req, res) => {
+router.get('/user', verifyUser, async (req, res) => {
   try {
-    const userId = req.query.userId || 'default-user';
     const limit = parseInt(req.query.limit) || 50;
     const offset = parseInt(req.query.offset) || 0;
 
-    const memories = await memoryService.getUserMemories(userId, limit, offset);
+    const memories = await memoryService.getUserMemories(req.userId, limit, offset);
     res.json(memories);
   } catch (error) {
     console.error('Error fetching user memories:', error);
@@ -241,12 +241,11 @@ router.get('/user', async (req, res) => {
  * DELETE /api/memory/:id
  * Delete a specific memory
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', verifyUser, async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.query.userId || 'default-user';
 
-    await memoryService.deleteMemory(id, userId);
+    await memoryService.deleteMemory(id, req.userId);
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting memory:', error);

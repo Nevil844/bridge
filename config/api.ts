@@ -12,19 +12,37 @@ const NETWORK_IP = '192.168.1.88'; // Replace with your actual IP!
 
 export const API_CONFIG = {
   // BASE_URL: `http://${NETWORK_IP}:3000`,  // For physical iOS device
-  // BASE_URL: 'https://api.bridge.neviljobanputra.com',  // For production
+  BASE_URL: 'https://api.bridge.neviljobanputra.com',  // For production
   
   // Alternatives (uncomment if needed):
-  BASE_URL: 'http://localhost:3000',      // For web browser
+  // BASE_URL: 'http://localhost:3000',      // For web browser
   // BASE_URL: 'http://127.0.0.1:3000',      // For iOS Simulator
   // BASE_URL: 'http://10.0.2.2:3000',       // For Android Emulator
 };
 
+// Helper to convert HTTP URL to WebSocket URL
+export const getWebSocketUrl = (httpUrl: string): string => {
+  if (httpUrl.startsWith('https://')) {
+    return httpUrl.replace('https://', 'wss://');
+  } else if (httpUrl.startsWith('http://')) {
+    return httpUrl.replace('http://', 'ws://');
+  }
+  return httpUrl;
+};
+
 export const API_ENDPOINTS = {
   CHAT: `${API_CONFIG.BASE_URL}/api/chat`,
+  get CHAT_WS() {
+    return getWebSocketUrl(`${API_CONFIG.BASE_URL}/api/chat/stream`);
+  },
+  get TRANSCRIBE_WS() {
+    return getWebSocketUrl(`${API_CONFIG.BASE_URL}/api/transcribe/stream`);
+  },
+  CHAT_TOOL_APPROVAL: `${API_CONFIG.BASE_URL}/api/chat/tools/approval`,
   MODELS: `${API_CONFIG.BASE_URL}/api/models`,
   MCP_STATUS: `${API_CONFIG.BASE_URL}/api/mcp/status`,
   INTEGRATIONS: `${API_CONFIG.BASE_URL}/api/integrations`,
+  AVAILABLE_INTEGRATIONS: `${API_CONFIG.BASE_URL}/api/integrations/available`,
   CONVERSATIONS: `${API_CONFIG.BASE_URL}/api/conversations`,
   USER_INTEGRATIONS: `${API_CONFIG.BASE_URL}/api/user-integrations`,
   USAGE: `${API_CONFIG.BASE_URL}/api/usage`,
@@ -33,8 +51,34 @@ export const API_ENDPOINTS = {
     GOOGLE_CALLBACK: `${API_CONFIG.BASE_URL}/api/auth/google/callback`,
     GOOGLE_SESSION: `${API_CONFIG.BASE_URL}/api/auth/google/session`,
     ME: `${API_CONFIG.BASE_URL}/api/auth/me`,
+    TOKEN: `${API_CONFIG.BASE_URL}/api/auth/token`,
+    DELETE_ACCOUNT: `${API_CONFIG.BASE_URL}/api/auth/account`,
   },
   WAITLIST: `${API_CONFIG.BASE_URL}/api/waitlist`,
   SAMPLE_QUESTIONS: `${API_CONFIG.BASE_URL}/api/sample-questions`,
+  NOTIFICATIONS: {
+    REGISTER: `${API_CONFIG.BASE_URL}/api/notifications/register`,
+    UNREGISTER: `${API_CONFIG.BASE_URL}/api/notifications/unregister`,
+    TOKENS: `${API_CONFIG.BASE_URL}/api/notifications/tokens`,
+  },
+  ADMIN: {
+    DASHBOARD: `${API_CONFIG.BASE_URL}/api/admin/dashboard`,
+    USERS: `${API_CONFIG.BASE_URL}/api/admin/users`,
+    USER_DETAILS: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/users/${userId}`,
+    UPDATE_USER_PLAN: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/users/${userId}/plan`,
+    APPROVALS: `${API_CONFIG.BASE_URL}/api/admin/approvals`,
+    APPROVE: (waitlistId: string) => `${API_CONFIG.BASE_URL}/api/admin/approvals/${waitlistId}/approve`,
+    REMOVE_APPROVAL: (waitlistId: string) => `${API_CONFIG.BASE_URL}/api/admin/approvals/${waitlistId}`,
+    CONVERSATION: (conversationId: string) => `${API_CONFIG.BASE_URL}/api/admin/conversations/${conversationId}`,
+    INTEGRATIONS: `${API_CONFIG.BASE_URL}/api/admin/integrations`,
+    UPDATE_INTEGRATION: (provider: string) => `${API_CONFIG.BASE_URL}/api/admin/integrations/${provider}`,
+    ADMINS: `${API_CONFIG.BASE_URL}/api/admin/admins`,
+    ADD_ADMIN: `${API_CONFIG.BASE_URL}/api/admin/admins`,
+    REMOVE_ADMIN: (userId: string) => `${API_CONFIG.BASE_URL}/api/admin/admins/${userId}`,
+    NOTIFICATIONS: `${API_CONFIG.BASE_URL}/api/admin/notifications`,
+    NOTIFICATION: (id: string) => `${API_CONFIG.BASE_URL}/api/admin/notifications/${id}`,
+    SEND_NOTIFICATION: (id: string) => `${API_CONFIG.BASE_URL}/api/admin/notifications/${id}/send`,
+    CANCEL_NOTIFICATION: (id: string) => `${API_CONFIG.BASE_URL}/api/admin/notifications/${id}/cancel`,
+  },
 };
 

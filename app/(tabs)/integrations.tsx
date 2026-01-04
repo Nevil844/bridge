@@ -1,8 +1,11 @@
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { getIntegrationMetadata } from '@/components/ui/integrations/metadata';
 import { API_ENDPOINTS } from '@/config/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
+import { authenticatedFetch } from '@/utils/api';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -13,10 +16,10 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Integration {
   id: string;
@@ -60,6 +63,22 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     description: 'Read, send, search, and manage your Gmail emails.',
   },
   {
+    id: 'google-calendar',
+    name: 'Google Calendar',
+    type: 'google-calendar',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Google_Calendar_icon_%282020%29.svg/512px-Google_Calendar_icon_%282020%29.svg.png?20221106121915',
+    description: 'View events, create meetings, manage your calendar, and schedule appointments.',
+  },
+  {
+    id: 'jira',
+    name: 'Jira',
+    type: 'jira',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Jira_Logo.svg/150px-Jira_Logo.svg.png',
+    description: 'Create and manage issues, projects, workflows, and more.',
+  },
+  {
     id: 'zerodha',
     name: 'Zerodha',
     type: 'zerodha',
@@ -76,6 +95,33 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     description: 'Control playback, manage playlists, and search music.',
   },
   {
+    id: 'slack',
+    name: 'Slack',
+    type: 'slack',
+    connected: false,
+    logo: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
+    description: 'Send messages, read channels, and manage your workspace.',
+  },
+  {
+    id: 'youtube',
+    name: 'YouTube',
+    type: 'youtube',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/150px-YouTube_full-color_icon_%282017%29.svg.png',
+    description: 'Search videos, manage playlists, and access your YouTube content.',
+  },
+  {
+    id: 'x',
+    name: 'X (Twitter)',
+    type: 'x',
+    connected: false,
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/X_logo.jpg/1200px-X_logo.jpg',
+    description: 'Read and post tweets, search content, manage your X account.',
+  },
+];
+
+const UPCOMING_INTEGRATIONS: Integration[] = [
+  {
     id: 'zomato',
     name: 'Zomato',
     type: 'zomato',
@@ -83,17 +129,6 @@ const AVAILABLE_INTEGRATIONS: Integration[] = [
     logo: 'https://logo.clearbit.com/zomato.com',
     description: 'Discover restaurants, browse menus, create carts, and place food orders.',
   },
-  {
-    id: 'jira',
-    name: 'Jira',
-    type: 'jira',
-    connected: false,
-    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Jira_Logo.svg/150px-Jira_Logo.svg.png',
-    description: 'Create and manage issues, projects, workflows, and more.',
-  },
-];
-
-const UPCOMING_INTEGRATIONS: Integration[] = [
   // Existing integrations that were there before
   {
     id: 'whatsapp',
@@ -129,22 +164,6 @@ const UPCOMING_INTEGRATIONS: Integration[] = [
     description: 'Post photos, manage stories, and grow your social presence.',
   },
   {
-    id: 'youtube',
-    name: 'YouTube',
-    type: 'youtube',
-    connected: false,
-    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/150px-YouTube_full-color_icon_%282017%29.svg.png',
-    description: 'Upload videos, manage playlists, and track your channel analytics.',
-  },
-  {
-    id: 'twitter',
-    name: 'X (Twitter)',
-    type: 'twitter',
-    connected: false,
-    logo: 'https://cdn-icons-png.flaticon.com/512/3256/3256013.png',
-    description: 'Post tweets, manage timeline, and grow your social influence.',
-  },
-  {
     id: 'telegram',
     name: 'Telegram',
     type: 'telegram',
@@ -169,14 +188,6 @@ const UPCOMING_INTEGRATIONS: Integration[] = [
     description: 'Pin content, manage boards, and discover visual inspiration.',
   },
   // B2B integrations
-  {
-    id: 'slack',
-    name: 'Slack',
-    type: 'slack',
-    connected: false,
-    logo: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
-    description: 'Send messages, manage channels, and automate team workflows.',
-  },
   {
     id: 'notion',
     name: 'Notion',
@@ -254,29 +265,54 @@ const UPCOMING_INTEGRATIONS: Integration[] = [
 
 export default function IntegrationsScreen() {
   const colorScheme = useColorScheme();
-  const insets = useSafeAreaInsets();
+  const { topInset, bottomInset } = useSafeAreaPadding({ top: 12, bottom: 24 });
   const [integrations, setIntegrations] = useState<Integration[]>(AVAILABLE_INTEGRATIONS);
+  const [upcomingIntegrations, setUpcomingIntegrations] = useState<Integration[]>(UPCOMING_INTEGRATIONS);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [detailsIntegration, setDetailsIntegration] = useState<Integration | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const isDark = colorScheme === 'dark';
 
   useEffect(() => {
-    loadUserIntegrations();
+    loadUserIntegrations(true);
   }, []);
 
   // Reload integrations when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      loadUserIntegrations();
+      loadUserIntegrations(false);
     }, [])
   );
 
-  const loadUserIntegrations = async () => {
+  const loadUserIntegrations = async (showInitialLoading = false) => {
     try {
-      const userId = await AsyncStorage.getItem('userId') || 'default-user';
-      const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}?userId=${userId}`);
+      if (showInitialLoading) setIsInitialLoading(true);
+      
+      // Fetch all integrations with their enabled status from backend
+      const availableResponse = await authenticatedFetch(`${API_ENDPOINTS.AVAILABLE_INTEGRATIONS}`);
+      let allIntegrationsFromBackend: any[] = [];
+      
+      if (availableResponse.ok) {
+        const availableData = await availableResponse.json();
+        allIntegrationsFromBackend = availableData.integrations || [];
+      } else {
+        // Fallback: if API fails, treat all hardcoded integrations as enabled
+        console.warn('Failed to fetch integration settings, using fallback');
+        allIntegrationsFromBackend = AVAILABLE_INTEGRATIONS.map(int => ({
+          provider: int.type,
+          name: int.name,
+          description: int.description,
+          icon: int.logo,
+          isEnabled: true,
+        }));
+      }
+      
+      // Fetch user's connected integrations
+      const response = await authenticatedFetch(`${API_ENDPOINTS.INTEGRATIONS}`);
       
       if (!response.ok) {
         const text = await response.text();
@@ -291,24 +327,77 @@ export default function IntegrationsScreen() {
         throw new Error('Server returned non-JSON response');
       }
       
-      const data = await response.json();
+      const userIntegrationsData = await response.json();
       
-      console.log('📡 User integrations from API:', data.integrations);
+      // Create a map of all integrations (from backend + hardcoded) for metadata
+      const allIntegrationsMap = new Map<string, Integration>();
+      [...AVAILABLE_INTEGRATIONS, ...UPCOMING_INTEGRATIONS].forEach(int => {
+        allIntegrationsMap.set(int.type, int);
+      });
       
-      // Update integrations with user's connected status
-      // Check both 'configured' and 'isActive' for backwards compatibility
-      const updated = AVAILABLE_INTEGRATIONS.map(int => ({
-        ...int,
-        connected: data.integrations.some((ui: any) => 
-          ui.type === int.type && (ui.configured || ui.isActive)
-        ),
-      }));
+      // Split integrations into enabled (Available) and disabled (Upcoming)
+      const enabledIntegrations: Integration[] = [];
+      const disabledIntegrations: Integration[] = [];
       
-      console.log('✅ Updated integrations state:', updated);
-      setIntegrations(updated);
+      allIntegrationsFromBackend.forEach((backendInt: any) => {
+        const metadata = allIntegrationsMap.get(backendInt.provider);
+        const integration: Integration = {
+          id: backendInt.provider,
+          name: backendInt.name || metadata?.name || backendInt.provider,
+          type: backendInt.provider,
+          connected: userIntegrationsData.some((ui: any) => 
+            ui.provider === backendInt.provider && (ui.configured || ui.isActive)
+          ),
+          logo: backendInt.icon || metadata?.logo,
+          description: backendInt.description || metadata?.description || '',
+        };
+        
+        if (backendInt.isEnabled) {
+          enabledIntegrations.push(integration);
+        } else {
+          disabledIntegrations.push(integration);
+        }
+      });
+      
+      // Also include hardcoded integrations that aren't in backend (for backwards compatibility)
+      const backendProviders = new Set(allIntegrationsFromBackend.map((int: any) => int.provider));
+      AVAILABLE_INTEGRATIONS.forEach(int => {
+        if (!backendProviders.has(int.type)) {
+          enabledIntegrations.push({
+            ...int,
+            connected: userIntegrationsData.some((ui: any) => 
+              ui.provider === int.type && (ui.configured || ui.isActive)
+            ),
+          });
+        }
+      });
+      
+      UPCOMING_INTEGRATIONS.forEach(int => {
+        if (!backendProviders.has(int.type)) {
+          disabledIntegrations.push({
+            ...int,
+            connected: userIntegrationsData.some((ui: any) => 
+              ui.provider === int.type && (ui.configured || ui.isActive)
+            ),
+          });
+        }
+      });
+      
+      setIntegrations(enabledIntegrations);
+      setUpcomingIntegrations(disabledIntegrations);
     } catch (error) {
       console.error('Error loading integrations:', error);
+    } finally {
+      setIsInitialLoading(false);
     }
+  };
+
+  const openIntegrationDetails = (integration: Integration) => {
+    setDetailsIntegration(integration);
+  };
+
+  const closeIntegrationDetails = () => {
+    setDetailsIntegration(null);
   };
 
   const handleAddIntegration = async (integration: Integration) => {
@@ -318,13 +407,25 @@ export default function IntegrationsScreen() {
     await handleOAuthFlow(integration);
   };
 
+  const handleConnectFromDetails = async () => {
+    if (!detailsIntegration) return;
+    await handleAddIntegration(detailsIntegration);
+    // Details will remain visible while OAuth flow runs; user can close manually if desired
+  };
+
+  const handleDisconnectFromDetails = async () => {
+    if (!detailsIntegration) return;
+    await handleDisconnect(detailsIntegration);
+    closeIntegrationDetails();
+  };
+
   const handleOAuthFlow = async (integration: Integration) => {
     try {
       setIsLoading(true);
-      const userId = await AsyncStorage.getItem('userId') || 'default-user';
       
       // Get OAuth URL from backend (generic endpoint)
-      const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}/oauth-url?userId=${userId}`);
+      // Use authenticated fetch - token is automatically added to headers
+      const response = await authenticatedFetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}/oauth-url`);
       
       if (!response.ok) {
         const text = await response.text();
@@ -350,7 +451,8 @@ export default function IntegrationsScreen() {
           // Start polling for connection status
           const pollInterval = setInterval(async () => {
             try {
-              const integrations = await fetch(`${API_ENDPOINTS.INTEGRATIONS}?userId=${userId}`);
+              // Use authenticated fetch - token is automatically added to headers
+              const integrations = await authenticatedFetch(`${API_ENDPOINTS.INTEGRATIONS}`);
               
               if (!integrations.ok) {
                 // Don't log errors during polling - just skip this poll
@@ -417,10 +519,11 @@ export default function IntegrationsScreen() {
     } catch (error) {
       console.error('OAuth error:', error);
       
+      const message = 'Something went wrong. Please try again.';
       if (Platform.OS === 'web') {
-        alert('Failed to start OAuth. Make sure the backend is running.');
+        alert(message);
       } else {
-        Alert.alert('Error', 'Failed to start OAuth. Make sure the backend is running.');
+        Alert.alert('Error', message);
       }
       
       setIsLoading(false);
@@ -448,9 +551,8 @@ export default function IntegrationsScreen() {
     }
     
     try {
-      const userId = await AsyncStorage.getItem('userId') || 'default-user';
-      
-      const response = await fetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}?userId=${userId}`, {
+      // Use authenticated fetch - token is automatically added to headers
+      const response = await authenticatedFetch(`${API_ENDPOINTS.INTEGRATIONS}/${integration.type}`, {
         method: 'DELETE',
       });
       
@@ -478,38 +580,279 @@ export default function IntegrationsScreen() {
     }
   };
 
+  // Filter integrations based on search query
+  const filteredIntegrations = useMemo(() => {
+    if (!searchQuery.trim()) return integrations;
+    
+    const query = searchQuery.toLowerCase();
+    return integrations.filter(integration =>
+      integration.name.toLowerCase().includes(query) ||
+      integration.description.toLowerCase().includes(query) ||
+      integration.type.toLowerCase().includes(query)
+    );
+  }, [integrations, searchQuery]);
+
+  // Filter upcoming integrations based on search query
+  const filteredUpcomingIntegrations = useMemo(() => {
+    if (!searchQuery.trim()) return upcomingIntegrations;
+    
+    const query = searchQuery.toLowerCase();
+    return upcomingIntegrations.filter(integration =>
+      integration.name.toLowerCase().includes(query) ||
+      integration.description.toLowerCase().includes(query) ||
+      integration.type.toLowerCase().includes(query)
+    );
+  }, [upcomingIntegrations, searchQuery]);
+
   const sortedIntegrations = useMemo(() => {
     // Connected integrations go first, fall back to name sorting within groups
-    return [...integrations].sort((a, b) => {
+    return [...filteredIntegrations].sort((a, b) => {
       if (a.connected === b.connected) {
         return a.name.localeCompare(b.name);
       }
       return a.connected ? -1 : 1;
     });
-  }, [integrations]);
+  }, [filteredIntegrations]);
+
+  // Full-screen details "screen" instead of popup when an integration is selected
+  if (detailsIntegration) {
+    const meta = getIntegrationMetadata(detailsIntegration.type);
+
+    return (
+      <ThemedView style={styles.container}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: bottomInset + 24 }}
+      >
+        <View style={[styles.header, { paddingTop: topInset + 12, paddingBottom: 12 }]}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 12,
+              }}
+            >
+              <ThemedText style={styles.title}>Integration details</ThemedText>
+              <TouchableOpacity
+                onPress={closeIntegrationDetails}
+                style={styles.closeButton}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <ThemedText style={styles.closeButtonText}>✕</ThemedText>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={[styles.section, { paddingTop: 0 }]}>
+            <View
+              style={[
+                styles.detailsCard,
+                { 
+                  backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                  borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                  borderWidth: 1,
+                },
+              ]}
+            >
+              <View style={styles.modalHeaderRow}>
+                <View style={styles.modalHeaderInfo}>
+                  {detailsIntegration.logo ? (
+                    <Image
+                      source={{ uri: detailsIntegration.logo }}
+                      style={[styles.detailsLogo]}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <ThemedText style={styles.integrationIcon}>🔗</ThemedText>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <ThemedText style={styles.modalTitle}>
+                      {detailsIntegration.name}
+                    </ThemedText>
+                    <ThemedText style={styles.modalSubtitle}>
+                      {detailsIntegration.type}
+                    </ThemedText>
+                  </View>
+                </View>
+              </View>
+
+              <ThemedText style={styles.modalDescription}>
+                {detailsIntegration.description}
+              </ThemedText>
+
+              {meta && (
+                <View style={{ marginTop: 12 }}>
+                  <ThemedText style={styles.sectionBadge}>How it works</ThemedText>
+                  <ThemedText style={styles.modalDescription}>
+                    {meta.howItWorks}
+                  </ThemedText>
+
+                  {meta.authNotes && (
+                    <>
+                      <ThemedText style={[styles.sectionBadge, { marginTop: 16 }]}>
+                        Authentication
+                      </ThemedText>
+                      <ThemedText style={styles.modalDescription}>
+                        {meta.authNotes}
+                      </ThemedText>
+                    </>
+                  )}
+
+                  {meta.exceptions && meta.exceptions.length > 0 && (
+                    <>
+                      <ThemedText style={[styles.sectionBadge, { marginTop: 16 }]}>
+                        Special notes
+                      </ThemedText>
+                      {meta.exceptions.map((note, index) => (
+                        <View key={index} style={styles.noteChip}>
+                          <View style={styles.noteDot} />
+                          <ThemedText style={styles.noteText}>
+                            {note}
+                          </ThemedText>
+                        </View>
+                      ))}
+                    </>
+                  )}
+
+                  {meta.tools && meta.tools.length > 0 && (
+                    <>
+                      <ThemedText style={[styles.sectionBadge, { marginTop: 16 }]}>
+                        Available tools
+                      </ThemedText>
+                      {meta.tools.map((tool, index) => (
+                        <View key={index} style={styles.toolCard}>
+                          <ThemedText style={styles.toolName}>
+                            {tool.name}
+                          </ThemedText>
+                          <ThemedText style={styles.toolDescription}>
+                            {tool.description}
+                          </ThemedText>
+                          {tool.importantParams && tool.importantParams.length > 0 && (
+                            <ThemedText style={styles.toolParams}>
+                              Key parameters:{' '}
+                              <ThemedText style={styles.toolParamsHighlight}>
+                                {tool.importantParams.join(', ')}
+                              </ThemedText>
+                            </ThemedText>
+                          )}
+                        </View>
+                      ))}
+                    </>
+                  )}
+                </View>
+              )}
+
+              <View style={styles.modalFooter}>
+                {detailsIntegration.connected ? (
+                  <TouchableOpacity
+                    style={[styles.button, styles.disconnectButton, { flex: 1 }]}
+                    onPress={handleDisconnectFromDetails}
+                  >
+                    <ThemedText style={styles.disconnectButtonText}>
+                      Disconnect
+                    </ThemedText>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.button, styles.connectButton, { flex: 1 }]}
+                    onPress={handleConnectFromDetails}
+                  >
+                    <ThemedText style={styles.connectButtonText}>
+                      Connect
+                    </ThemedText>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </View>
+        </ScrollView>
+      </ThemedView>
+    );
+  }
+
+  // Show full-screen loading on initial load
+  if (isInitialLoading) {
+    return (
+      <ThemedView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <ThemedText style={{ marginTop: 16, opacity: 0.7 }}>Loading integrations...</ThemedText>
+      </ThemedView>
+    );
+  }
 
   return (
     <ThemedView style={styles.container}>
-      <ScrollView style={styles.scrollView}>
-        <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: bottomInset + 24 }}
+      >
+        <View style={[styles.header, { paddingTop: topInset + 20 }]}>
           <ThemedText style={styles.title}>Integrations</ThemedText>
           <ThemedText style={styles.subtitle}>
-            Connect your tools to Bridge AI for powerful integrations
+            Connect your apps to Bridge AI
           </ThemedText>
+          
+          {/* Search Bar */}
+          <View style={[
+            styles.searchContainer,
+            { 
+              backgroundColor: isDark ? '#1C1C1E' : '#F2F2F7',
+              borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+            }
+          ]}>
+            <IconSymbol
+              name="magnifyingglass"
+              size={18}
+              color={isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'}
+              style={styles.searchIcon}
+            />
+            <TextInput
+              style={[
+                styles.searchInput,
+                { color: isDark ? '#FFFFFF' : '#000000' }
+              ]}
+              placeholder="Search integrations..."
+              placeholderTextColor={isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)'}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
+                <IconSymbol
+                  name="xmark.circle.fill"
+                  size={18}
+                  color={isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'}
+                />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         <View style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>Available Integrations</ThemedText>
+          <ThemedText style={styles.sectionTitle}>
+            Available Integrations ({sortedIntegrations.length})
+          </ThemedText>
 
           {sortedIntegrations.map((integration) => (
             <View
               key={integration.id}
               style={[
                 styles.integrationCard,
-                { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' },
+                { 
+                  backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                  borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                  borderWidth: 1,
+                },
               ]}>
               <View style={styles.integrationHeader}>
-                <View style={styles.integrationInfo}>
+                <TouchableOpacity
+                  style={styles.integrationInfo}
+                  activeOpacity={0.8}
+                  onPress={() => openIntegrationDetails(integration)}
+                >
                   {integration.logo ? (
                     <Image
                       source={{ uri: integration.logo }}
@@ -523,11 +866,8 @@ export default function IntegrationsScreen() {
                     <ThemedText style={styles.integrationName}>
                       {integration.name}
                     </ThemedText>
-                    <ThemedText style={styles.integrationStatus}>
-                      {integration.connected ? '✓ Connected' : 'Not connected'}
-                    </ThemedText>
                   </View>
-                </View>
+                </TouchableOpacity>
 
                 {integration.connected ? (
                   <TouchableOpacity
@@ -548,60 +888,80 @@ export default function IntegrationsScreen() {
                 )}
               </View>
 
-              <ThemedText style={styles.integrationDescription}>
-                {integration.description}
-              </ThemedText>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => openIntegrationDetails(integration)}
+              >
+                <ThemedText style={styles.integrationDescription}>
+                  {integration.description}
+                </ThemedText>
+              </TouchableOpacity>
             </View>
           ))}
         </View>
 
         {/* Upcoming Integrations */}
         <View style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>Upcoming Integrations</ThemedText>
+          <ThemedText style={styles.sectionTitle}>
+            Upcoming Integrations ({filteredUpcomingIntegrations.length})
+          </ThemedText>
           <ThemedText style={[styles.subtitle, { marginBottom: 16 }]}>
             These integrations are under development
           </ThemedText>
 
-          {UPCOMING_INTEGRATIONS.map((integration) => (
-            <View
-              key={integration.id}
-              style={[
-                styles.integrationCard,
-                styles.upcomingCard,
-                { 
-                  backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
-                  opacity: 0.6,
-                },
-              ]}>
-              <View style={styles.integrationHeader}>
-                <View style={styles.integrationInfo}>
-                  {integration.logo ? (
-                    <Image
-                      source={{ uri: integration.logo }}
-                      style={styles.integrationLogo}
-                      resizeMode="contain"
-                    />
-                  ) : (
-                    <ThemedText style={styles.integrationIcon}>🔗</ThemedText>
-                  )}
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <ThemedText style={styles.integrationName}>
-                        {integration.name}
-                      </ThemedText>
+          {filteredUpcomingIntegrations.map((integration) => {
+            // Zomato works locally - show connect button
+            const isFunctional = integration.type === 'zomato';
+            
+            return (
+              <View
+                key={integration.id}
+                style={[
+                  styles.integrationCard,
+                  styles.upcomingCard,
+                  { 
+                    backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+                    borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                    borderWidth: 1,
+                    opacity: isFunctional ? 1 : 0.6,
+                  },
+                ]}>
+                <View style={styles.integrationHeader}>
+                  <TouchableOpacity
+                    style={styles.integrationInfo}
+                    activeOpacity={0.8}
+                    onPress={() => openIntegrationDetails(integration)}
+                  >
+                    {integration.logo ? (
+                      <Image
+                        source={{ uri: integration.logo }}
+                        style={styles.integrationLogo}
+                        resizeMode="contain"
+                      />
+                    ) : (
+                      <ThemedText style={styles.integrationIcon}>🔗</ThemedText>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <ThemedText style={styles.integrationName}>
+                          {integration.name}
+                        </ThemedText>
+                      </View>
                     </View>
-                    <ThemedText style={styles.integrationStatus}>
-                      In development
-                    </ThemedText>
-                  </View>
+                  </TouchableOpacity>
                 </View>
-              </View>
 
-              <ThemedText style={styles.integrationDescription}>
-                {integration.description}
-              </ThemedText>
-            </View>
-          ))}
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => openIntegrationDetails(integration)}
+                >
+                  <ThemedText style={styles.integrationDescription}>
+                    {integration.description}
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            );
+          })}
         </View>
 
         <View style={styles.infoSection}>
@@ -664,6 +1024,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     opacity: 0.6,
   },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 16,
+    borderWidth: 1,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    padding: 0,
+  },
+  clearButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
   section: {
     paddingHorizontal: 20,
     paddingBottom: 24,
@@ -725,6 +1106,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
     fontSize: 14,
+    textAlign: 'center',
   },
   disconnectButton: {
     backgroundColor: 'transparent',
@@ -735,6 +1117,7 @@ const styles = StyleSheet.create({
     color: '#FF3B30',
     fontWeight: '600',
     fontSize: 14,
+    textAlign: 'center',
   },
   infoSection: {
     paddingHorizontal: 20,
@@ -754,26 +1137,34 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     opacity: 0.8,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
-  modalContent: {
-    borderRadius: 20,
-    padding: 24,
+  modalHeaderInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
   },
   modalTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 12,
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    opacity: 0.6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginTop: 2,
   },
   modalDescription: {
     fontSize: 14,
-    opacity: 0.6,
-    marginBottom: 20,
-    lineHeight: 20,
+    opacity: 0.8,
+    marginBottom: 16,
+    lineHeight: 22,
   },
   label: {
     fontSize: 14,
@@ -798,6 +1189,98 @@ const styles = StyleSheet.create({
     opacity: 0.5,
     marginBottom: 4,
   },
+  sectionBadge: {
+    alignSelf: 'flex-start',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+    color: '#94a3b8',
+  },
+  noteChip: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 4,
+    marginTop: 4,
+  },
+  noteDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FF3B30',
+    marginTop: 6,
+    marginRight: 8,
+  },
+  noteText: {
+    flex: 1,
+    fontSize: 13,
+    opacity: 0.8,
+    lineHeight: 18,
+  },
+  toolCard: {
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginTop: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(148, 163, 184, 0.35)',
+    backgroundColor: 'rgba(15, 23, 42, 0.06)',
+  },
+  toolName: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+    color: '#0a7ea4',
+  },
+  toolDescription: {
+    fontSize: 13,
+    opacity: 0.8,
+    lineHeight: 19,
+  },
+  toolParams: {
+    fontSize: 12,
+    marginTop: 4,
+    opacity: 0.8,
+  },
+  toolParamsHighlight: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0a7ea4',
+  },
+  detailsLogo: {
+    width: 40,
+    height: 40,
+    borderRadius: 9,
+  },
+  closeButton: {
+    marginLeft: 12,
+  },
+  closeButtonText: {
+    fontSize: 18,
+    fontWeight: '600',
+    opacity: 0.9,
+    color: '#FF3B30',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 16,
+    gap: 12,
+  },
+  detailsCard: {
+    borderRadius: 16,
+    padding: 20,
+    backgroundColor: '#FFFFFF',
+  },
+  backButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#007AFF',
+  },
+  learnMoreButton: {
+    marginTop: 8,
+  },
   loadingOverlay: {
     position: 'absolute',
     top: 0,
@@ -819,8 +1302,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   upcomingCard: {
-    borderWidth: 1,
-    borderColor: 'rgba(128, 128, 128, 0.2)',
+    // Border is now set dynamically in the component
   },
   comingSoonBadge: {
     paddingHorizontal: 8,

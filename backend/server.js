@@ -11,16 +11,20 @@ const memoryRouter = require('./routes/memory');
 const usageRouter = require('./routes/usage');
 const authRouter = require('./routes/auth');
 const chatRouter = require('./routes/chat');
+const { setupChatWebSocket } = require('./routes/chat');
 const modelsRouter = require('./routes/models');
 const oauthRouter = require('./routes/oauth');
 const waitlistRouter = require('./routes/waitlist');
 const sampleQuestionsRouter = require('./routes/sampleQuestions');
 const { router: transcribeRouter, setupTranscribeWebSocket } = require('./routes/transcribe');
+const adminRouter = require('./routes/admin');
+const notificationsRouter = require('./routes/notifications');
 
 // Services
 const integrationService = require('./db/services/integration');
 const mcpManager = require('./mcp/manager');
 const { ensureUserIntegrationsLoaded, loadedIntegrationsCache } = require('./utils/integrationLoader');
+const { verifyUser } = require('./middleware/auth');
 
 const app = express();
 const expressWsInstance = expressWs(app); // Enable WebSocket support
@@ -49,24 +53,28 @@ app.use('/api/auth', authRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/models', modelsRouter);
 app.use('/api/oauth', oauthRouter);
+app.use('/api/integrations', integrationsRouter); // Integration routes (including /available) - must be before oauthRouter
 app.use('/api/integrations', oauthRouter); // OAuth routes also handle /api/integrations/:type/oauth-url
 app.use('/api/waitlist', waitlistRouter);
 app.use('/api/sample-questions', sampleQuestionsRouter);
 app.use('/api/transcribe', transcribeRouter);
+app.use('/api/admin', adminRouter);
+app.use('/api/notifications', notificationsRouter);
 
 // Setup WebSocket route for real-time transcription (must be after expressWs)
 setupTranscribeWebSocket(app);
 
+// Setup WebSocket route for chat streaming (must be after expressWs)
+setupChatWebSocket(app);
+
 // Legacy integration endpoints (for backward compatibility)
-app.get('/api/integrations', async (req, res) => {
+app.get('/api/integrations', verifyUser, async (req, res) => {
   try {
-    const userId = req.query.userId || 'default-user';
-    
     // Load from database (source of truth)
-    const dbIntegrations = await integrationService.getUserIntegrations(userId);
+    const dbIntegrations = await integrationService.getUserIntegrations(req.userId);
     
     // Also ensure they're loaded in MCP manager for active use
-    await ensureUserIntegrationsLoaded(userId);
+    await ensureUserIntegrationsLoaded(req.userId);
     
     // Return database integrations (more complete info)
     res.json({ 
@@ -83,15 +91,15 @@ app.get('/api/integrations', async (req, res) => {
   }
 });
 
-app.post('/api/integrations', async (req, res) => {
+app.post('/api/integrations', verifyUser, async (req, res) => {
   try {
-    const { userId, type, config } = req.body;
+    const { type, config } = req.body;
     
-    if (!userId || !type || !config) {
+    if (!type || !config) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    await mcpManager.addIntegration(userId, type, config);
+    await mcpManager.addIntegration(req.userId, type, config);
     res.json({ success: true, message: 'Integration added successfully' });
   } catch (error) {
     console.error('Error adding integration:', error);
@@ -99,25 +107,20 @@ app.post('/api/integrations', async (req, res) => {
   }
 });
 
-app.delete('/api/integrations/:type', async (req, res) => {
+app.delete('/api/integrations/:type', verifyUser, async (req, res) => {
   try {
-    const userId = req.query.userId || 'default-user';
     const { type } = req.params;
     
-    console.log(`\n🗑️  Disconnect request: ${type} for user ${userId}`);
-    
     // Remove from database first
-    await integrationService.deleteIntegration(userId, type);
+    await integrationService.deleteIntegration(req.userId, type);
     
     // Remove from MCP manager
-    const result = await mcpManager.removeIntegration(userId, type);
+    await mcpManager.removeIntegration(req.userId, type);
     
     // Update cache
-    if (loadedIntegrationsCache.has(userId)) {
-      loadedIntegrationsCache.get(userId).delete(type);
+    if (loadedIntegrationsCache.has(req.userId)) {
+      loadedIntegrationsCache.get(req.userId).delete(type);
     }
-    
-    console.log(`✅ Successfully disconnected ${type}:`, result);
     
     res.json({ success: true, message: `${type} integration removed` });
   } catch (error) {
@@ -127,15 +130,13 @@ app.delete('/api/integrations/:type', async (req, res) => {
 });
 
 // MCP status endpoint
-app.get('/api/mcp/status', async (req, res) => {
+app.get('/api/mcp/status', verifyUser, async (req, res) => {
   try {
-    const userId = req.query.userId || 'default-user';
-    
     // Lazy load integrations if needed
-    await ensureUserIntegrationsLoaded(userId);
+    await ensureUserIntegrationsLoaded(req.userId);
     
-    const connected = await mcpManager.isUserMCPConnected(userId);
-    const tools = connected ? await mcpManager.getUserMCPTools(userId) : [];
+    const connected = await mcpManager.isUserMCPConnected(req.userId);
+    const tools = connected ? await mcpManager.getUserMCPTools(req.userId) : [];
     
     res.json({
       connected,
@@ -147,7 +148,17 @@ app.get('/api/mcp/status', async (req, res) => {
   }
 });
 
+// Schedule notification processor to run every 5 minutes
+const cron = require('node-cron');
+const notificationProcessor = require('./jobs/notificationProcessor');
+
+// Run notification processor every 5 minutes to check for pending notifications
+cron.schedule('*/5 * * * *', () => {
+  notificationProcessor.processNotifications().catch(err => {
+    console.error('Error in scheduled notification processor:', err);
+  });
+});
+
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 ${appConfig.appName} backend running on http://localhost:${PORT}`);
-  console.log(`📊 Multi-tenant mode: Integrations loaded on-demand per user`);
+  console.log(`${appConfig.appName} backend running on http://localhost:${PORT}`);
 });

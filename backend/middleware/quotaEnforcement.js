@@ -1,6 +1,6 @@
 /**
  * Quota Enforcement Middleware
- * Checks if user has exceeded their token limit before making LLM calls
+ * Checks if user has exceeded their credit limit before making LLM calls
  */
 
 const tokenUsageService = require('../db/services/tokenUsage');
@@ -25,7 +25,7 @@ async function checkQuota(req, res, next) {
       });
     }
 
-    // Get current month's usage
+    // Get current month's usage (includes credits)
     const usage = await tokenUsageService.getCurrentMonthTotal(userId);
     
     // Get user's plan from database (default to 'free' if not set)
@@ -33,18 +33,23 @@ async function checkQuota(req, res, next) {
     const userPlan = user?.plan || 'free';
     const limit = getPlanLimit(userPlan);
     
+    // Use credits for limit checking (cost-based)
+    const creditsUsed = usage.creditsUsed || 0;
+    
     // Check if over limit
-    if (usage.totalTokens >= limit) {
-      const usagePercentage = getUsagePercentage(usage.totalTokens, userPlan);
+    if (creditsUsed >= limit) {
+      const usagePercentage = getUsagePercentage(creditsUsed, userPlan);
       
       return res.status(429).json({
         error: 'Quota Exceeded',
-        message: `You have exceeded your ${userPlan} plan limit of ${limit.toLocaleString()} tokens/month.`,
+        message: `You have exceeded your ${userPlan} plan limit of ${limit} credits/month.`,
         usage: {
-          used: usage.totalTokens,
+          used: creditsUsed,
           limit: limit,
           percentage: usagePercentage.toFixed(1),
           plan: userPlan,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
         },
         upgradeUrl: '/pricing', // Link to pricing page
       });
@@ -52,11 +57,14 @@ async function checkQuota(req, res, next) {
 
     // Attach usage info to request for logging/monitoring
     req.tokenUsage = {
-      current: usage.totalTokens,
+      current: creditsUsed,
       limit: limit,
-      remaining: getRemainingTokens(usage.totalTokens, userPlan),
-      percentage: getUsagePercentage(usage.totalTokens, userPlan),
+      remaining: getRemainingTokens(creditsUsed, userPlan),
+      percentage: getUsagePercentage(creditsUsed, userPlan),
       plan: userPlan,
+      creditsUsed: creditsUsed,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
     };
 
     next();
@@ -80,23 +88,31 @@ async function checkUserQuota(userId, plan = 'free') {
   const usage = await tokenUsageService.getCurrentMonthTotal(userId);
   const limit = getPlanLimit(plan);
   
-  if (usage.totalTokens >= limit) {
-    const error = new Error(`Token limit exceeded for plan ${plan}`);
+  // Use credits for limit checking
+  const creditsUsed = usage.creditsUsed || 0;
+  
+  if (creditsUsed >= limit) {
+    const error = new Error(`Credit limit exceeded for plan ${plan}`);
     error.code = 'QUOTA_EXCEEDED';
     error.usage = {
-      used: usage.totalTokens,
+      used: creditsUsed,
       limit: limit,
-      percentage: getUsagePercentage(usage.totalTokens, plan).toFixed(1),
+      percentage: getUsagePercentage(creditsUsed, plan).toFixed(1),
       plan: plan,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
     };
     throw error;
   }
   
   return {
     allowed: true,
-    remaining: getRemainingTokens(usage.totalTokens, plan),
-    usage: usage.totalTokens,
+    remaining: getRemainingTokens(creditsUsed, plan),
+    usage: creditsUsed,
     limit: limit,
+    creditsUsed: creditsUsed,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
   };
 }
 

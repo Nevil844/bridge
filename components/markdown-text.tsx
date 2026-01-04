@@ -1,7 +1,6 @@
-import React from 'react';
-import { Text, StyleSheet, Linking, View } from 'react-native';
-import { ThemedText } from './themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import React from 'react';
+import { Linking, Platform, StyleSheet, Text, View } from 'react-native';
 
 interface MarkdownTextProps {
   text: string;
@@ -15,138 +14,290 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
   const codeBg = isDark ? '#1C1C1E' : '#E5E5EA';
   const codeText = isDark ? '#FFFFFF' : '#000000';
 
+  if (!text) {
+    return null;
+  }
+
   // Parse markdown and return React elements
   const parseMarkdown = (input: string): React.ReactNode[] => {
-    if (!input) return [<Text key="empty" style={{ color: textColor }}>{input}</Text>];
-
     const result: React.ReactNode[] = [];
-    let key = 0;
+    let keyCounter = 0;
+    const getKey = () => `md-${keyCounter++}`;
 
-    // Split by code blocks first
+    // First, extract code blocks
     const codeBlockRegex = /```([\s\S]*?)```/g;
-    const parts: Array<{ type: 'text' | 'code'; content: string }> = [];
+    const segments: Array<{ type: 'text' | 'code'; content: string }> = [];
     let lastIndex = 0;
     let match;
 
     while ((match = codeBlockRegex.exec(input)) !== null) {
-      // Add text before code block
       if (match.index > lastIndex) {
-        parts.push({
+        segments.push({
           type: 'text',
           content: input.substring(lastIndex, match.index),
         });
       }
-      // Add code block
-      parts.push({
+      segments.push({
         type: 'code',
         content: match[1],
       });
       lastIndex = match.index + match[0].length;
     }
-    // Add remaining text
+
     if (lastIndex < input.length) {
-      parts.push({
+      segments.push({
         type: 'text',
         content: input.substring(lastIndex),
       });
     }
 
-    // If no code blocks found, treat entire input as text
-    if (parts.length === 0) {
-      parts.push({ type: 'text', content: input });
+    if (segments.length === 0) {
+      segments.push({ type: 'text', content: input });
     }
 
-    // Process each part
-    parts.forEach(part => {
-      if (part.type === 'code') {
+    // Process each segment
+    segments.forEach(segment => {
+      if (segment.type === 'code') {
         result.push(
-          <View key={`codeblock-${key++}`} style={[styles.codeBlock, { backgroundColor: codeBg }]}>
+          <View key={getKey()} style={[styles.codeBlock, { backgroundColor: codeBg }]}>
             <Text style={[styles.codeBlockText, { color: codeText }]}>
-              {part.content.trim()}
+              {segment.content.trim()}
             </Text>
           </View>
         );
       } else {
-        // Process text for inline markdown
-        const lines = part.content.split('\n');
-        let pendingListItems: string[] = [];
+        // Process text content line by line
+        const lines = segment.content.split('\n');
+        const processedLines: React.ReactNode[] = [];
+        let currentList: Array<string | { 
+          type: 'ordered' | 'unordered' | 'checkbox'; 
+          content: string; 
+          number?: string; 
+          checkbox?: string;
+          indent?: number;
+        }> = [];
 
         const flushList = () => {
-          if (pendingListItems.length === 0) return;
-          result.push(
-            <View key={`list-${key++}`} style={styles.listContainer}>
-              {pendingListItems.map((item, idx) => {
-                const parsedItem = parseInlineFormatting(item, key + idx, textColor, codeBg, codeText);
+          if (currentList.length === 0) return;
+          
+          const listKey = getKey();
+          processedLines.push(
+            <View key={listKey} style={styles.listContainer}>
+              {currentList.map((item, idx) => {
+                if (typeof item === 'string') {
+                  // Legacy support for plain strings
+                  return (
+                    <View key={`${listKey}-item-${idx}`} style={styles.listItemRow}>
+                      <View style={styles.unorderedMarkerContainer}>
+                        <Text style={[styles.unorderedMarker, { color: textColor }]}>•</Text>
+                      </View>
+                      <View style={styles.listItemTextContainer}>
+                        <Text style={[styles.listItemText, { color: textColor }]}>
+                          {parseInlineFormatting(item, `${listKey}-${idx}`, textColor, codeBg, codeText)}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                }
+
+                const isOrdered = item.type === 'ordered';
+                const isCheckbox = item.type === 'checkbox';
+                const content = item.content;
+                const indent = item.indent || 0;
+                
+                const marker = isOrdered 
+                  ? `${item.number}.`
+                  : isCheckbox
+                  ? (item.checkbox || '☐')
+                  : '•';
+                
                 return (
-                  <View key={`list-item-${key + idx}`} style={styles.listItemRow}>
-                    <Text style={[styles.bullet, { color: textColor }]}>•</Text>
-                    <Text style={[styles.listItemText, { color: textColor }]}>
-                      {parsedItem.length > 0 ? parsedItem : item}
-                    </Text>
+                  <View 
+                    key={`${listKey}-item-${idx}`} 
+                    style={[styles.listItemRow, indent > 0 && { paddingLeft: indent * 20 }]}
+                  >
+                    {isOrdered && (
+                      <View style={styles.orderedMarkerContainer}>
+                        <Text style={[styles.orderedMarker, { color: textColor }]}>
+                          {marker}
+                        </Text>
+                      </View>
+                    )}
+                    {isCheckbox && (
+                      <View style={styles.checkboxMarkerContainer}>
+                        <Text style={[styles.checkboxMarker, { color: textColor }]}>
+                          {marker}
+                        </Text>
+                      </View>
+                    )}
+                    {!isOrdered && !isCheckbox && (
+                      <View style={styles.unorderedMarkerContainer}>
+                        <Text style={[styles.unorderedMarker, { color: textColor }]}>
+                          {marker}
+                        </Text>
+                      </View>
+                    )}
+                    <View style={styles.listItemTextContainer}>
+                      <Text style={[styles.listItemText, { color: textColor }]}>
+                        {parseInlineFormatting(content, `${listKey}-${idx}`, textColor, codeBg, codeText)}
+                      </Text>
+                    </View>
                   </View>
                 );
               })}
             </View>
           );
-          key += pendingListItems.length;
-          pendingListItems = [];
+          currentList = [];
         };
 
         lines.forEach((line, lineIndex) => {
-          const bulletMatch = line.match(/^\s*[-*]\s+(.+)$/);
-          if (bulletMatch) {
-            pendingListItems.push(bulletMatch[1]);
+          const trimmedLine = line.trim();
+          const originalLine = line;
+          
+          // Check for unordered list items (-, *, •)
+          const unorderedListMatch = trimmedLine.match(/^[-*•]\s+(.+)$/);
+          if (unorderedListMatch) {
+            // Check if indented (nested)
+            const indent = originalLine.search(/\S/);
+            currentList.push({ 
+              type: 'unordered', 
+              content: unorderedListMatch[1],
+              indent: indent > 0 ? Math.floor(indent / 2) : 0
+            });
+            // Flush at end or when next line is not a list item
             if (lineIndex === lines.length - 1) {
               flushList();
+            } else {
+              const nextLine = lines[lineIndex + 1].trim();
+              if (!nextLine.match(/^[-*•☐□✓✔]\s+/) && !nextLine.match(/^\d+\.\s+/)) {
+                flushList();
+              }
             }
             return;
-          } else {
-            flushList();
           }
 
-          // Check for headers
-          const headerMatch = line.match(/^(#{1,3})\s+(.+)$/);
+          // Check for checkbox list items (☐, □, ✓, ✔) - with or without bullet prefix
+          const checkboxMatch = trimmedLine.match(/^[☐□✓✔]\s+(.+)$/);
+          const bulletCheckboxMatch = trimmedLine.match(/^[-*•]\s+[☐□✓✔]\s+(.+)$/);
+          
+          if (bulletCheckboxMatch) {
+            // Handle bullet + checkbox format (• ☐ text)
+            const indent = originalLine.search(/\S/);
+            const checkbox = trimmedLine.match(/[☐□✓✔]/)?.[0] || '☐';
+            currentList.push({ 
+              type: 'checkbox', 
+              content: bulletCheckboxMatch[1],
+              checkbox: checkbox,
+              indent: indent > 0 ? Math.floor(indent / 2) : 0
+            });
+            // Flush at end or when next line is not a list item
+            if (lineIndex === lines.length - 1) {
+              flushList();
+            } else {
+              const nextLine = lines[lineIndex + 1].trim();
+              if (!nextLine.match(/^[-*•☐□✓✔]\s+/) && !nextLine.match(/^\d+\.\s+/)) {
+                flushList();
+              }
+            }
+            return;
+          } else if (checkboxMatch) {
+            // Handle standalone checkbox format (☐ text)
+            const indent = originalLine.search(/\S/);
+            const checkbox = trimmedLine[0];
+            currentList.push({ 
+              type: 'checkbox', 
+              content: checkboxMatch[1],
+              checkbox: checkbox,
+              indent: indent > 0 ? Math.floor(indent / 2) : 0
+            });
+            // Flush at end or when next line is not a list item
+            if (lineIndex === lines.length - 1) {
+              flushList();
+            } else {
+              const nextLine = lines[lineIndex + 1].trim();
+              if (!nextLine.match(/^[-*•☐□✓✔]\s+/) && !nextLine.match(/^\d+\.\s+/)) {
+                flushList();
+              }
+            }
+            return;
+          }
+
+          // Check for ordered list items (1., 2., etc.)
+          const orderedListMatch = trimmedLine.match(/^(\d+)\.\s+(.+)$/);
+          if (orderedListMatch) {
+            const indent = originalLine.search(/\S/);
+            currentList.push({ 
+              type: 'ordered', 
+              number: orderedListMatch[1], 
+              content: orderedListMatch[2],
+              indent: indent > 0 ? Math.floor(indent / 2) : 0
+            });
+            // Flush at end or when next line is not a list item
+            if (lineIndex === lines.length - 1) {
+              flushList();
+            } else {
+              const nextLine = lines[lineIndex + 1].trim();
+              if (!nextLine.match(/^[-*•☐□✓✔]\s+/) && !nextLine.match(/^\d+\.\s+/)) {
+                flushList();
+              }
+            }
+            return;
+          }
+
+          // Flush any pending list
+          flushList();
+
+          // Check for headers with # syntax
+          const headerMatch = trimmedLine.match(/^(#{1,3})\s+(.+)$/);
           if (headerMatch) {
             const level = headerMatch[1].length;
-            result.push(
-              <Text key={`header-${key++}`} style={[styles[`h${level}` as keyof typeof styles], { color: textColor }]}>
-                {headerMatch[2]}
+            processedLines.push(
+              <Text key={getKey()} style={[styles[`h${level}` as keyof typeof styles], { color: textColor }]}>
+                {parseInlineFormatting(headerMatch[2], getKey(), textColor, codeBg, codeText)}
               </Text>
             );
-            if (lineIndex < lines.length - 1) {
-              result.push(<Text key={`break-${key++}`}>{'\n'}</Text>);
-            }
             return;
           }
 
-          // Parse inline formatting
-          const parsed = parseInlineFormatting(line, key, textColor, codeBg, codeText);
-          if (parsed.length > 0) {
-            result.push(
-              <Text key={`line-${key++}`} style={{ color: textColor }}>
-                {parsed}
+          // Check for bold text as heading (entire line is **text**)
+          const boldHeadingMatch = trimmedLine.match(/^\*\*(.+)\*\*$/);
+          if (boldHeadingMatch) {
+            processedLines.push(
+              <Text key={getKey()} style={[styles.boldHeading, { color: textColor }]}>
+                {boldHeadingMatch[1]}
               </Text>
             );
+            return;
           }
 
-          // Add line break (except for last line)
-          if (lineIndex < lines.length - 1) {
-            result.push(<Text key={`break-${key++}`}>{'\n'}</Text>);
+          // Regular text line
+          if (trimmedLine) {
+            processedLines.push(
+              <Text key={getKey()} style={{ color: textColor }}>
+                {parseInlineFormatting(trimmedLine, getKey(), textColor, codeBg, codeText)}
+              </Text>
+            );
+          } else if (lineIndex < lines.length - 1) {
+            // Empty line - add spacing
+            processedLines.push(<View key={getKey()} style={{ height: 8 }} />);
           }
         });
 
-        // Flush any remaining list after processing all lines
+        // Flush any remaining list
         flushList();
+        result.push(...processedLines);
       }
     });
 
-    return result.length > 0 ? result : [<Text key={key} style={{ color: textColor }}>{input}</Text>];
+    return result.length > 0 ? result : [
+      <Text key={getKey()} style={{ color: textColor }}>{input}</Text>
+    ];
   };
 
   // Parse inline formatting (bold, italic, links, inline code)
   const parseInlineFormatting = (
     text: string,
-    startKey: number,
+    baseKey: string,
     defaultColor: string,
     codeBg: string,
     codeText: string
@@ -154,21 +305,24 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
     if (!text) return [];
 
     const parts: React.ReactNode[] = [];
-    let key = startKey;
+    let keyIndex = 0;
+    const getKey = () => `${baseKey}-inline-${keyIndex++}`;
 
-    // Find all tokens in order
-    const tokens: Array<{
-      type: 'code' | 'link' | 'bold' | 'italic' | 'text';
+    // Find all formatting tokens
+    interface Token {
+      type: 'code' | 'link' | 'bold' | 'italic';
       start: number;
       end: number;
       content: string;
       url?: string;
-    }> = [];
+    }
 
-    // Find inline code (`code`) - highest priority
-    const inlineCodeRegex = /`([^`\n]+)`/g;
-    let match;
-    while ((match = inlineCodeRegex.exec(text)) !== null) {
+    const tokens: Token[] = [];
+
+    // Find inline code (highest priority)
+    const codeRegex = /`([^`]+)`/g;
+    let match: RegExpExecArray | null;
+    while ((match = codeRegex.exec(text)) !== null) {
       tokens.push({
         type: 'code',
         start: match.index,
@@ -177,7 +331,7 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
       });
     }
 
-    // Find links [text](url)
+    // Find links
     const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
     while ((match = linkRegex.exec(text)) !== null) {
       tokens.push({
@@ -190,7 +344,7 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
     }
 
     // Find bold (**text**)
-    const boldRegex = /\*\*([^*]+)\*\*/g;
+    const boldRegex = /\*\*(.+?)\*\*/g;
     while ((match = boldRegex.exec(text)) !== null) {
       tokens.push({
         type: 'bold',
@@ -201,46 +355,42 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
     }
 
     // Find italic (*text* but not **text**)
-    const italicRegex = /(?<!\*)\*([^*\n]+)\*(?!\*)/g;
+    // Use negative lookbehind and lookahead to avoid matching bold markers
+    const italicRegex = /(?<!\*)\*([^*]+?)\*(?!\*)/g;
     while ((match = italicRegex.exec(text)) !== null) {
-      // Double check it's not part of bold
-      const before = text.substring(Math.max(0, match.index - 1), match.index);
-      const after = text.substring(match.index + match[0].length, match.index + match[0].length + 1);
-      if (before !== '*' && after !== '*') {
-        tokens.push({
-          type: 'italic',
-          start: match.index,
-          end: match.index + match[0].length,
-          content: match[1],
-        });
-      }
+      // Skip if overlaps with bold token
+      const overlapsBold = tokens.some(t => 
+        t.type === 'bold' && match!.index >= t.start && match!.index < t.end
+      );
+      if (overlapsBold) continue;
+
+      tokens.push({
+        type: 'italic',
+        start: match.index,
+        end: match.index + match[0].length,
+        content: match[1],
+      });
     }
 
-    // Sort by start position
+    // Sort by position and remove overlaps
     tokens.sort((a, b) => a.start - b.start);
-
-    // Remove overlapping (keep first)
-    const nonOverlapping: typeof tokens = [];
+    const nonOverlapping: Token[] = [];
     let lastEnd = 0;
-    tokens.forEach(token => {
+    for (const token of tokens) {
       if (token.start >= lastEnd) {
         nonOverlapping.push(token);
         lastEnd = token.end;
       }
-    });
+    }
 
     // Build result
-    let lastPos = 0;
-    nonOverlapping.forEach(token => {
-      // Add plain text before token
-      if (token.start > lastPos) {
-        const plainText = text.substring(lastPos, token.start);
+    let pos = 0;
+    for (const token of nonOverlapping) {
+      // Add text before token
+      if (token.start > pos) {
+        const plainText = text.substring(pos, token.start);
         if (plainText) {
-          parts.push(
-            <Text key={`text-${key++}`} style={{ color: defaultColor }}>
-              {plainText}
-            </Text>
-          );
+          parts.push(plainText);
         }
       }
 
@@ -248,7 +398,7 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
       switch (token.type) {
         case 'code':
           parts.push(
-            <Text key={`code-${key++}`} style={[styles.inlineCode, { backgroundColor: codeBg, color: codeText }]}>
+            <Text key={getKey()} style={[styles.inlineCode, { backgroundColor: codeBg, color: codeText }]}>
               {token.content}
             </Text>
           );
@@ -256,11 +406,13 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
         case 'link':
           parts.push(
             <Text
-              key={`link-${key++}`}
+              key={getKey()}
               style={[styles.link, { color: '#4a9eff' }]}
               onPress={() => {
                 if (token.url) {
-                  Linking.openURL(token.url).catch(err => console.error('Failed to open URL:', err));
+                  Linking.openURL(token.url).catch(err => 
+                    console.error('Failed to open URL:', err)
+                  );
                 }
               }}>
               {token.content}
@@ -269,48 +421,47 @@ export function MarkdownText({ text, isUser = false }: MarkdownTextProps) {
           break;
         case 'bold':
           parts.push(
-            <Text key={`bold-${key++}`} style={[styles.bold, { color: defaultColor }]}>
+            <Text key={getKey()} style={[styles.bold, { color: defaultColor }]}>
               {token.content}
             </Text>
           );
           break;
         case 'italic':
           parts.push(
-            <Text key={`italic-${key++}`} style={[styles.italic, { color: defaultColor }]}>
+            <Text key={getKey()} style={[styles.italic, { color: defaultColor }]}>
               {token.content}
             </Text>
           );
           break;
       }
 
-      lastPos = token.end;
-    });
+      pos = token.end;
+    }
 
-    // Add remaining plain text
-    if (lastPos < text.length) {
-      const plainText = text.substring(lastPos);
-      if (plainText) {
-        parts.push(
-          <Text key={`text-${key++}`} style={{ color: defaultColor }}>
-            {plainText}
-          </Text>
-        );
+    // Add remaining text
+    if (pos < text.length) {
+      const remaining = text.substring(pos);
+      if (remaining) {
+        parts.push(remaining);
       }
     }
 
-    return parts.length > 0 ? parts : [<Text key={key} style={{ color: defaultColor }}>{text}</Text>];
+    return parts.length > 0 ? parts : [text];
   };
 
   const parsed = parseMarkdown(text);
 
   return (
-    <ThemedText style={{ color: textColor }}>
-      {parsed.length > 0 ? parsed : <Text style={{ color: textColor }}>{text}</Text>}
-    </ThemedText>
+    <View style={styles.container}>
+      {parsed}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  container: {
+    flexShrink: 1,
+  },
   bold: {
     fontWeight: '700',
   },
@@ -322,7 +473,7 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
   inlineCode: {
-    fontFamily: 'monospace',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     fontSize: 14,
     paddingHorizontal: 4,
     paddingVertical: 2,
@@ -336,7 +487,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   codeBlockText: {
-    fontFamily: 'monospace',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     fontSize: 14,
     lineHeight: 20,
   },
@@ -346,15 +497,53 @@ const styles = StyleSheet.create({
   listItemRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 4,
+    marginBottom: 6,
+    paddingLeft: 0,
+  },
+  orderedMarkerContainer: {
+    minWidth: 30,
+    marginRight: 6,
+    alignItems: 'flex-end',
+  },
+  unorderedMarkerContainer: {
+    width: 20,
+    marginRight: 6,
+    alignItems: 'center',
+  },
+  checkboxMarkerContainer: {
+    width: 20,
+    marginRight: 6,
+    alignItems: 'flex-start',
+  },
+  orderedMarker: {
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 1,
+    fontWeight: '600',
+  },
+  unorderedMarker: {
+    fontSize: 16,
+    lineHeight: 22,
+    marginTop: 1,
+  },
+  checkboxMarker: {
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 1,
   },
   bullet: {
-    width: 12,
-    lineHeight: 18,
+    fontSize: 18,
+    lineHeight: 22,
+    marginRight: 8,
+    marginTop: 2,
+  },
+  listItemTextContainer: {
+    flex: 1,
+    flexShrink: 1,
   },
   listItemText: {
-    flex: 1,
-    lineHeight: 18,
+    lineHeight: 22,
+    flexWrap: 'wrap',
   },
   h1: {
     fontSize: 24,
@@ -372,6 +561,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginTop: 10,
+    marginBottom: 4,
+  },
+  boldHeading: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 8,
     marginBottom: 4,
   },
 });

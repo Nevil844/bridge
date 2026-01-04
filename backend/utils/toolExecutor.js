@@ -112,20 +112,32 @@ async function executeToolCall(userId, toolCall, integrationType = null, convers
       if (!integrationType) {
         if (availableIntegrations.length === 1) {
           integrationType = availableIntegrations[0];
-          console.log(`⚠️  list_tools called without integration; defaulting to ${integrationType}`);
-        } else if (availableIntegrations.includes('spotify')) {
-          integrationType = 'spotify';
-          console.log('⚠️  list_tools missing integration; auto-selecting spotify (integration available)');
+          console.log(`⚠️  list_tools called without integration; auto-selecting the only available integration: ${integrationType}`);
         } else {
           console.log('⚠️  list_tools called without integration and multiple integrations available');
+          
+          // Return error telling AI to call with parameter
+          // Format as plain text so AI can easily read it
+          const errorMessage = `ERROR: The integration parameter is REQUIRED when calling list_tools.
+
+You called: list_tools({})
+You must call: list_tools({"integration": "<integration_name>"})
+
+Available integrations: ${availableIntegrations.join(', ')}
+
+Examples:
+- For calendar events: list_tools({"integration": "google-calendar"})
+- For music/Spotify: list_tools({"integration": "spotify"})
+- For Slack: list_tools({"integration": "slack"})
+- For YouTube: list_tools({"integration": "youtube"})
+
+Please retry the list_tools call with the correct integration parameter based on what the user is asking about.`;
+
           return {
             tool_call_id: toolCall.id,
             role: 'tool',
             name: toolCall.function.name,
-            content: JSON.stringify({
-              error: 'Integration parameter is required. Please specify which integration to list tools for.',
-              availableIntegrations,
-            }),
+            content: errorMessage,
           };
         }
       }

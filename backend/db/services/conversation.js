@@ -31,13 +31,23 @@ class ConversationService {
   /**
    * Get user's conversations (paginated)
    * Automatically creates user if they don't exist
+   * @param {string} userId - User ID
+   * @param {number} limit - Number of conversations to fetch
+   * @param {number} offset - Pagination offset
+   * @param {boolean} includeDeleted - Whether to include deleted conversations (default: false - users don't see deleted)
    */
-  async getUserConversations(userId, limit = 50, offset = 0) {
+  async getUserConversations(userId, limit = 50, offset = 0, includeDeleted = false) {
     // Ensure user exists
     const user = await userService.getOrCreateUser(userId, null);
     
+    const where = { userId: user.id };
+    // If includeDeleted is false, only show non-deleted conversations (default behavior)
+    if (!includeDeleted) {
+      where.isDeleted = false;
+    }
+    
     return await this.prisma.conversation.findMany({
-      where: { userId: user.id },
+      where,
       orderBy: { lastActive: 'desc' },
       take: limit,
       skip: offset,
@@ -56,6 +66,7 @@ class ConversationService {
   /**
    * Get conversation by ID
    * Automatically creates user if they don't exist
+   * Includes deleted conversations for safety/abuse review
    */
   async getConversation(conversationId, userId) {
     // Ensure user exists
@@ -94,16 +105,41 @@ class ConversationService {
   }
 
   /**
-   * Delete conversation (cascade deletes messages)
+   * Soft delete conversation (marks as deleted but preserves data)
+   * This helps with safety and abuse prevention
    */
   async deleteConversation(conversationId, userId) {
     // Ensure user exists
     const user = await userService.getOrCreateUser(userId, null);
     
-    return await this.prisma.conversation.delete({
+    return await this.prisma.conversation.update({
       where: {
         id: conversationId,
         userId: user.id,
+      },
+      data: {
+        isDeleted: true,
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  /**
+   * Soft delete all conversations for a user (marks as deleted but preserves data)
+   * This helps with safety and abuse prevention
+   */
+  async deleteAllConversations(userId) {
+    // Ensure user exists
+    const user = await userService.getOrCreateUser(userId, null);
+    
+    return await this.prisma.conversation.updateMany({
+      where: {
+        userId: user.id,
+        isDeleted: false, // Only update non-deleted conversations
+      },
+      data: {
+        isDeleted: true,
+        updatedAt: new Date(),
       },
     });
   }

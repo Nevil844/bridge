@@ -10,6 +10,10 @@ const ZerodhaIntegration = require('./zerodha.js');
 const SpotifyIntegration = require('./spotify.js');
 const ZomatoIntegration = require('./zomato.js');
 const JiraIntegration = require('./jira.js');
+const SlackIntegration = require('./slack.js');
+const YouTubeIntegration = require('./youtube.js');
+const GoogleCalendarIntegration = require('./google-calendar.js');
+const XIntegration = require('./x.js');
 
 // Available integrations
 // Add new integrations here as you create them
@@ -63,14 +67,35 @@ const integrations = {
     icon: 'https://wac-cdn.atlassian.com/assets/img/favicons/atlassian/favicon-32x32.png',
     authType: 'oauth', // Uses Atlassian Remote MCP Server with OAuth (recommended)
   },
+  slack: {
+    class: SlackIntegration,
+    name: 'Slack',
+    description: 'Send messages, read channels, and manage your workspace',
+    icon: 'https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png',
+    authType: 'oauth',
+  },
+  youtube: {
+    class: YouTubeIntegration,
+    name: 'YouTube',
+    description: 'Search videos, manage playlists, and access your YouTube content',
+    icon: 'https://www.youtube.com/img/desktop/yt_1200.png',
+    authType: 'oauth',
+  },
+  'google-calendar': {
+    class: GoogleCalendarIntegration,
+    name: 'Google Calendar',
+    description: 'View events, create meetings, manage your calendar, and schedule appointments',
+    icon: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Google_Calendar_icon_%282020%29.svg/512px-Google_Calendar_icon_%282020%29.svg.png?20221106121915',
+    authType: 'oauth',
+  },
+  x: {
+    class: XIntegration,
+    name: 'X (Twitter)',
+    description: 'Read and post tweets, search content, manage your X account',
+    icon: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/X_logo.jpg/1200px-X_logo.jpg',
+    authType: 'oauth',
+  },
   // Future integrations:
-  // slack: {
-  //   class: SlackIntegration,
-  //   name: 'Slack',
-  //   description: 'Send messages, read channels, and manage your workspace',
-  //   icon: 'https://...',
-  //   authType: 'oauth',
-  // },
 };
 
 module.exports = integrations;

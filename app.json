@@ -4,44 +4,80 @@
     "slug": "bridge-ai",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/logo.png",
     "scheme": "bridgeai",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nevil84.bridgeai",
+      "buildNumber": "3",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "This app uses the microphone to record your voice for speech-to-text conversion.",
+        "NSSpeechRecognitionUsageDescription": "This app uses speech recognition to convert your voice to text.",
+        "NSPhotoLibraryUsageDescription": "This app may access your photo library to allow you to share images in conversations with the AI assistant."
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
+        "backgroundColor": "#151718",
+        "foregroundImage": "./assets/images/logo.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.nevil84.bridgeai",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/logo-transparent.png",
+      "name": "Bridge AI",
+      "title": "Bridge AI"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
+          "image": "./assets/images/logo-transparent.png",
+          "imageWidth": 120,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#151718",
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#151718"
           }
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/logo-transparent.png",
+          "color": "#FF9500",
+          "mode": "production"
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "This app uses the microphone to record your voice for speech-to-text conversion.",
+          "speechRecognitionPermission": "This app uses speech recognition to convert your voice to text."
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "072b0e6b-d00e-4392-8330-9314b59dfd8b"
+      }
     }
   }
 }

@@ -1,2 +1,0 @@
-Add cache read in bedrock to optimize token pricing
-Improve latency for audio inputs

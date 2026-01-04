@@ -69,9 +69,6 @@ router.get('/google/url', (req, res) => {
       
       if (isValidRedirectUri) {
         redirectUri = requestedRedirectUri;
-        console.log('📱 Using frontend-provided redirect URI:', redirectUri);
-      } else {
-        console.warn('⚠️ Invalid redirect URI requested:', requestedRedirectUri, '- using default');
       }
     }
 
@@ -110,25 +107,8 @@ router.get('/google/callback', async (req, res) => {
   try {
     const { code, state, error, error_description, success, email, userId } = req.query;
     
-    console.log('\n🔐 OAuth Callback Received:', {
-      hasCode: !!code,
-      hasState: !!state,
-      state: state,
-      success: success,
-      userId: userId,
-      email: email,
-      error: error,
-    });
-    
     // If this is a success redirect (after OAuth completion), show success page
     if (success === 'true' && userId) {
-      console.log('✅ Success redirect - session should already be stored');
-      
-      if (state && oauthSessions.has(state)) {
-        console.log('✅ Session found for state:', state);
-      } else {
-        console.log('⚠️ Session NOT found for state:', state);
-      }
       
       // Fetch user info to display
       const user = await userService.getUserById(userId);
@@ -160,7 +140,6 @@ router.get('/google/callback', async (req, res) => {
     }
 
     if (!state) {
-      console.log('❌ Missing state parameter');
       return res.status(400).send('Missing state parameter');
     }
 
@@ -169,12 +148,10 @@ router.get('/google/callback', async (req, res) => {
     let expectedRedirectUri = null;
     if (stateData && stateData.redirectUri) {
       expectedRedirectUri = stateData.redirectUri;
-      console.log('📋 Using redirect URI from state:', expectedRedirectUri);
     }
 
     if (pendingAuthStates.has(state)) {
       pendingAuthStates.delete(state);
-      console.log('✅ State validated and removed from pending states');
     }
 
     // Exchange code for token
@@ -183,7 +160,6 @@ router.get('/google/callback', async (req, res) => {
     
     if (expectedRedirectUri && expectedRedirectUri !== googleAuth.redirectUri) {
       googleAuth.redirectUri = expectedRedirectUri;
-      console.log('🔄 Updated redirect URI for token exchange:', expectedRedirectUri);
     }
     
     const tokenData = await googleAuth.exchangeCodeForToken(code);
@@ -195,14 +171,12 @@ router.get('/google/callback', async (req, res) => {
     });
 
     if (!waitlistEntry || !waitlistEntry.isInvited) {
-      console.log(`🚫 Access denied for ${userInfo.email} - not invited`);
       return res.status(403).send(createErrorPage(
         'Access Restricted',
-        'This app is currently invite-only. Please join the waitlist and wait for an invitation.'
+        'This app is currently invite-only. Please join the waitlist and wait for an invitation.',
+        'https://join.bridge.neviljobanputra.com'
       ));
     }
-
-    console.log(`✅ User ${userInfo.email} is invited, proceeding with login`);
 
     // Create or update user in database
     const user = await userService.getOrCreateUser(userInfo.email, userInfo.email);
@@ -231,15 +205,14 @@ router.get('/google/callback', async (req, res) => {
       }
     );
 
-    // Store session for app to poll
-    console.log('💾 Storing OAuth session for state:', state);
+    // Store session for app to poll (include access token for frontend)
     oauthSessions.set(state, {
       userId: user.id,
       email: userInfo.email,
       name: userInfo.name,
+      accessToken: tokenData.accessToken, // Include token in session
       expiresAt: Date.now() + appConfig.oauth.sessionExpiry,
     });
-    console.log('✅ Session stored. Total sessions:', oauthSessions.size);
 
     // Redirect to callback URL with user info
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:3000';
@@ -254,15 +227,11 @@ router.get('/google/callback', async (req, res) => {
 
 /**
  * Check OAuth session status (for polling after browser dismiss)
+ * Returns user info and access token for frontend to store
  */
 router.get('/google/session', async (req, res) => {
   try {
     const { state } = req.query;
-    
-    console.log('\n🔍 Session check requested:', {
-      state: state,
-      totalSessions: oauthSessions.size,
-    });
     
     if (!state) {
       return res.status(400).json({ error: 'state parameter is required' });
@@ -271,37 +240,79 @@ router.get('/google/session', async (req, res) => {
     const session = oauthSessions.get(state);
     
     if (!session) {
-      console.log('❌ Session not found for state:', state);
       return res.status(404).json({ 
-        error: 'Session not found or expired',
-        debug: {
-          requestedState: state,
-          availableStates: Array.from(oauthSessions.keys()),
-          totalSessions: oauthSessions.size,
-        }
+        error: 'Session not found or expired'
       });
     }
 
     // Check if session expired
     if (session.expiresAt < Date.now()) {
-      console.log('⏰ Session expired for state:', state);
       oauthSessions.delete(state);
       return res.status(404).json({ error: 'Session expired' });
     }
 
-    console.log('✅ Session found:', {
-      userId: session.userId,
-      email: session.email,
-    });
+    // Get access token from user's google-auth integration
+    let accessToken = null;
+    try {
+      const integration = await integrationService.getIntegration(session.userId, 'google-auth');
+      if (integration?.credentials) {
+        const credentials = integration.credentials;
+        if (typeof credentials === 'object' && credentials.accessToken) {
+          accessToken = credentials.accessToken;
+        }
+      }
+    } catch (error) {
+      console.error('Error getting access token:', error);
+    }
 
     res.json({
       userId: session.userId,
       email: session.email,
       name: session.name,
+      accessToken: accessToken, // Include token for frontend to store
     });
   } catch (error) {
     console.error('Error checking OAuth session:', error);
     res.status(500).json({ error: 'Failed to check session' });
+  }
+});
+
+/**
+ * Get access token for authenticated user
+ * NOTE: This endpoint uses userId-based auth temporarily (before token is stored)
+ * After first use, all other endpoints require token-based auth
+ */
+router.get('/token', async (req, res) => {
+  try {
+    const userId = req.query.userId;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    // Verify user exists and has google-auth integration
+    const user = await userService.getUserById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const integration = await integrationService.getIntegration(userId, 'google-auth');
+    if (!integration || !integration.isActive) {
+      return res.status(403).json({ error: 'User has not completed Google OAuth' });
+    }
+
+    // Return access token
+    const credentials = integration.credentials;
+    if (typeof credentials === 'object' && credentials.accessToken) {
+      res.json({
+        accessToken: credentials.accessToken,
+      });
+    } else {
+      res.status(404).json({ error: 'Access token not found' });
+    }
+  } catch (error) {
+    console.error('Error getting access token:', error);
+    res.status(500).json({ error: 'Failed to get access token' });
   }
 });
 
@@ -358,27 +369,50 @@ router.get('/me', async (req, res) => {
     let name = user.username;
     try {
       const integration = await integrationService.getIntegration(user.id, 'google-auth');
-      if (integration?.metadata?.picture) {
-        picture = integration.metadata.picture;
-      }
-      if (integration?.metadata?.name) {
-        name = integration.metadata.name;
+      if (integration?.metadata) {
+        // Check both metadata.picture and direct picture field
+        picture = integration.metadata.picture || integration.metadata.pictureUrl || null;
+        name = integration.metadata.name || user.username;
+        
       }
     } catch (e) {
-      // Ignore errors
+      console.error('Error getting profile picture:', e);
+      // Ignore errors but log them
     }
 
     res.json({
       id: user.id,
       username: name || user.username,
       email: user.email,
-      picture: picture,
+      picture: picture || null, // Explicitly set to null if not found
       plan: user.plan || 'free',
       createdAt: user.createdAt,
     });
   } catch (error) {
     console.error('Error getting user info:', error);
     res.status(500).json({ error: 'Failed to get user info' });
+  }
+});
+
+/**
+ * DELETE /api/auth/account
+ * Delete user account and all related data
+ */
+const { verifyUser } = require('../middleware/auth');
+router.delete('/account', verifyUser, async (req, res) => {
+  try {
+    const userId = req.userId;
+    
+    // Delete user (cascade deletes all related data: conversations, messages, integrations, memories, token usage)
+    await userService.deleteUser(userId);
+    
+    res.json({ 
+      success: true,
+      message: 'Account deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting account:', error);
+    res.status(500).json({ error: 'Failed to delete account' });
   }
 });
 
@@ -402,14 +436,17 @@ function createSuccessPage(userInfo, userId, state) {
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Login Successful</title>
+        <title>Bridge AI – Login Successful</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
           body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             margin: 0;
             padding: 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background:
+              radial-gradient(circle at top left, rgba(74, 158, 255, 0.4), transparent 55%),
+              radial-gradient(circle at bottom right, rgba(124, 58, 237, 0.4), transparent 55%),
+              #050816;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -417,55 +454,98 @@ function createSuccessPage(userInfo, userId, state) {
           }
           .container {
             text-align: center;
-            background: white;
-            padding: 40px;
-            border-radius: 20px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            background: rgba(15, 23, 42, 0.96);
+            padding: 32px 28px;
+            border-radius: 24px;
+            box-shadow:
+              0 18px 60px rgba(15, 23, 42, 0.9),
+              0 0 0 1px rgba(148, 163, 184, 0.12);
             max-width: 400px;
+            width: 90%;
+            backdrop-filter: blur(22px);
           }
           .checkmark {
-            font-size: 60px;
-            color: #34C759;
-            margin-bottom: 20px;
+            width: 64px;
+            height: 64px;
+            border-radius: 32px;
+            margin: 0 auto 20px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at top, #4A9EFF, #2563EB);
+            box-shadow: 0 12px 35px rgba(37, 99, 235, 0.7);
+            color: white;
+            font-size: 32px;
           }
           h1 {
-            color: #333;
+            color: #E5E7EB;
             margin: 0 0 10px 0;
-            font-size: 24px;
+            font-size: 22px;
+            letter-spacing: 0.03em;
           }
           p {
-            color: #666;
+            color: #9CA3AF;
             margin: 0 0 20px 0;
-            font-size: 16px;
+            font-size: 14px;
+            line-height: 1.6;
           }
           .user-info {
-            background: #f5f5f5;
-            padding: 15px;
-            border-radius: 10px;
+            background: rgba(15, 23, 42, 0.9);
+            padding: 14px 16px;
+            border-radius: 14px;
             margin: 20px 0;
+            border: 1px solid rgba(148, 163, 184, 0.25);
           }
           .user-info img {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            margin-bottom: 10px;
+            width: 52px;
+            height: 52px;
+            border-radius: 999px;
+            margin-bottom: 8px;
+            border: 2px solid rgba(148, 163, 184, 0.5);
           }
           .user-info p {
             margin: 5px 0;
-            font-size: 14px;
+            font-size: 13px;
+          }
+          .email {
+            color: #6B7280;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+          }
+          .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            background: rgba(37, 99, 235, 0.12);
+            color: #BFDBFE;
+            margin-top: 6px;
+          }
+          .badge-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 999px;
+            background: #4ADE80;
           }
         </style>
       </head>
       <body>
         <div class="container">
           <div class="checkmark">✓</div>
-          <h1>Login Successful!</h1>
+          <h1>Welcome to Bridge AI</h1>
           <div class="user-info">
             ${userInfo.picture ? `<img src="${userInfo.picture}" alt="${userInfo.name}" />` : ''}
             <p><strong>${userInfo.name || userInfo.email}</strong></p>
-            <p style="color: #999; font-size: 12px;">${userInfo.email}</p>
+            <p class="email">${userInfo.email}</p>
+            <div class="badge">
+              <span class="badge-dot"></span>
+              <span>Login successful</span>
+            </div>
           </div>
-          <p>You can now close this window and return to the app.</p>
+          <p>You can close this tab and continue in the Bridge AI app.</p>
           <script>
             try {
               localStorage.setItem('oauth_userId', '${userId}');
@@ -489,23 +569,117 @@ function createSuccessPage(userInfo, userId, state) {
 /**
  * Helper: Create error page HTML
  */
-function createErrorPage(title, message) {
+function createErrorPage(title, message, registrationUrl = null) {
   return `
     <!DOCTYPE html>
     <html>
       <head>
-        <title>${title}</title>
+        <title>${title} – Bridge AI</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          body { font-family: -apple-system, sans-serif; text-align: center; padding: 50px; }
-          .error { color: #ff3b30; font-size: 48px; }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background:
+              radial-gradient(circle at top left, rgba(74, 158, 255, 0.4), transparent 55%),
+              radial-gradient(circle at bottom right, rgba(124, 58, 237, 0.4), transparent 55%),
+              #050816;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+          }
+          .container {
+            text-align: center;
+            background: rgba(15, 23, 42, 0.96);
+            padding: 40px 32px;
+            border-radius: 24px;
+            box-shadow:
+              0 18px 60px rgba(15, 23, 42, 0.9),
+              0 0 0 1px rgba(148, 163, 184, 0.12);
+            max-width: 480px;
+            width: 90%;
+            backdrop-filter: blur(22px);
+          }
+          .icon {
+            width: 72px;
+            height: 72px;
+            border-radius: 36px;
+            margin: 0 auto 24px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at top, rgba(255, 59, 48, 0.2), rgba(220, 38, 38, 0.3));
+            box-shadow: 0 12px 35px rgba(220, 38, 38, 0.4);
+            color: #FCA5A5;
+            font-size: 36px;
+            border: 1px solid rgba(220, 38, 38, 0.3);
+          }
+          h1 {
+            color: #E5E7EB;
+            margin: 0 0 12px 0;
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+          }
+          p {
+            color: #9CA3AF;
+            margin: 0 0 28px 0;
+            font-size: 15px;
+            line-height: 1.6;
+          }
+          .button {
+            display: inline-block;
+            padding: 14px 28px;
+            background: linear-gradient(135deg, #4A9EFF 0%, #2563EB 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            box-shadow: 0 8px 24px rgba(37, 99, 235, 0.4);
+            margin-top: 8px;
+          }
+          .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 32px rgba(37, 99, 235, 0.5);
+          }
+          .button:active {
+            transform: translateY(0);
+          }
+          .footer {
+            margin-top: 32px;
+            padding-top: 24px;
+            border-top: 1px solid rgba(148, 163, 184, 0.15);
+            color: #6B7280;
+            font-size: 13px;
+          }
+          .logo {
+            color: #4A9EFF;
+            font-weight: 700;
+            font-size: 18px;
+            margin-bottom: 8px;
+            letter-spacing: 0.05em;
+          }
         </style>
       </head>
       <body>
-        <div class="error">❌</div>
-        <h1>${title}</h1>
-        <p>${message}</p>
-        <script>setTimeout(() => window.close(), 3000);</script>
+        <div class="container">
+          <div class="logo">BRIDGE AI</div>
+          <div class="icon">⚠️</div>
+          <h1>${title}</h1>
+          <p>${message}</p>
+          ${registrationUrl ? `
+            <a href="${registrationUrl}" target="_blank" class="button">
+              Join Waitlist →
+            </a>
+          ` : ''}
+          <div class="footer">
+            <p style="margin: 0; font-size: 12px;">You can close this window when you're done</p>
+          </div>
+        </div>
       </body>
     </html>
   `;

@@ -1,81 +1,118 @@
-// Fallback for using MaterialIcons on Android and web.
-
-import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { SymbolViewProps, SymbolWeight } from 'expo-symbols';
-import { ComponentProps } from 'react';
-import { OpaqueColorValue, type StyleProp, type TextStyle } from 'react-native';
-
-type IconMapping = Record<SymbolViewProps['name'], ComponentProps<typeof MaterialIcons>['name']>;
-type IconSymbolName = keyof typeof MAPPING;
+import Ionicons from '@expo/vector-icons/Ionicons';
+import type { ComponentProps } from 'react';
+import type { StyleProp, TextStyle } from 'react-native';
 
 /**
- * Add your SF Symbols to Material Icons mappings here.
- * - see Material Icons in the [Icons Directory](https://icons.expo.fyi).
- * - see SF Symbols in the [SF Symbols](https://developer.apple.com/sf-symbols/) app.
+ * Web/Android icon implementation.
+ *
+ * We map SF Symbol-style names to Ionicons (which use iOS-style glyphs),
+ * so you get an iOS-like look on non-iOS platforms while the `.ios.tsx`
+ * version continues to use native SF Symbols.
  */
+
 const MAPPING = {
+  // Navigation / layout
   'house.fill': 'home',
-  'paperplane.fill': 'send',
-  'chevron.left.forwardslash.chevron.right': 'code',
-  'chevron.right': 'chevron-right',
-  // Tab bar icons
-  'message.fill': 'message',
-  'link': 'link',
-  'gearshape.fill': 'settings',
-  // Chat screen icons
+  'chevron.right': 'chevron-forward',
+  'chevron.left': 'chevron-back',
+  'chevron.up': 'chevron-up',
+  'chevron.down': 'chevron-down',
   'line.3.horizontal': 'menu',
-  'square.and.pencil': 'edit',
-  'chevron.left': 'chevron-left',
-  'trash': 'delete',
-  'envelope': 'mail',
-  'arrow.right.square': 'send',
-  // Settings icons
-  'arrow.clockwise': 'refresh',
-  // Pricing icons
-  'checkmark.circle.fill': 'check-circle',
-  // Alert icons
-  'exclamationmark.triangle.fill': 'warning',
-  'info.circle.fill': 'info',
-  // Thinking process icons
-  'brain': 'psychology',
-  'chevron.up': 'keyboard-arrow-up',
-  'chevron.down': 'keyboard-arrow-down',
-  // Additional icons
-  'mic.fill': 'mic',
-  'arrow.up': 'arrow-upward',
-  'stop.circle.fill': 'stop-circle',
-  'doc.on.doc': 'content-copy',
-  // Landing page icons
-  'shield.fill': 'shield',
-  'bolt.fill': 'bolt',
-  'sparkles': 'auto-awesome',
-  'lock.fill': 'lock',
-  'arrow.right': 'arrow-forward',
-} as IconMapping;
 
-/**
- * An icon component that uses native SF Symbols on iOS, and Material Icons on Android and web.
- * This ensures a consistent look across platforms, and optimal resource usage.
- * Icon `name`s are based on SF Symbols and require manual mapping to Material Icons.
- */
+  // Tabs
+  'message.fill': 'chatbubble-ellipses',
+  link: 'link',
+  'gearshape.fill': 'settings',
+  gearshape: 'settings-outline',
+
+  // Chat
+  'square.and.pencil': 'create',
+  trash: 'trash',
+  envelope: 'mail',
+  'envelope.fill': 'mail',
+  'arrow.right.square': 'arrow-forward-circle',
+
+  // Settings / usage
+  'chart.bar': 'stats-chart',
+  'arrow.clockwise': 'refresh',
+  'info.circle': 'information-circle',
+  'info.circle.fill': 'information-circle',
+
+  // Alerts
+  'exclamationmark.triangle.fill': 'warning',
+
+  // Thinking / misc
+  brain: 'hardware-chip',
+
+  // Recording
+  'mic.fill': 'mic',
+  'arrow.up': 'arrow-up',
+  'stop.circle.fill': 'stop-circle',
+
+  // Copy / close / person
+  'doc.on.doc': 'copy',
+  'xmark.circle.fill': 'close-circle',
+  'person.circle.fill': 'person-circle',
+  
+  // Search
+  'magnifyingglass': 'search',
+
+  // Landing / marketing
+  'shield.fill': 'shield',
+  'bolt.fill': 'flash',
+  sparkles: 'sparkles',
+  'lock.fill': 'lock-closed',
+  'arrow.right': 'arrow-forward',
+
+  // Pricing
+  'checkmark.circle.fill': 'checkmark-circle',
+  
+  // Experts and Characters
+  'person.fill': 'person',
+  'theatermasks.fill': 'people',
+  'cross.case.fill': 'medical',
+  'chart.bar.fill': 'bar-chart',
+  'scale.3d': 'scale',
+  'laptopcomputer': 'laptop',
+  'cpu.fill': 'hardware-chip',
+  'doc.text.fill': 'document-text',
+  'rocket.fill': 'rocket',
+  'figure.run': 'fitness',
+  'book.fill': 'library',
+  'heart.fill': 'heart',
+  'figure.yoga': 'leaf',
+  'star.fill': 'star',
+  'atom': 'nuclear',
+  'scroll.fill': 'document',
+  'peace.fill': 'flower',
+  'airplane': 'airplane',
+  'hands.sparkles.fill': 'sparkles',
+  'sportscourt.fill': 'basketball',
+  'leaf.fill': 'leaf',
+  'hand.raised.fill': 'hand-left',
+} as const;
+
+type IconName = keyof typeof MAPPING;
+
 export function IconSymbol({
   name,
   size = 24,
   color,
   style,
 }: {
-  name: IconSymbolName;
+  name: IconName;
   size?: number;
-  color: string | OpaqueColorValue;
+  color: ComponentProps<typeof Ionicons>['color'];
   style?: StyleProp<TextStyle>;
-  weight?: SymbolWeight;
 }) {
-  const iconName = MAPPING[name];
-  
-  if (!iconName) {
-    console.warn(`IconSymbol: No mapping found for "${name}". Using "help" as fallback.`);
-    return <MaterialIcons color={color} size={size} name="help" style={style} />;
+  const mapped = MAPPING[name];
+
+  if (!mapped) {
+    if (__DEV__) {
+      console.warn(`IconSymbol(web/android): No Ionicons mapping for "${name}". Falling back to "help-circle".`);
+    }
+    return <Ionicons name="help-circle" size={size} color={color} style={style} />;
   }
-  
-  return <MaterialIcons color={color} size={size} name={iconName} style={style} />;
+
+  return <Ionicons name={mapped} size={size} color={color} style={style} />;
 }
