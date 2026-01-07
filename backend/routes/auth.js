@@ -451,10 +451,37 @@ router.post('/apple/login', async (req, res) => {
       return res.status(400).json({ error: 'appleUserId is required' });
     }
 
-    // In some environments (e.g. Expo Go or subsequent logins), Apple may not
-    // return email. Fall back to a synthetic, non-routable email so the user
-    // account and waitlist entry can still be created for testing / review.
-    const normalizedEmail = (email || `${appleUserId}@apple.local`).toLowerCase().trim();
+    // Prefer email from the identityToken payload (more reliable across logins),
+    // then fall back to credential.email, and only as a last resort synthesize one.
+    let tokenEmail = null;
+    try {
+      if (identityToken) {
+        const parts = identityToken.split('.');
+        if (parts.length === 3) {
+          const payloadJson = Buffer.from(parts[1], 'base64').toString('utf8');
+          const payload = JSON.parse(payloadJson);
+          tokenEmail = payload.email || null;
+          console.log('📧 Apple identityToken payload email:', {
+            email: payload.email,
+            is_private_email: payload.is_private_email,
+            email_verified: payload.email_verified,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ Failed to parse Apple identityToken payload:', e);
+    }
+
+    let effectiveEmail = email && email.trim() ? email : tokenEmail;
+
+    if (!effectiveEmail) {
+      // Last resort for environments where Apple provides no email at all.
+      // This is non-routable and only used to satisfy our schema; app logic
+      // should not rely on contacting this address.
+      effectiveEmail = `${appleUserId}@apple.local`;
+    }
+
+    const normalizedEmail = effectiveEmail.toLowerCase().trim();
 
     // TODO (optional): Verify identityToken with Apple on the server for extra security.
     // For App Review and initial launch, we rely on Expo/Apple on-device verification.
