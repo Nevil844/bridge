@@ -444,13 +444,17 @@ router.get('/google/test', (req, res) => {
  */
 router.post('/apple/login', async (req, res) => {
   try {
-    const { appleUserId, email, fullName, identityToken } = req.body;
+    console.log('🔐 Apple login request body:', req.body);
+    const { appleUserId, email, fullName, identityToken } = req.body || {};
 
-    if (!appleUserId || !email) {
-      return res.status(400).json({ error: 'appleUserId and email are required' });
+    if (!appleUserId) {
+      return res.status(400).json({ error: 'appleUserId is required' });
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
+    // In some environments (e.g. Expo Go or subsequent logins), Apple may not
+    // return email. Fall back to a synthetic, non-routable email so the user
+    // account and waitlist entry can still be created for testing / review.
+    const normalizedEmail = (email || `${appleUserId}@apple.local`).toLowerCase().trim();
 
     // TODO (optional): Verify identityToken with Apple on the server for extra security.
     // For App Review and initial launch, we rely on Expo/Apple on-device verification.
