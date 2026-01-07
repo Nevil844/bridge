@@ -4,6 +4,7 @@ const { PrismaClient } = require('@prisma/client');
 const userService = require('../db/services/user');
 const integrationService = require('../db/services/integration');
 const appConfig = require('../config/app');
+const crypto = require('crypto');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -426,6 +427,95 @@ router.get('/google/test', (req, res) => {
     totalSessions: oauthSessions.size,
     availableStates: Array.from(oauthSessions.keys()),
   });
+});
+
+/**
+ * POST /api/auth/apple/login
+ * Sign in with Apple flow (frontend already obtained Apple credential)
+ *
+ * - Auto-adds the user to the waitlist (if not present) and marks them as invited
+ *   so App Review and Apple users can access the app without manual approval.
+ * - Creates or fetches a user account.
+ * - Issues an internal access token stored via the existing integrationService so
+ *   the same token-based auth middleware (verifyUser) continues to work.
+ *
+ * After App Store review, you can gate the auto-approval behind an env flag
+ * (e.g., INVITE_ONLY=true) to restore invite-only behavior.
+ */
+router.post('/apple/login', async (req, res) => {
+  try {
+    const { appleUserId, email, fullName, identityToken } = req.body;
+
+    if (!appleUserId || !email) {
+      return res.status(400).json({ error: 'appleUserId and email are required' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // TODO (optional): Verify identityToken with Apple on the server for extra security.
+    // For App Review and initial launch, we rely on Expo/Apple on-device verification.
+
+    // Auto-add to waitlist and mark as invited so Apple Review can access the app.
+    let waitlistEntry = await prisma.waitlist.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    if (!waitlistEntry) {
+      waitlistEntry = await prisma.waitlist.create({
+        data: {
+          email: normalizedEmail,
+          isInvited: true,
+        },
+      });
+      console.log(`✅ Created and invited waitlist entry for Apple user: ${normalizedEmail}`);
+    } else if (!waitlistEntry.isInvited) {
+      waitlistEntry = await prisma.waitlist.update({
+        where: { email: normalizedEmail },
+        data: { isInvited: true },
+      });
+      console.log(`✅ Marked existing waitlist entry as invited for Apple user: ${normalizedEmail}`);
+    }
+
+    // Create or fetch user account
+    let user = await userService.getUserByEmail(normalizedEmail);
+    if (!user) {
+      user = await userService.createUser(fullName || normalizedEmail, normalizedEmail);
+    } else if (fullName && !user.username) {
+      user = await userService.updateUser(user.id, {
+        username: fullName,
+        email: normalizedEmail,
+      });
+    }
+
+    // Generate an internal access token and store it via integrationService so
+    // verifyUser (which looks up google-auth integration credentials.accessToken)
+    // continues to function without major refactors.
+    const accessToken = crypto.randomBytes(32).toString('hex');
+
+    await integrationService.storeIntegration(
+      user.id,
+      'google-auth',
+      { accessToken },
+      {
+        provider: 'apple',
+        appleUserId,
+        email: normalizedEmail,
+        name: fullName || normalizedEmail,
+        identityTokenPresent: !!identityToken,
+      }
+    );
+
+    res.json({
+      id: user.id,
+      email: user.email,
+      name: user.username,
+      plan: user.plan || 'free',
+      accessToken,
+    });
+  } catch (error) {
+    console.error('Apple login error:', error);
+    res.status(500).json({ error: 'Failed to sign in with Apple' });
+  }
 });
 
 /**

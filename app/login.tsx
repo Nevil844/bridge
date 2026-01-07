@@ -8,6 +8,7 @@ import { useSafeAreaPadding } from '@/hooks/use-safe-area-padding';
 import { setAccessToken } from '@/utils/api';
 import { secureStorage, storage, STORAGE_KEYS } from '@/utils/storage';
 import { useRouter } from 'expo-router';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -85,6 +86,70 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
     } else {
       // On native, ensure we leave the login route
       router.replace('/');
+    }
+  };
+
+  const handleAppleLogin = async () => {
+    try {
+      setIsLoading(true);
+
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      const email = credential.email ?? '';
+      const fullName =
+        [credential.fullName?.givenName, credential.fullName?.familyName]
+          .filter(Boolean)
+          .join(' ')
+          .trim() || email;
+
+      const response = await fetch(API_ENDPOINTS.AUTH.APPLE_LOGIN, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          appleUserId: credential.user,
+          email,
+          fullName,
+          identityToken: credential.identityToken,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Apple login failed:', response.status, errorText);
+        throw new Error('Failed to sign in with Apple. Please try again.');
+      }
+
+      const userData = await response.json();
+
+      if (userData.accessToken) {
+        await setAccessToken(userData.accessToken);
+      }
+
+      await handleLoginSuccess({
+        id: userData.id,
+        email: userData.email,
+        name: userData.name || userData.email,
+        plan: userData.plan || 'free',
+      });
+    } catch (error: any) {
+      if (error?.code === 'ERR_CANCELED') {
+        // User cancelled, no need to show an alert
+        console.log('Apple sign-in cancelled by user');
+      } else {
+        console.error('Apple sign-in error:', error);
+        Alert.alert(
+          'Apple Sign In Failed',
+          error?.message || 'Unable to sign in with Apple. Please try again.'
+        );
+      }
+      setIsLoading(false);
     }
   };
 
@@ -608,7 +673,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
             </Animated.View>
           </View>
           <ThemedText style={styles.subtitle}>
-            Sign in with Google to get started
+            Sign in to get started
           </ThemedText>
         </View>
 
@@ -629,6 +694,18 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps = {}) {
             </>
           )}
         </TouchableOpacity>
+
+        {Platform.OS === 'ios' && (
+          <View style={{ width: '100%', marginBottom: 12 }}>
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+              cornerRadius={12}
+              style={{ width: '100%', height: 50 }}
+              onPress={handleAppleLogin}
+            />
+          </View>
+        )}
 
         <View style={styles.footerContainer}>
           <ThemedText style={styles.footerText}>

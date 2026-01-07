@@ -1,9 +1,21 @@
-import {
-    ExpoSpeechRecognitionModule,
-    useSpeechRecognitionEvent,
-} from 'expo-speech-recognition';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Platform } from 'react-native';
+
+// Lazy-load expo-speech-recognition so the app doesn't crash if the native module
+// isn't available (e.g. Expo Go, certain environments).
+let ExpoSpeechRecognitionModule: any = null;
+let useSpeechRecognitionEvent: any = () => {};
+
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const mod = require('expo-speech-recognition');
+  ExpoSpeechRecognitionModule = mod.ExpoSpeechRecognitionModule;
+  useSpeechRecognitionEvent = mod.useSpeechRecognitionEvent;
+} catch (e) {
+  // Module not available – we'll mark isAvailable=false and no-op the hooks.
+  ExpoSpeechRecognitionModule = null;
+  useSpeechRecognitionEvent = () => {};
+}
 
 interface UseSpeechRecognitionOptions {
   language?: string;
@@ -30,7 +42,7 @@ export function useSpeechRecognition(
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [isAvailable, setIsAvailable] = useState(true);
+  const [isAvailable, setIsAvailable] = useState<boolean>(false);
 
   // Check if speech recognition is available
   useEffect(() => {
@@ -43,10 +55,10 @@ export function useSpeechRecognition(
           return;
         }
         
-        // On native, the module should be available
+        // On native, only available if the module actually loaded
         setIsAvailable(!!ExpoSpeechRecognitionModule);
       } catch {
-        setIsAvailable(Platform.OS !== 'web');
+        setIsAvailable(false);
       }
     };
     
@@ -54,50 +66,64 @@ export function useSpeechRecognition(
   }, []);
 
   // Handle speech recognition results
-  useSpeechRecognitionEvent('result', (event) => {
-    const results = event.results;
-    if (results && results.length > 0) {
-      const latestResult = results[results.length - 1];
-      if (latestResult && latestResult.transcript) {
-        const recognizedText = latestResult.transcript;
-        const isFinal = event.isFinal;
-        
-        if (isFinal) {
-          setTranscript(recognizedText);
-          setInterimTranscript('');
-          onResult?.(recognizedText, true);
-        } else {
-          setInterimTranscript(recognizedText);
-          onResult?.(recognizedText, false);
+  if (useSpeechRecognitionEvent && ExpoSpeechRecognitionModule) {
+    // Handle speech recognition results
+    useSpeechRecognitionEvent('result', (event: any) => {
+      const results = event.results;
+      if (results && results.length > 0) {
+        const latestResult = results[results.length - 1];
+        if (latestResult && latestResult.transcript) {
+          const recognizedText = latestResult.transcript;
+          const isFinal = event.isFinal;
+          
+          if (isFinal) {
+            setTranscript(recognizedText);
+            setInterimTranscript('');
+            onResult?.(recognizedText, true);
+          } else {
+            setInterimTranscript(recognizedText);
+            onResult?.(recognizedText, false);
+          }
         }
       }
-    }
-  });
+    });
 
-  // Handle speech recognition errors
-  useSpeechRecognitionEvent('error', (event) => {
-    const errorMessage = event.error || 'Speech recognition error';
-    setError(errorMessage);
-    setIsListening(false);
-    onError?.(errorMessage);
-  });
+    // Handle speech recognition errors
+    useSpeechRecognitionEvent('error', (event: any) => {
+      const errorMessage = event.error || 'Speech recognition error';
+      setError(errorMessage);
+      setIsListening(false);
+      onError?.(errorMessage);
+    });
 
-  // Handle recognition end
-  useSpeechRecognitionEvent('end', () => {
-    setIsListening(false);
-  });
+    // Handle recognition end
+    useSpeechRecognitionEvent('end', () => {
+      setIsListening(false);
+    });
 
-  // Handle recognition start
-  useSpeechRecognitionEvent('start', () => {
-    setIsListening(true);
-    setError(null);
-    setTranscript('');
-    setInterimTranscript('');
-  });
+    // Handle recognition start
+    useSpeechRecognitionEvent('start', () => {
+      setIsListening(true);
+      setError(null);
+      setTranscript('');
+      setInterimTranscript('');
+    });
+  }
 
   const startListening = useCallback(async () => {
     try {
       setError(null);
+
+      if (!ExpoSpeechRecognitionModule) {
+        const errorMsg = 'Speech recognition is not available on this device.';
+        setError(errorMsg);
+        Alert.alert(
+          'Not Available',
+          'Speech recognition is not supported in this environment.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
       
       // Request permissions
       const permissionResult = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
@@ -133,7 +159,9 @@ export function useSpeechRecognition(
 
   const stopListening = useCallback(async () => {
     try {
-      await ExpoSpeechRecognitionModule.stop();
+      if (ExpoSpeechRecognitionModule) {
+        await ExpoSpeechRecognitionModule.stop();
+      }
     } catch {
       // Ignore stop errors
     }

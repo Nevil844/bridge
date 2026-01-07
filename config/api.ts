@@ -50,6 +50,7 @@ export const API_ENDPOINTS = {
     GOOGLE_URL: `${API_CONFIG.BASE_URL}/api/auth/google/url`,
     GOOGLE_CALLBACK: `${API_CONFIG.BASE_URL}/api/auth/google/callback`,
     GOOGLE_SESSION: `${API_CONFIG.BASE_URL}/api/auth/google/session`,
+    APPLE_LOGIN: `${API_CONFIG.BASE_URL}/api/auth/apple/login`,
     ME: `${API_CONFIG.BASE_URL}/api/auth/me`,
     TOKEN: `${API_CONFIG.BASE_URL}/api/auth/token`,
     DELETE_ACCOUNT: `${API_CONFIG.BASE_URL}/api/auth/account`,
