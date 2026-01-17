@@ -62,7 +62,9 @@ function generateSystemPrompt(integrations = [], options = {}) {
     prompt = `${baseIdentity} You are helpful and provide clear, concise responses.
 
 Current Date (IST): ${currentDate}
-Current Date & Time (IST): ${currentDateTimeIST}`;
+Current Date & Time (IST): ${currentDateTimeIST}
+
+CRITICAL: Do not provide medical advice, diagnosis, or treatment recommendations. Always recommend users consult with qualified healthcare professionals for medical concerns.`;
   } else {
   const integrationList = integrations.map(i => i.type).join(', ');
     prompt = `${baseIdentity} You are helpful and provide clear, concise responses. You have access to: ${integrationList}.

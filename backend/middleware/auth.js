@@ -111,6 +111,14 @@ async function verifyUser(req, res, next) {
       });
     }
 
+    // Check if user account has been deleted
+    if (user.isDeleted) {
+      return res.status(403).json({ 
+        error: 'Account Deleted', 
+        message: 'Your account has been deleted. Please contact the developer at neviljobanputra34@gmail.com if you need assistance.' 
+      });
+    }
+
     // Attach user to request object - this is the ONLY trusted userId (from token, not request)
     req.user = user;
     req.userId = user.id;

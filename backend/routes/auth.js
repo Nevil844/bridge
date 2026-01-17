@@ -179,8 +179,19 @@ router.get('/google/callback', async (req, res) => {
       ));
     }
 
+    // Check if user exists and is deleted
+    let user = await userService.getUserByEmail(userInfo.email);
+    
+    if (user && user.isDeleted) {
+      return res.status(403).send(createErrorPage(
+        'Account Deleted',
+        'Your account has been deleted. Please contact the developer at neviljobanputra34@gmail.com if you need assistance.',
+        null
+      ));
+    }
+
     // Create or update user in database
-    const user = await userService.getOrCreateUser(userInfo.email, userInfo.email);
+    user = await userService.getOrCreateUser(userInfo.email, userInfo.email);
     
     if (userInfo.name && !user.username) {
       await userService.updateUser(user.id, {
@@ -507,8 +518,17 @@ router.post('/apple/login', async (req, res) => {
       console.log(`✅ Marked existing waitlist entry as invited for Apple user: ${normalizedEmail}`);
     }
 
-    // Create or fetch user account
+    // Check if user exists and is deleted
     let user = await userService.getUserByEmail(normalizedEmail);
+    
+    if (user && user.isDeleted) {
+      return res.status(403).json({ 
+        error: 'Account Deleted',
+        message: 'Your account has been deleted. Please contact the developer at neviljobanputra34@gmail.com if you need assistance.'
+      });
+    }
+
+    // Create or fetch user account
     if (!user) {
       user = await userService.createUser(fullName || normalizedEmail, normalizedEmail);
     } else if (fullName && !user.username) {

@@ -20,6 +20,7 @@ model User {
   username  String   @unique
   email     String?  @unique
   plan      String   @default("free") // "free", "pro", "power", "enterprise"
+  isDeleted Boolean  @default(false) // Soft delete flag - prevents re-login after account deletion
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -33,6 +34,7 @@ model User {
 
   @@index([email])
   @@index([plan])
+  @@index([isDeleted])
   @@map("users")
 }
 

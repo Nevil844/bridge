@@ -28,6 +28,7 @@ const MAPPING = {
   // Chat
   'square.and.pencil': 'create',
   trash: 'trash',
+  'trash.fill': 'trash',
   envelope: 'mail',
   'envelope.fill': 'mail',
   'arrow.right.square': 'arrow-forward-circle',

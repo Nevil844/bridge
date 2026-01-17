@@ -89,11 +89,16 @@ class UserService {
   }
 
   /**
-   * Delete user (cascade deletes all related data)
+   * Soft delete user (sets isDeleted flag to prevent re-login)
+   * This prevents users from deleting and re-creating accounts to abuse free credits
    */
   async deleteUser(userId) {
-    return await this.prisma.user.delete({
+    return await this.prisma.user.update({
       where: { id: userId },
+      data: { 
+        isDeleted: true,
+        updatedAt: new Date(),
+      },
     });
   }
 
