@@ -356,6 +356,11 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
           hasError = true;
           sender.send({ type: 'error', error: chunk.error });
           break;
+        } else if (chunk.type === 'usage' || (chunk.usage && !usage)) {
+          // Capture usage data as soon as it's available (from message_delta events)
+          // This ensures we track usage even if stream is interrupted
+          usage = chunk.usage || chunk;
+          console.log('📊 Captured usage from stream:', usage);
         } else if (chunk.type === 'content') {
           // Accumulate all content chunks
           fullContent += chunk.content;
@@ -412,7 +417,10 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
           // Final chunk with complete data
           fullContent = chunk.content || fullContent;
           toolCalls = chunk.tool_calls;
-          usage = chunk.usage;
+          // Capture usage from done chunk (most reliable)
+          if (chunk.usage) {
+            usage = chunk.usage;
+          }
           
           // If there are tool calls, we should show this as thinking (even if no text was provided)
           if (toolCalls && toolCalls.length > 0) {
@@ -713,6 +721,24 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
     } catch (streamError) {
       console.error('❌ Error processing stream:', streamError);
       hasError = true;
+      
+      // Even on error, try to track usage if we have it (AWS charges even for failed requests)
+      if (usage) {
+        try {
+          await tokenUsageService.trackUsage(
+            user,
+            selectedModel,
+            usage.input_tokens || 0,
+            usage.output_tokens || 0
+          );
+          console.log('✅ Tracked usage from interrupted stream');
+        } catch (error) {
+          console.error('❌ Error tracking usage from interrupted stream:', error);
+        }
+      } else {
+        console.warn('⚠️ Stream interrupted but no usage data captured - tokens may have been consumed but not tracked');
+      }
+      
       sender.send({ type: 'error', error: streamError.message });
     }
 
@@ -726,12 +752,18 @@ async function handleStreamingResponse(req, res, provider, messages, selectedMod
       );
       
       if (usage) {
-        await tokenUsageService.trackUsage(
-          user,
-          selectedModel,
-          usage.input_tokens || 0,
-          usage.output_tokens || 0
-        );
+        try {
+          await tokenUsageService.trackUsage(
+            user,
+            selectedModel,
+            usage.input_tokens || 0,
+            usage.output_tokens || 0
+          );
+        } catch (error) {
+          console.error('❌ Error tracking token usage:', error);
+        }
+      } else {
+        console.warn('⚠️ Stream completed but no usage data - tokens may have been consumed but not tracked');
       }
 
       sender.send({ 
@@ -982,10 +1014,38 @@ CRITICAL: Do not provide medical advice, diagnosis, or treatment recommendations
       let roundNumber = 2;
       const maxRounds = 10; // Prevent infinite loops
       
+      // Track usage from initial response (round 1)
+      if (aiResponse.usage) {
+        try {
+          await tokenUsageService.trackUsage(
+            user,
+            selectedModel,
+            aiResponse.usage.input_tokens || 0,
+            aiResponse.usage.output_tokens || 0
+          );
+        } catch (error) {
+          console.error('❌ Error tracking token usage (round 1):', error);
+        }
+      }
+      
       while (roundNumber <= maxRounds) {
         // Check if AI wants to call more tools
         if (currentResponse.tool_calls && currentResponse.tool_calls.length > 0) {
           console.log(`🔧 Round ${roundNumber}: ${currentResponse.tool_calls.map(tc => tc.function.name).join(', ')}`);
+          
+          // Track usage from previous round BEFORE making next API call
+          if (currentResponse.usage) {
+            try {
+              await tokenUsageService.trackUsage(
+                user,
+                selectedModel,
+                currentResponse.usage.input_tokens || 0,
+                currentResponse.usage.output_tokens || 0
+              );
+            } catch (error) {
+              console.error(`❌ Error tracking token usage (round ${roundNumber - 1}):`, error);
+            }
+          }
           
           // Execute the additional tool calls (pass conversationId for working memory)
           const { results: additionalResults } = await processToolCallsWithApproval(
@@ -1018,7 +1078,19 @@ CRITICAL: Do not provide medical advice, diagnosis, or treatment recommendations
           currentResponse = await provider.chat(conversationMessages, selectedModel, tools, false);
           roundNumber++;
         } else {
-          // No more tool calls, break
+          // No more tool calls - track usage from final round
+          if (currentResponse.usage) {
+            try {
+              await tokenUsageService.trackUsage(
+                user,
+                selectedModel,
+                currentResponse.usage.input_tokens || 0,
+                currentResponse.usage.output_tokens || 0
+              );
+            } catch (error) {
+              console.error(`❌ Error tracking token usage (final round):`, error);
+            }
+          }
           break;
         }
       }
@@ -1030,20 +1102,6 @@ CRITICAL: Do not provide medical advice, diagnosis, or treatment recommendations
         currentResponse.content,
         { model: selectedModel, usage: currentResponse.usage, toolsUsed: allToolCalls }
       );
-      
-      // Track token usage
-      if (currentResponse.usage) {
-        try {
-          await tokenUsageService.trackUsage(
-            user,
-            selectedModel,
-            currentResponse.usage.input_tokens || 0,
-            currentResponse.usage.output_tokens || 0
-          );
-        } catch (error) {
-          console.error('❌ Error tracking token usage:', error);
-        }
-      }
       
       res.json({ 
         message: currentResponse.content,

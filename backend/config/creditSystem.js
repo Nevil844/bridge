@@ -13,8 +13,21 @@ const CREDIT_VALUE = 0.01; // $0.01 per credit
  * Format: { modelId: { inputCostPerToken, outputCostPerToken } }
  */
 const MODEL_COSTS = {
-  // Claude models (Anthropic)
+  // Claude models (Anthropic) - Direct API
   'claude-3-5-sonnet': {
+    inputCostPerToken: 0.000003,   // $0.003 per 1K tokens
+    outputCostPerToken: 0.000015,  // $0.015 per 1K tokens
+  },
+  // Claude models (AWS Bedrock)
+  'anthropic.claude-sonnet-4-5-20250929-v1:0': {
+    inputCostPerToken: 0.000003,   // $0.003 per 1K tokens (same as direct API)
+    outputCostPerToken: 0.000015,  // $0.015 per 1K tokens (same as direct API)
+  },
+  'anthropic.claude-sonnet-4-20250514-v1:0': {
+    inputCostPerToken: 0.000003,   // $0.003 per 1K tokens
+    outputCostPerToken: 0.000015,  // $0.015 per 1K tokens
+  },
+  'anthropic.claude-3-5-sonnet-20241022-v2:0': {
     inputCostPerToken: 0.000003,   // $0.003 per 1K tokens
     outputCostPerToken: 0.000015,  // $0.015 per 1K tokens
   },
@@ -61,10 +74,10 @@ const MODEL_COSTS = {
 };
 
 /**
- * Get default model (Claude Sonnet 4.5)
+ * Get default model (Bedrock Claude Sonnet 4.5)
  */
 function getDefaultModel() {
-  return 'claude-3-5-sonnet';
+  return 'anthropic.claude-sonnet-4-5-20250929-v1:0';
 }
 
 /**
@@ -87,7 +100,7 @@ function getModelCosts(modelId) {
     }
   }
   
-  // Default to Claude Sonnet 4.5
+  // Default to Bedrock Claude Sonnet 4.5 (current production model)
   return MODEL_COSTS[getDefaultModel()];
 }
 

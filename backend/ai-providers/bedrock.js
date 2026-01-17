@@ -413,11 +413,16 @@ class BedrockProvider {
             // Content block finished
             currentToolCall = null;
           } else if (chunkData.type === 'message_delta') {
-            // Message delta (usage info)
+            // Message delta (usage info) - capture immediately so we can track even if stream is interrupted
             if (chunkData.usage) {
               usage = {
                 input_tokens: chunkData.usage.input_tokens || 0,
                 output_tokens: chunkData.usage.output_tokens || 0,
+              };
+              // Yield usage immediately so it can be tracked even if stream fails later
+              yield {
+                type: 'usage',
+                usage: usage,
               };
             }
           } else if (chunkData.type === 'message_stop') {
