@@ -12,7 +12,10 @@ const { getPlanLimit, getRemainingTokens, getUsagePercentage, getWarningLevel } 
 
 /**
  * GET /api/usage/:userId
- * Get usage details for a specific user (current month)
+ * Get usage details for a specific user
+ *
+ * By default this now uses lifetime totals (no resets). A specific month can
+ * still be requested via the `month` query param for historical reports.
  * 
  * Response:
  * {
@@ -47,7 +50,7 @@ router.get('/:userId', verifyUser, async (req, res) => {
     
     const { month } = req.query; // Optional: specific month (format: "2025-11")
 
-    // Get usage for current or specified month (using authenticated userId from token)
+    // Get usage for a specific month (legacy) or lifetime totals by default
     let usage;
     if (month) {
       // For specific month, aggregate the records
@@ -65,7 +68,8 @@ router.get('/:userId', verifyUser, async (req, res) => {
         creditsUsed,
       };
     } else {
-      usage = await tokenUsageService.getCurrentMonthTotal(authenticatedUserId);
+      // Default: lifetime totals so usage/credits never reset
+      usage = await tokenUsageService.getLifetimeTotal(authenticatedUserId);
     }
 
     // Get user's plan from database (using authenticated userId from token)
@@ -79,7 +83,8 @@ router.get('/:userId', verifyUser, async (req, res) => {
     const percentage = getUsagePercentage(creditsUsed, userPlan);
     const warningLevel = getWarningLevel(percentage / 100);
 
-    const currentMonth = month || new Date().toISOString().slice(0, 7);
+    // For backwards compatibility we continue to return a `month` string.
+    const currentMonth = month || 'lifetime';
 
     res.json({
       userId: authenticatedUserId,

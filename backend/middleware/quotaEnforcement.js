@@ -25,8 +25,8 @@ async function checkQuota(req, res, next) {
       });
     }
 
-    // Get current month's usage (includes credits)
-    const usage = await tokenUsageService.getCurrentMonthTotal(userId);
+    // Get lifetime usage (includes credits). Credits do not reset.
+    const usage = await tokenUsageService.getLifetimeTotal(userId);
     
     // Get user's plan from database (default to 'free' if not set)
     const user = await userService.getUserById(userId);
@@ -36,13 +36,13 @@ async function checkQuota(req, res, next) {
     // Use credits for limit checking (cost-based)
     const creditsUsed = usage.creditsUsed || 0;
     
-    // Check if over limit
+    // Check if over limit based on lifetime usage (no resets)
     if (creditsUsed >= limit) {
       const usagePercentage = getUsagePercentage(creditsUsed, userPlan);
       
       return res.status(429).json({
         error: 'Quota Exceeded',
-        message: `You have exceeded your ${userPlan} plan limit of ${limit} credits/month.`,
+        message: `You have exceeded your ${userPlan} plan limit of ${limit} credits (lifetime).`,
         usage: {
           used: creditsUsed,
           limit: limit,
@@ -85,7 +85,8 @@ async function checkQuota(req, res, next) {
  *   // Throws error if over limit
  */
 async function checkUserQuota(userId, plan = 'free') {
-  const usage = await tokenUsageService.getCurrentMonthTotal(userId);
+  // Use lifetime usage for programmatic checks (no resets)
+  const usage = await tokenUsageService.getLifetimeTotal(userId);
   const limit = getPlanLimit(plan);
   
   // Use credits for limit checking

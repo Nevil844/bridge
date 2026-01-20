@@ -166,21 +166,32 @@ router.get('/google/callback', async (req, res) => {
     const tokenData = await googleAuth.exchangeCodeForToken(code);
     const userInfo = await googleAuth.getUserInfo(tokenData.accessToken);
 
-    // Check if user is invited (invite-only mode)
-    const waitlistEntry = await prisma.waitlist.findUnique({
-      where: { email: userInfo.email.toLowerCase().trim() },
+    // Auto-add Google users to the waitlist and mark them as invited,
+    // matching the behavior used for Sign in with Apple so they can
+    // access the app without manual approval.
+    const normalizedEmail = userInfo.email.toLowerCase().trim();
+    let waitlistEntry = await prisma.waitlist.findUnique({
+      where: { email: normalizedEmail },
     });
 
-    if (!waitlistEntry || !waitlistEntry.isInvited) {
-      return res.status(403).send(createErrorPage(
-        'Access Restricted',
-        'This app is currently invite-only. Please join the waitlist and wait for an invitation.',
-        'https://join.bridge.neviljobanputra.com'
-      ));
+    if (!waitlistEntry) {
+      waitlistEntry = await prisma.waitlist.create({
+        data: {
+          email: normalizedEmail,
+          isInvited: true,
+        },
+      });
+      console.log(`✅ Created and invited waitlist entry for Google user: ${normalizedEmail}`);
+    } else if (!waitlistEntry.isInvited) {
+      waitlistEntry = await prisma.waitlist.update({
+        where: { email: normalizedEmail },
+        data: { isInvited: true },
+      });
+      console.log(`✅ Marked existing waitlist entry as invited for Google user: ${normalizedEmail}`);
     }
 
     // Check if user exists and is deleted
-    let user = await userService.getUserByEmail(userInfo.email);
+    let user = await userService.getUserByEmail(normalizedEmail);
     
     if (user && user.isDeleted) {
       return res.status(403).send(createErrorPage(
@@ -191,12 +202,12 @@ router.get('/google/callback', async (req, res) => {
     }
 
     // Create or update user in database
-    user = await userService.getOrCreateUser(userInfo.email, userInfo.email);
+    user = await userService.getOrCreateUser(normalizedEmail, normalizedEmail);
     
     if (userInfo.name && !user.username) {
       await userService.updateUser(user.id, {
         username: userInfo.name,
-        email: userInfo.email,
+        email: normalizedEmail,
       });
     }
 
@@ -220,7 +231,7 @@ router.get('/google/callback', async (req, res) => {
     // Store session for app to poll (include access token for frontend)
     oauthSessions.set(state, {
       userId: user.id,
-      email: userInfo.email,
+      email: normalizedEmail,
       name: userInfo.name,
       accessToken: tokenData.accessToken, // Include token in session
       expiresAt: Date.now() + appConfig.oauth.sessionExpiry,
@@ -228,7 +239,7 @@ router.get('/google/callback', async (req, res) => {
 
     // Redirect to callback URL with user info
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:3000';
-    const successUrl = `${backendUrl}/api/auth/google/callback?success=true&email=${encodeURIComponent(userInfo.email)}&userId=${user.id}&state=${state}`;
+    const successUrl = `${backendUrl}/api/auth/google/callback?success=true&email=${encodeURIComponent(normalizedEmail)}&userId=${user.id}&state=${state}`;
     
     res.redirect(successUrl);
   } catch (error) {

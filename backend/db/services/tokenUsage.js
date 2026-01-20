@@ -115,6 +115,79 @@ class TokenUsageService {
   }
 
   /**
+   * Get total usage for a rolling window (all models)
+   * Returns both token counts and credits.
+   *
+   * @param {string} userId - User ID
+   * @param {number} days - Number of days to look back (default: 30)
+   */
+  async getRollingTotal(userId, days = 30) {
+    // Ensure user exists
+    const user = await userService.getOrCreateUser(userId, null);
+
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    const result = await this.prisma.tokenUsage.aggregate({
+      where: {
+        userId: user.id,
+        createdAt: {
+          gte: since,
+        },
+      },
+      _sum: {
+        inputTokens: true,
+        outputTokens: true,
+        totalTokens: true,
+        creditsUsed: true,
+      },
+    });
+
+    const creditsUsed = result._sum.creditsUsed
+      ? parseFloat(result._sum.creditsUsed.toString())
+      : 0;
+
+    return {
+      inputTokens: result._sum.inputTokens || 0,
+      outputTokens: result._sum.outputTokens || 0,
+      totalTokens: result._sum.totalTokens || 0,
+      creditsUsed,
+    };
+  }
+
+  /**
+   * Get total usage for lifetime (all time, all models)
+   * Returns both token counts and credits.
+   */
+  async getLifetimeTotal(userId) {
+    // Ensure user exists
+    const user = await userService.getOrCreateUser(userId, null);
+
+    const result = await this.prisma.tokenUsage.aggregate({
+      where: {
+        userId: user.id,
+      },
+      _sum: {
+        inputTokens: true,
+        outputTokens: true,
+        totalTokens: true,
+        creditsUsed: true,
+      },
+    });
+
+    const creditsUsed = result._sum.creditsUsed
+      ? parseFloat(result._sum.creditsUsed.toString())
+      : 0;
+
+    return {
+      inputTokens: result._sum.inputTokens || 0,
+      outputTokens: result._sum.outputTokens || 0,
+      totalTokens: result._sum.totalTokens || 0,
+      creditsUsed,
+    };
+  }
+
+  /**
    * Get usage for specific month
    */
   async getMonthUsage(userId, month) {
@@ -147,7 +220,8 @@ class TokenUsageService {
    * Check if user is over usage limit (based on credits)
    */
   async isOverLimit(userId, limit) {
-    const total = await this.getCurrentMonthTotal(userId);
+    // Lifetime usage for limit checks (no resets)
+    const total = await this.getLifetimeTotal(userId);
     return total.creditsUsed >= limit;
   }
 
