@@ -1,7 +1,7 @@
 /**
  * Admin API Routes
  * SECURITY: All routes require verifyUser + verifyAdmin middleware
- * Only accessible to admin email: neviljobanputra34@gmail.com
+ * Only accessible to users present in the Admin table (see middleware/admin.js)
  */
 
 const express = require('express');
