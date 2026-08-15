@@ -99,8 +99,29 @@ The generic OAuth handler will automatically work with your new integration:
 
 ## 📚 Current Integrations
 
+- **Google Sign-In** (`google-auth.js`): user login/authentication
+  - Env vars: `GOOGLE_AUTH_CLIENT_ID`, `GOOGLE_AUTH_CLIENT_SECRET`
 - **GitHub** (`github.js`): OAuth 2.0 with `repo` and `read:org` scopes
   - Env vars: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
+- **Gmail** (`gmail.js`): direct Google API integration
+  - Env vars: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`
+- **Google Drive** (`google-drive.js`)
+  - Env vars: `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`
+- **Google Calendar** (`google-calendar.js`)
+  - Env vars: `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`
+- **Jira** (`jira.js`): OAuth 2.0 (Atlassian) or API token, remote MCP server by default
+  - Env vars: `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET`
+- **Slack** (`slack.js`)
+  - Env vars: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`
+- **Spotify** (`spotify.js`)
+  - Env vars: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`
+- **X** (`x.js`)
+  - Env vars: `X_CLIENT_ID`, `X_CLIENT_SECRET`
+- **YouTube** (`youtube.js`)
+  - Env vars: `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`
+- **Zerodha** (`zerodha.js`): Kite Connect API
+  - Env vars: `ZERODHA_API_KEY`, `ZERODHA_API_SECRET`
+- **Zomato** (`zomato.js`): OAuth handled internally by the remote MCP server, no client credentials needed
 
 ## 🔧 Core Components
 

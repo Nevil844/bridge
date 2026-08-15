@@ -1,17 +1,15 @@
 /**
  * Admin Middleware
- * SECURITY: Verifies admin access by checking email from authenticated token
- * 
+ * SECURITY: Verifies admin access via the Admin table, keyed off the authenticated user
+ *
  * This middleware:
- * 1. Requires verifyUser to run first (ensures valid token)
- * 2. Extracts user email from Google OAuth integration
- * 3. Verifies email matches admin email (neviljobanputra34@gmail.com)
- * 4. Only allows access if email matches exactly
- * 
+ * 1. Requires verifyUser to run first (ensures valid token, sets req.userId)
+ * 2. Looks up req.userId in the Admin table (db/services/admin.js)
+ * 3. Only allows access if a matching, active admin row exists
+ *
  * SECURITY NOTES:
- * - Email check is case-sensitive and exact match
  * - Token must be valid (verified by verifyUser)
- * - No fallbacks or bypasses
+ * - No fallbacks or bypasses; admin status is entirely DB-driven
  */
 
 const adminService = require('../db/services/admin');

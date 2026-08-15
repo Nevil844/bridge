@@ -215,12 +215,7 @@ npm run db:studio
 
 ### Run Migrations
 ```bash
-npm run db:migrate
-```
-
-### Seed Test Data
-```bash
-npm run db:seed
+npx prisma migrate dev
 ```
 
 ### Reset Database
@@ -231,6 +226,4 @@ npm run db:reset  # Warning: deletes all data!
 ## See Also
 
 - `/backend/prisma/README.md` - Prisma setup guide
-- `/backend/INTEGRATION_GUIDE.md` - Server.js integration
-- `/backend/DATABASE_QUICKSTART.md` - Quick start guide
 
