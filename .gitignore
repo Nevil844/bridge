@@ -52,3 +52,6 @@ backend/.cache
 # Firebase Service Account (sensitive)
 bridge-ai-*.json
 *.json.backup
+
+# Internal notes (deployment runbook, store listing draft, roadmap) - not for the public repo
+/docs/
