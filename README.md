@@ -1,78 +1,84 @@
-# 🌉 Bridge AI
+<p align="center">
+  <img src="assets/images/feature-graphic.png" alt="Bridge AI" width="600" />
+</p>
 
-A mobile AI assistant (React Native/Expo + Express) that chats across multiple model providers and can act on your behalf inside the apps you already use — GitHub, Gmail, Google Drive/Calendar, Jira, Slack, Spotify, X, YouTube, Zerodha, and Zomato — via OAuth and the Model Context Protocol (MCP).
+<h1 align="center">Bridge AI</h1>
 
-## ✨ Features
+<p align="center">
+  A mobile assistant that chats across GPT, Claude, and Gemini — and can actually act on GitHub, Gmail, Slack, Spotify, Jira, and seven other apps you already use, connected through OAuth and the Model Context Protocol.
+</p>
 
-- **Multi-provider AI chat** — Gemini (free tier), OpenRouter (GPT-family and others), and AWS Bedrock (Claude), streamed live over WebSocket. The model list is fetched from `/api/models`, not hardcoded.
-- **11 live integrations** — GitHub, Gmail, Google Drive, Google Calendar, Jira, Slack, Spotify, X, YouTube, Zerodha, Zomato. Each connects via its own OAuth flow; credentials are encrypted at rest and never touch the mobile app.
-- **Semantic memory** — Postgres + pgvector-backed recall across conversations, used to give the AI relevant context automatically.
-- **Voice input** — real-time speech-to-text via AWS Transcribe streaming, plus on-device speech recognition.
-- **Credits & plans** — Free / Pro / Power / Enterprise tiers, usage metered from real per-model token pricing.
-- **Admin console** — dashboard, user/plan management, waitlist approvals, integration toggles, and push notification composer.
-- **Experts & characters** — 26 selectable personas (professional experts and character personas) with server-side-only system prompts.
-- **Invite-gated launch** — login is blocked at the OAuth callback until an email is approved on the waitlist.
-- **Dark mode, animated UI** — glowing orb chat interface, smooth theming.
+<p align="center">
+  <a href="https://apps.apple.com/sg/app/bridge-ai-assistant/id6757355127"><img src="https://img.shields.io/badge/App_Store-Download-000000?logo=apple&logoColor=white" alt="Download on the App Store"></a>
+  <a href="https://play.google.com/store/apps/details?id=com.nevil84.bridgeai"><img src="https://img.shields.io/badge/Google_Play-Download-000000?logo=googleplay&logoColor=white" alt="Get it on Google Play"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-2563EB.svg" alt="MIT License"></a>
+</p>
 
-## 🏗️ Architecture
+---
+
+Ask it to summarize a GitHub PR, draft and send an email, add a calendar event, order food, check your portfolio, or queue a playlist — in one conversation, without leaving the app. Each user connects their own accounts; nothing is shared across accounts, and credentials never touch the client.
+
+## What's inside
+
+**Multi-provider chat.** Gemini, OpenRouter, and AWS Bedrock (Claude) all live behind one streaming interface. The model list comes from `/api/models` at runtime, so it's never stale.
+
+**Eleven real integrations.** GitHub, Gmail, Google Drive, Google Calendar, Jira, Slack, Spotify, X, YouTube, Zerodha, and Zomato — each behind its own OAuth flow, connected lazily on first use with health checks and automatic retry.
+
+**Memory that's actually semantic.** Every conversation is embedded into Postgres via `pgvector`, so the assistant can recall relevant context from weeks-old chats instead of just the last few messages.
+
+**Voice in, not just text.** Real-time speech-to-text over a WebSocket to AWS Transcribe, plus on-device recognition for quick dictation.
+
+**A real product shell around it.** Credit-metered Free / Pro / Power / Enterprise plans priced off actual per-model token costs, an admin console for users and approvals, push notifications, and an invite-gated waitlist for launch.
+
+**26 personas.** A dozen professional "expert" system prompts (tax, legal, medical, career...) and fourteen character personas — all resolved server-side, never shipped to the client.
+
+## How it fits together
 
 ```
 Mobile App (Expo / React Native)
     │  REST + WebSocket
     ▼
-Backend API (Express, backend/server.js)
-    ├── routes/          — REST + WebSocket endpoints (chat, auth, admin, memory, usage...)
-    ├── mcp/manager.js    — per-user MCP connections (lazy, health-checked, auto-reconnect)
-    ├── oauth/handler.js  — generic OAuth 2.0 flow, per-provider modules in oauth/integrations/
-    ├── ai-providers/     — Gemini, OpenRouter, Bedrock adapters + embeddings
-    ├── db/                — Prisma client + service layer (Postgres + pgvector)
-    └── jobs/              — scheduled notification processing
+Backend API (Express)
+    ├── routes/          REST + WebSocket endpoints
+    ├── mcp/manager.js   per-user MCP connections — lazy, health-checked, auto-reconnect
+    ├── oauth/handler.js generic OAuth 2.0 flow, one module per provider
+    ├── ai-providers/    Gemini, OpenRouter, Bedrock adapters + embeddings
+    ├── db/              Prisma client + service layer (Postgres + pgvector)
+    └── jobs/            scheduled notification processing
     │
     ▼
-External APIs (GitHub, Google, Slack, Spotify, Zerodha, Zomato, Jira, X, YouTube, AWS)
+GitHub · Google · Slack · Spotify · Zerodha · Zomato · Jira · X · YouTube · AWS
 ```
 
-Each user's integration credentials and MCP connections are isolated per-user; nothing is shared across accounts.
+| | |
+|---|---|
+| **Frontend** | React Native, Expo Router, TypeScript, Reanimated, `expo-speech-recognition` |
+| **Backend** | Express + `express-ws`, Prisma, PostgreSQL (`pgvector`), MCP SDK |
+| **AI** | Gemini, OpenRouter, AWS Bedrock (Claude) |
+| **Infra** | AWS (Transcribe, S3, Bedrock), Expo Push Notifications, `node-cron` |
 
-## 🚀 Quick Start
+## Running it yourself
 
-### Prerequisites
-
-- Node.js 18+ and npm
-- PostgreSQL 14+ with the `pgvector` extension
-- A Google Cloud OAuth Client ID/Secret (required — login is Google OAuth only)
-- API keys/OAuth apps for whichever AI providers and integrations you want active (all are optional except Google login)
-
-### 1. Backend
+**Prerequisites:** Node.js 18+, PostgreSQL 14+ with `pgvector`, and a Google OAuth client (login is Google-only). Everything else — AI providers, individual integrations — is optional; each one just won't appear if its credentials aren't set.
 
 ```bash
+# Backend
 cd backend
 npm install
-
-# Create backend/.env — see "Environment Variables" below
+# create backend/.env — see the variable list below
 npx prisma generate
 npx prisma migrate dev
+npm run dev
 
-npm run dev   # or: npm start
-```
-
-Backend runs on `http://localhost:3000`.
-
-### 2. Frontend
-
-```bash
-# From the project root
+# Frontend, from the project root
 npm install
-npm start
-
-# Press 'i' for iOS simulator, 'a' for Android, or scan the QR code in Expo Go
+npm start   # then press 'i' for iOS, 'a' for Android, or scan the QR in Expo Go
 ```
 
-Update `config/api.ts` with your backend's URL before running on a physical device.
+Point `config/api.ts` at your backend before running on a physical device.
 
-### 3. Environment Variables
-
-`backend/.env` — nothing is hardcoded; every credential below is read from `process.env`:
+<details>
+<summary><strong>Environment variables</strong></summary>
 
 ```bash
 # Core
@@ -85,17 +91,17 @@ NODE_ENV=development
 GOOGLE_AUTH_CLIENT_ID=
 GOOGLE_AUTH_CLIENT_SECRET=
 
-# AI providers (enable any/all)
+# AI providers — enable any/all
 GOOGLE_GEMINI_API_KEY=
 OPENROUTER_API_KEY=
 AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 AWS_REGION=
 
-# Voice transcription (optional, uses the same AWS credentials)
+# Voice transcription (optional, reuses the AWS credentials above)
 AWS_TRANSCRIBE_S3_BUCKET=
 
-# Integrations (enable whichever you want available — each is independent)
+# Integrations — each is independent, enable whichever you want available
 GITHUB_CLIENT_ID= / GITHUB_CLIENT_SECRET=
 GMAIL_CLIENT_ID= / GMAIL_CLIENT_SECRET=
 GOOGLE_DRIVE_CLIENT_ID= / GOOGLE_DRIVE_CLIENT_SECRET=
@@ -108,21 +114,18 @@ YOUTUBE_CLIENT_ID= / YOUTUBE_CLIENT_SECRET=
 ZERODHA_API_KEY= / ZERODHA_API_SECRET=
 ```
 
-Each integration also accepts a `..._REDIRECT_URI` override; see the relevant file in `backend/oauth/integrations/` for defaults.
+Each integration also accepts a `..._REDIRECT_URI` override — see `backend/oauth/integrations/` for defaults.
+</details>
 
-## 🛠️ Tech Stack
-
-**Frontend:** React Native, Expo Router, TypeScript, Reanimated, AsyncStorage, expo-speech-recognition
-
-**Backend:** Express + express-ws, Prisma + PostgreSQL (pgvector), MCP SDK, AWS SDK (Bedrock, Transcribe, S3), Google APIs SDK, node-cron
-
-## 🔒 Security Notes
+## Security
 
 - OAuth throughout — no manually pasted tokens for third-party integrations
-- Per-user credential isolation and encryption at rest
-- All userId resolution happens server-side from the authenticated token, never from request parameters
+- Per-user credential isolation, encrypted at rest
+- The authenticated user's identity is always resolved server-side from their token; request bodies and params are never trusted for it
 - State-parameter CSRF protection on every OAuth flow
 
-## 📄 License
+More detail in [`backend/README.md`](./backend/README.md).
+
+## License
 
 [MIT](./LICENSE)
