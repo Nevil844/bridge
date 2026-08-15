@@ -13,11 +13,12 @@ CREATE TABLE IF NOT EXISTS admins (
 CREATE INDEX IF NOT EXISTS idx_admins_user_id ON admins(user_id);
 CREATE INDEX IF NOT EXISTS idx_admins_email ON admins(email);
 
--- Insert the initial admin (neviljobanputra34@gmail.com)
+-- Insert the initial admin
+-- Replace 'you@example.com' with the email you'll log in with (must already exist in `users`).
 -- Note: Prisma db push uses camelCase column names (userId, not user_id)
 -- This will only work if the user exists in the users table
 INSERT INTO admins (id, "userId", email, "addedBy", "createdAt", "updatedAt")
-SELECT 
+SELECT
   'admin_' || substr(md5(u.id || u.email), 1, 20),
   u.id,
   u.email,
@@ -25,6 +26,6 @@ SELECT
   CURRENT_TIMESTAMP,
   CURRENT_TIMESTAMP
 FROM users u
-WHERE u.email = 'neviljobanputra34@gmail.com'
+WHERE u.email = 'you@example.com'
   AND NOT EXISTS (SELECT 1 FROM admins WHERE "userId" = u.id);
 

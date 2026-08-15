@@ -53,5 +53,6 @@ backend/.cache
 bridge-ai-*.json
 *.json.backup
 
-# Internal notes (deployment runbook, store listing draft, roadmap) - not for the public repo
+# Internal notes/tooling (deployment runbook, store listing draft, roadmap) - not for the public repo
 /docs/
+/scripts/deploy-landing.sh
